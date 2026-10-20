@@ -1,3 +1,9 @@
+// x509negativeserial=1 lets crypto/x509 parse certificates with a negative
+// serial number, which Go has rejected since 1.23 but OpenSSL, Java and the
+// CA stores that ship them still accept. trustinspector inventories what is
+// there, so one such certificate must not hide itself, or a whole keystore.
+//go:debug x509negativeserial=1
+
 package main
 
 import (
@@ -8,14 +14,13 @@ import (
 	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
-	"encoding/pem"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -34,12 +39,17 @@ type property struct {
 	Value string `json:"value"`
 }
 
+// trustMaterial is one finding. report-2 keeps every report-1 key with the
+// same meaning and adds certificate identity, extension and location fields
+// (all omitempty, so nothing moves for a report-1 consumer).
 type trustMaterial struct {
 	Kind          string     `json:"kind"`
 	Path          string     `json:"path"`
+	Paths         []string   `json:"paths,omitempty"`
 	Name          string     `json:"name,omitempty"`
 	TrustDomain   string     `json:"trustDomain,omitempty"`
 	SourceType    string     `json:"sourceType,omitempty"`
+	SourceTypes   []string   `json:"sourceTypes,omitempty"`
 	FileExtension string     `json:"fileExtension,omitempty"`
 	SHA1          string     `json:"sha1,omitempty"`
 	SHA256        string     `json:"sha256,omitempty"`
@@ -53,8 +63,56 @@ type trustMaterial struct {
 	Subject       string     `json:"subject,omitempty"`
 	Issuer        string     `json:"issuer,omitempty"`
 	Serial        string     `json:"serial,omitempty"`
+	SerialHex     string     `json:"serialHex,omitempty"`
 	Format        string     `json:"format,omitempty"`
 	Properties    []property `json:"properties,omitempty"`
+
+	// report-2 certificate identity. certificate is the parsed certificate
+	// kept for issuer linking; it is never serialized.
+	CertSHA256       string `json:"certSha256,omitempty"`
+	SPKISHA256       string `json:"spkiSha256,omitempty"`
+	SPKISHA256Base64 string `json:"spkiSha256Base64,omitempty"`
+	CertVersion      int    `json:"version,omitempty"`
+	IsCA             *bool  `json:"isCA,omitempty"`
+	SelfSigned       *bool  `json:"selfSigned,omitempty"`
+	// SelfSignedUnverified marks a selfSigned decided by the self-issued
+	// fallback because the signature could not be checked (PLAN 2.5).
+	SelfSignedUnverified bool     `json:"selfSignedUnverified,omitempty"`
+	Role                 string   `json:"role,omitempty"`
+	PathLen              *int     `json:"pathLen,omitempty"`
+	SubjectKeyId         string   `json:"subjectKeyId,omitempty"`
+	AuthorityKeyId       string   `json:"authorityKeyId,omitempty"`
+	Issuers              []string `json:"issuers,omitempty"`
+	// IssuersUnverified lists parents whose names and key identifiers chain
+	// but whose signature on this certificate could not be checked.
+	IssuersUnverified []string `json:"issuersUnverified,omitempty"`
+	HostStores        []string `json:"hostStores,omitempty"`
+	// KeyName names the public key ("RSA-2048", "ECDSA-P256", "ML-DSA-65",
+	// or the dotted OID when unknown); KeyBits is its size, absent for
+	// post-quantum keys; KeyAlgorithmOid is the SPKI algorithm OID.
+	KeyName         string `json:"keyName,omitempty"`
+	KeyBits         int    `json:"keyBits,omitempty"`
+	KeyAlgorithmOid string `json:"keyAlgorithmOid,omitempty"`
+
+	// report-2 certificate extensions and URLs.
+	KeyUsage               []string `json:"keyUsage,omitempty"`
+	ExtKeyUsage            []string `json:"extKeyUsage,omitempty"`
+	SignatureAlgorithm     string   `json:"signatureAlgorithm,omitempty"`
+	SignatureAlgorithmOid  string   `json:"signatureAlgorithmOid,omitempty"`
+	DNSNames               []string `json:"dnsNames,omitempty"`
+	DNSNamesTruncated      bool     `json:"dnsNamesTruncated,omitempty"`
+	OCSPServers            []string `json:"ocspServers,omitempty"`
+	IssuingCertificateURLs []string `json:"issuingCertificateUrls,omitempty"`
+	CRLDistributionPoints  []string `json:"crlDistributionPoints,omitempty"`
+	PolicyOIDs             []string `json:"policyOids,omitempty"`
+	HasNameConstraints     bool     `json:"hasNameConstraints,omitempty"`
+	TrustAcceptedPurposes  []string `json:"trustAcceptedPurposes,omitempty"`
+	TrustRejectedPurposes  []string `json:"trustRejectedPurposes,omitempty"`
+
+	certificate *x509.Certificate `json:"-"`
+	// dedupID overrides the dedup identity of materials that have no
+	// digest of their own (several private keys in one file).
+	dedupID string `json:"-"`
 }
 
 type pathInspection struct {
@@ -72,6 +130,12 @@ type hostFinding struct {
 	Properties  []property `json:"properties,omitempty"`
 }
 
+// reportOptions records the scan options that produced the report.
+type reportOptions struct {
+	Embedded  bool     `json:"embedded"`
+	ExtraDirs []string `json:"extraDirs,omitempty"`
+}
+
 type output struct {
 	// Envelope: schema, tool and toolVersion identify the report shape and
 	// the binary that produced it. The payload keys below stay at the top
@@ -79,13 +143,15 @@ type output struct {
 	Schema       string           `json:"schema"`
 	Tool         string           `json:"tool"`
 	ToolVersion  string           `json:"toolVersion"`
+	Options      *reportOptions   `json:"options,omitempty"`
 	Materials    []trustMaterial  `json:"materials,omitempty"`
 	Inspections  []pathInspection `json:"inspections,omitempty"`
 	HostFindings []hostFinding    `json:"hostFindings,omitempty"`
+	Warnings     []string         `json:"warnings,omitempty"`
 }
 
 // trustInspectorSchemaVersion is bumped whenever the output shape changes.
-const trustInspectorSchemaVersion = "trustinspector/report-1"
+const trustInspectorSchemaVersion = "trustinspector/report-2"
 
 // version is injected at build time (-X main.version=...); "dev" marks a
 // binary built without the injection.
@@ -109,6 +175,15 @@ type usageError struct{ err error }
 
 func (e *usageError) Error() string { return e.err.Error() }
 func (e *usageError) Unwrap() error { return e.err }
+
+// repeatableFlag collects repeated string flags (--extra-dir).
+type repeatableFlag []string
+
+func (r *repeatableFlag) String() string { return strings.Join(*r, ",") }
+func (r *repeatableFlag) Set(value string) error {
+	*r = append(*r, value)
+	return nil
+}
 
 func main() {
 	if len(os.Args) > 1 {
@@ -134,6 +209,8 @@ func main() {
 		err = runPaths(os.Args[2:])
 	case "host":
 		err = runHost(os.Args[2:])
+	case "certs":
+		err = runCerts(os.Args[2:])
 	default:
 		fmt.Fprintf(os.Stderr, "trustinspector-cdxgen: unknown command %q\n", os.Args[1])
 		printUsage()
@@ -157,10 +234,20 @@ func printUsage() {
 	fmt.Fprintln(os.Stderr, `Usage: trustinspector-cdxgen <command> [options]
 
 Commands:
-  rootfs <dir>   inspect trust material in an unpacked root filesystem
-  paths [paths]  inspect selected binaries/apps on the current platform
-  host           inspect host trust posture on the current platform
-  version        print the tool version
+  rootfs <dir>            inspect trust material in an unpacked root filesystem
+  certs [options] <file>  parse exactly the given certificate files
+  paths [paths]           inspect selected binaries/apps on the current platform
+  host                    inspect host trust posture on the current platform
+  version                 print the tool version
+
+rootfs options:
+  --embedded              scan ELF/Mach-O/PE binaries for embedded PEM certificates
+  --extra-dir <rel>       also scan this directory relative to the root (repeatable)
+
+certs options:
+  --stdin                 read newline-delimited paths from stdin
+  --embedded              scan the given files for embedded PEM certificates
+  --root <dir>            report paths relative to this directory (leading /)
 
 Exit codes: 0 success; 2 usage error; 3 runtime error.`)
 }
@@ -168,20 +255,158 @@ Exit codes: 0 success; 2 usage error; 3 runtime error.`)
 func runRootfs(args []string) error {
 	flags := flag.NewFlagSet("rootfs", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
+	embedded := flags.Bool("embedded", false, "scan binaries for embedded PEM certificates")
+	var extraDirs repeatableFlag
+	flags.Var(&extraDirs, "extra-dir", "additional directory to scan, relative to the root (repeatable)")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return err
 		}
 		return &usageError{err: err}
 	}
+	if err := rejectTrailingFlags(flags.Args()); err != nil {
+		return err
+	}
 	if flags.NArg() != 1 {
 		return &usageError{err: errors.New("rootfs requires exactly one target directory")}
 	}
-	materials, err := scanRootfsTrustMaterials(flags.Arg(0))
+	for _, dir := range extraDirs {
+		if err := validateExtraDir(dir); err != nil {
+			return &usageError{err: err}
+		}
+	}
+	materials, warnings, err := scanRootfsTrustMaterials(flags.Arg(0), scanOptions{Embedded: *embedded, ExtraDirs: extraDirs})
 	if err != nil {
 		return err
 	}
-	return writeJSON(output{Materials: materials})
+	return writeJSON(output{
+		Options:   &reportOptions{Embedded: *embedded, ExtraDirs: uniqueSortedStrings(extraDirs)},
+		Materials: materials,
+		Warnings:  warnings,
+	})
+}
+
+// validateExtraDir rejects --extra-dir values that escape the scanned root.
+func validateExtraDir(dir string) error {
+	slash := filepath.ToSlash(dir)
+	clean := path.Clean(slash)
+	if dir == "" || clean == "." || clean == ".." || strings.HasPrefix(clean, "../") ||
+		path.IsAbs(slash) || filepath.IsAbs(dir) || filepath.VolumeName(dir) != "" {
+		return fmt.Errorf("extra dir %q must be a relative path inside the root", dir)
+	}
+	return nil
+}
+
+// rejectTrailingFlags reports a usage error for a flag given after the first
+// positional argument, which Go's flag package would otherwise take as a file
+// name (certs a.pem --root r would read files "--root" and "r").
+func rejectTrailingFlags(args []string) error {
+	for _, arg := range args {
+		if len(arg) > 1 && strings.HasPrefix(arg, "-") {
+			return &usageError{err: fmt.Errorf("flag %s must come before the file arguments", arg)}
+		}
+	}
+	return nil
+}
+
+// runCerts parses exactly the given files (PLAN section 3): same parsers as
+// rootfs, sourceType generic, and with --root the reported paths are
+// relative to that directory.
+func runCerts(args []string) error {
+	flags := flag.NewFlagSet("certs", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	stdin := flags.Bool("stdin", false, "read newline-delimited paths from stdin")
+	embedded := flags.Bool("embedded", false, "scan the given files for embedded PEM certificates")
+	root := flags.String("root", "", "report paths relative to this directory")
+	if err := flags.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return err
+		}
+		return &usageError{err: err}
+	}
+	if err := rejectTrailingFlags(flags.Args()); err != nil {
+		return err
+	}
+	paths := uniqueSortedStrings(flags.Args())
+	if *stdin {
+		stdinPaths, err := readLines(os.Stdin)
+		if err != nil {
+			return err
+		}
+		paths = uniqueSortedStrings(append(paths, stdinPaths...))
+	}
+	if len(paths) == 0 {
+		return writeJSON(output{Options: &reportOptions{Embedded: *embedded}})
+	}
+	if *root != "" {
+		if info, err := os.Stat(*root); err != nil || !info.IsDir() {
+			return fmt.Errorf("--root %s is not a directory", *root)
+		}
+	}
+	accumulator := newMaterialAccumulator()
+	warnings := &warningList{}
+	limit := maxMaterialFileBytes
+	if *embedded {
+		limit = maxEmbeddedFileBytes
+	}
+	for _, name := range paths {
+		// Regular files only, read with a cap: a FIFO or device named here
+		// must not block the run, nor a huge file exhaust memory.
+		data, err := readHostFile(name, limit)
+		if errors.Is(err, errFileTooLarge) {
+			warnings.add(fmt.Sprintf("file over %d MiB skipped: %s", limit>>20, name))
+		}
+		if err != nil || len(data) == 0 {
+			continue
+		}
+		displayPath := displayPathCerts(name, *root)
+		if *embedded && isExecutableBinaryMagic(data) {
+			sha1Value, sha256Value := digestBytes(data)
+			for _, cert := range embeddedCertificateBlocks(data) {
+				material := buildCertificateFields(cert)
+				setCertificateName(material, cert, displayPath)
+				accumulator.add(material, certLocation{path: displayPath, sourceType: "generic", sha1Value: sha1Value, sha256Value: sha256Value})
+			}
+			continue
+		}
+		if int64(len(data)) > maxMaterialFileBytes {
+			warnings.add(fmt.Sprintf("file over %d MiB skipped: %s", maxMaterialFileBytes>>20, name))
+			continue
+		}
+		for _, entry := range parseFileMaterials(data, displayPath, "generic") {
+			accumulator.add(entry.material, entry.location)
+		}
+	}
+	materials := accumulator.resolve()
+	if issuerWarnings := linkIssuers(materials, accumulator.certs); len(issuerWarnings) > 0 {
+		warnings.add(issuerWarnings...)
+	}
+	return writeJSON(output{
+		Options:   &reportOptions{Embedded: *embedded},
+		Materials: materials,
+		Warnings:  warnings.list(),
+	})
+}
+
+// displayPathCerts resolves the reported path for certs mode: relative to
+// --root with a leading slash when given, otherwise the path as passed.
+func displayPathCerts(path, root string) string {
+	if root == "" {
+		return path
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return path
+	}
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return path
+	}
+	rel, err := filepath.Rel(absRoot, absPath)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return filepath.ToSlash(absPath)
+	}
+	return "/" + filepath.ToSlash(rel)
 }
 
 func runPaths(args []string) error {
@@ -228,15 +453,25 @@ func runHost(args []string) error {
 		return &usageError{err: err}
 	}
 	var findings []hostFinding
+	var materials []trustMaterial
+	var warnings []string
 	switch runtime.GOOS {
 	case "darwin":
 		findings = inspectDarwinHost()
+		materials, warnings = inspectDarwinHostTrustMaterials()
 	case "windows":
 		findings = inspectWindowsHost()
+		materials, warnings = inspectWindowsHostTrustMaterials()
 	default:
-		findings = nil
+		// Linux: the host scan is a rootfs scan of /, without --embedded
+		// (PLAN section 4.2).
+		scanMaterials, scanWarnings, err := inspectLinuxHostTrustMaterials("/")
+		if err == nil {
+			materials = scanMaterials
+			warnings = scanWarnings
+		}
 	}
-	return writeJSON(output{HostFindings: findings})
+	return writeJSON(output{Materials: materials, HostFindings: findings, Warnings: warnings})
 }
 
 // writeJSON stamps the schema, tool and version envelope onto the report
@@ -262,173 +497,20 @@ func readLines(r io.Reader) ([]string, error) {
 	return lines, scanner.Err()
 }
 
-func scanRootfsTrustMaterials(root string) ([]trustMaterial, error) {
-	info, err := os.Stat(root)
-	if err != nil {
-		return nil, err
-	}
-	if !info.IsDir() {
-		return nil, fmt.Errorf("%s is not a directory", root)
-	}
-
-	candidateDirs := []struct {
-		rel        string
-		sourceType string
-	}{
-		{rel: filepath.Join("etc", "apt", "trusted.gpg.d"), sourceType: "repository-keyring"},
-		{rel: filepath.Join("usr", "share", "keyrings"), sourceType: "repository-keyring"},
-		{rel: filepath.Join("etc", "pki", "rpm-gpg"), sourceType: "repository-keyring"},
-		{rel: filepath.Join("usr", "share", "distribution-gpg-keys"), sourceType: "repository-keyring"},
-		{rel: filepath.Join("etc", "apk", "keys"), sourceType: "repository-keyring"},
-		{rel: filepath.Join("etc", "ssl", "certs"), sourceType: "ca-store"},
-		{rel: filepath.Join("usr", "local", "share", "ca-certificates"), sourceType: "ca-store"},
-		{rel: filepath.Join("usr", "share", "ca-certificates"), sourceType: "ca-store"},
-		{rel: filepath.Join("etc", "pki", "ca-trust", "source", "anchors"), sourceType: "ca-store"},
-	}
-
-	seen := map[string]trustMaterial{}
-	for _, candidate := range candidateDirs {
-		baseDir := filepath.Join(root, candidate.rel)
-		if _, err := os.Stat(baseDir); err != nil {
-			continue
-		}
-		_ = filepath.WalkDir(baseDir, func(current string, d fs.DirEntry, walkErr error) error {
-			if walkErr != nil {
-				return nil
-			}
-			if d.IsDir() {
-				return nil
-			}
-			if d.Type()&os.ModeSymlink != 0 {
-				return nil
-			}
-			if !looksLikeTrustMaterialPath(current) {
-				return nil
-			}
-			materials := inspectTrustMaterialFile(current, root, candidate.sourceType)
-			for _, material := range materials {
-				key := material.Kind + "\x00" + firstNonEmpty(material.Fingerprint, material.SHA256, material.Path)
-				if existing, ok := seen[key]; ok {
-					merged := mergeTrustMaterial(existing, material)
-					seen[key] = merged
-					continue
-				}
-				seen[key] = material
-			}
-			return nil
-		})
-	}
-	results := make([]trustMaterial, 0, len(seen))
-	for _, material := range seen {
-		results = append(results, material)
-	}
-	sort.Slice(results, func(i, j int) bool {
-		if results[i].Path == results[j].Path {
-			return results[i].Kind < results[j].Kind
-		}
-		return results[i].Path < results[j].Path
-	})
-	return results, nil
-}
-
-func mergeTrustMaterial(existing, incoming trustMaterial) trustMaterial {
-	if existing.Path == "" {
-		existing.Path = incoming.Path
-	}
-	if existing.Name == "" {
-		existing.Name = incoming.Name
-	}
-	if existing.TrustDomain == "" {
-		existing.TrustDomain = incoming.TrustDomain
-	}
-	if existing.SourceType == "" {
-		existing.SourceType = incoming.SourceType
-	}
-	if existing.FileExtension == "" {
-		existing.FileExtension = incoming.FileExtension
-	}
-	if existing.SHA1 == "" {
-		existing.SHA1 = incoming.SHA1
-	}
-	if existing.SHA256 == "" {
-		existing.SHA256 = incoming.SHA256
-	}
-	if existing.KeyID == "" {
-		existing.KeyID = incoming.KeyID
-	}
-	if existing.Algorithm == "" {
-		existing.Algorithm = incoming.Algorithm
-	}
-	if existing.KeyStrength == 0 {
-		existing.KeyStrength = incoming.KeyStrength
-	}
-	if existing.CreatedAt == "" {
-		existing.CreatedAt = incoming.CreatedAt
-	}
-	if existing.ExpiresAt == "" {
-		existing.ExpiresAt = incoming.ExpiresAt
-	}
-	if existing.Fingerprint == "" {
-		existing.Fingerprint = incoming.Fingerprint
-	}
-	if existing.Subject == "" {
-		existing.Subject = incoming.Subject
-	}
-	if existing.Issuer == "" {
-		existing.Issuer = incoming.Issuer
-	}
-	if existing.Serial == "" {
-		existing.Serial = incoming.Serial
-	}
-	if existing.Format == "" {
-		existing.Format = incoming.Format
-	}
-	existing.UserIDs = uniqueSortedStrings(append(existing.UserIDs, incoming.UserIDs...))
-	existing.Properties = uniqueProperties(append(existing.Properties, incoming.Properties...))
-	return existing
-}
-
-func looksLikeTrustMaterialPath(path string) bool {
-	lowerPath := strings.ToLower(path)
-	base := strings.ToLower(filepath.Base(path))
-	if strings.Contains(lowerPath, string(filepath.Separator)+"private"+string(filepath.Separator)) {
-		return false
-	}
-	if base == "trusted.gpg" || strings.HasPrefix(base, "rpm-gpg-key") {
-		return true
-	}
-	for _, suffix := range []string{".asc", ".gpg", ".pgp", ".pub", ".pem", ".crt", ".cer", ".der"} {
-		if strings.HasSuffix(lowerPath, suffix) {
-			return true
-		}
-	}
-	return strings.Contains(lowerPath, string(filepath.Separator)+"certs"+string(filepath.Separator))
-}
-
-func inspectTrustMaterialFile(absolutePath, root, sourceType string) []trustMaterial {
-	data, err := os.ReadFile(absolutePath)
-	if err != nil || len(data) == 0 {
-		return nil
-	}
-	relPath := "/" + filepath.ToSlash(strings.TrimPrefix(absolutePath, root))
-	relPath = strings.ReplaceAll(relPath, "//", "/")
-	sha1Value, sha256Value := digestBytes(data)
-	trustDomain := deriveTrustDomain(relPath)
-	fileExtension := strings.TrimPrefix(strings.ToLower(filepath.Ext(relPath)), ".")
-
-	var materials []trustMaterial
-	materials = append(materials, parseOpenPGPMaterials(data, relPath, sha1Value, sha256Value, trustDomain, sourceType, fileExtension)...)
-	materials = append(materials, parseCertificateMaterials(data, relPath, sha1Value, sha256Value, trustDomain, sourceType, fileExtension)...)
-	if len(materials) > 0 {
-		return materials
-	}
-	return nil
-}
-
 func digestBytes(data []byte) (string, string) {
 	sha1Sum := sha1.Sum(data)
 	sha256Sum := sha256.Sum256(data)
 	return hex.EncodeToString(sha1Sum[:]), hex.EncodeToString(sha256Sum[:])
+}
+
+func sha256SumBytes(data []byte) []byte {
+	sum := sha256.Sum256(data)
+	return sum[:]
+}
+
+func sha256SumHex(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
 }
 
 func deriveTrustDomain(path string) string {
@@ -470,11 +552,6 @@ func parseOpenPGPMaterials(data []byte, relPath, sha1Value, sha256Value, trustDo
 			ExpiresAt:     entity.ExpiresAt,
 			Fingerprint:   entity.Fingerprint,
 			UserIDs:       entity.UserIDs,
-			Properties: uniqueProperties([]property{
-				{Name: "cdx:crypto:sourceType", Value: sourceType},
-				{Name: "cdx:crypto:trustDomain", Value: trustDomain},
-				{Name: "cdx:crypto:fileExtension", Value: firstNonEmpty(fileExtension, "gpg")},
-			}),
 		})
 	}
 	return materials
@@ -567,70 +644,6 @@ func publicKeyAlgorithm(algo packet.PublicKeyAlgorithm) string {
 	default:
 		return fmt.Sprintf("ALGO-%d", int(algo))
 	}
-}
-
-func parseCertificateMaterials(data []byte, relPath, sha1Value, sha256Value, trustDomain, sourceType, fileExtension string) []trustMaterial {
-	certs := readCertificates(data)
-	if len(certs) == 0 {
-		return nil
-	}
-	var materials []trustMaterial
-	for _, cert := range certs {
-		certFingerprintBytes := sha256.Sum256(cert.Raw)
-		materials = append(materials, trustMaterial{
-			Kind:          "certificate",
-			Path:          relPath,
-			Name:          firstNonEmpty(cert.Subject.CommonName, filepath.Base(relPath)),
-			TrustDomain:   trustDomain,
-			SourceType:    sourceType,
-			FileExtension: firstNonEmpty(fileExtension, "crt"),
-			SHA1:          sha1Value,
-			SHA256:        sha256Value,
-			Algorithm:     publicKeyType(cert.PublicKeyAlgorithm),
-			KeyStrength:   certificateKeyStrength(cert),
-			CreatedAt:     cert.NotBefore.UTC().Format(time.RFC3339),
-			ExpiresAt:     cert.NotAfter.UTC().Format(time.RFC3339),
-			Fingerprint:   strings.ToUpper(hex.EncodeToString(certFingerprintBytes[:])),
-			Subject:       cert.Subject.String(),
-			Issuer:        cert.Issuer.String(),
-			Serial:        cert.SerialNumber.String(),
-			Format:        "X.509",
-			Properties: uniqueProperties([]property{
-				{Name: "cdx:crypto:sourceType", Value: sourceType},
-				{Name: "cdx:crypto:trustDomain", Value: trustDomain},
-				{Name: "cdx:crypto:fileExtension", Value: firstNonEmpty(fileExtension, "crt")},
-				{Name: "cdx:crypto:isCA", Value: fmt.Sprintf("%t", cert.IsCA)},
-			}),
-		})
-	}
-	return materials
-}
-
-func readCertificates(data []byte) []*x509.Certificate {
-	var certs []*x509.Certificate
-	remaining := data
-	for {
-		block, rest := pem.Decode(remaining)
-		if block == nil {
-			break
-		}
-		remaining = rest
-		if block.Type != "CERTIFICATE" {
-			continue
-		}
-		parsed, err := x509.ParseCertificate(block.Bytes)
-		if err == nil {
-			certs = append(certs, parsed)
-		}
-	}
-	if len(certs) > 0 {
-		return certs
-	}
-	parsed, err := x509.ParseCertificates(data)
-	if err == nil {
-		return parsed
-	}
-	return nil
 }
 
 func publicKeyType(algo x509.PublicKeyAlgorithm) string {
