@@ -1,0 +1,28 @@
+thirdparty/golem/JSON_ATTRIBUTE_REFERENCE.md
+  h_0926447d100ad2 414-415
+thirdparty/golem/README.md
+  h_0926447d100ad2 94,96-98
+thirdparty/golem/internal/analyzer/crypto.go
+  h_0926447d100ad2 7,135-138,166-384
+thirdparty/golem/internal/analyzer/tls_trust_test.go
+  h_0926447d100ad2 1-64
+thirdparty/golem/testdata/tlstrust/certs.pem
+  h_0926447d100ad2 1
+thirdparty/golem/testdata/tlstrust/go.mod
+  h_0926447d100ad2 1-3
+thirdparty/golem/testdata/tlstrust/main.go
+  h_0926447d100ad2 1-46
+thirdparty/golem/testdata/tlstrust/negative.go
+  h_0926447d100ad2 1-42
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "be4f2cbbd604f3227d7dc8da576a33f426cbb612",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
