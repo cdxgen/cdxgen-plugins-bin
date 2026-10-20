@@ -91,9 +91,11 @@ The implementation has four main inputs:
 
 2. **Selector expressions are resolved through `packages.Package.TypesInfo`.** Known symbols such as `crypto/md5.Sum`, `crypto/aes.NewCipher`, `crypto/rsa.GenerateKey`, `crypto/ed25519.Sign`, `crypto/hmac.New`, `crypto/rand.Read`, `crypto/x509.ParseCertificate`, `crypto/tls.LoadX509KeyPair`, `pbkdf2.Key`, and `curve25519.X25519` are classified into assets, operations, material types, protocols, strengths, standards, OIDs, and findings.
 
-3. **TLS configuration literals are inspected for `InsecureSkipVerify: true`** and produce a critical finding.
+3. **TLS configuration literals are inspected for trust customisation.** `InsecureSkipVerify: true` produces a critical finding (`GOLEM-CRYPTO-TLS-INSECURE-SKIP-VERIFY`). Composite literals typed `crypto/tls.Config` or `crypto/x509.VerifyOptions` (resolved through `TypesInfo`) additionally produce: `GOLEM-CRYPTO-TLS-CUSTOM-ROOTS` (low) when `RootCAs`/`Roots` is set, `GOLEM-CRYPTO-TLS-CUSTOM-VERIFY` (medium) when `VerifyPeerCertificate` or `VerifyConnection` is set, and `GOLEM-CRYPTO-TLS-VERIFY-REPLACED` (high) when a custom verify callback is combined with `InsecureSkipVerify: true` — the callback is then the only verification left, which matters because rebuilt Go toolchains apply their own SPKI distrust decisions the callback may not replicate.
 
-4. **Assignments and value declarations are checked for string literals bound to names that look like key material or secrets**, such as private keys, public keys, secrets, passwords, tokens, credentials, IVs, nonces, salts, and generic keys. The literal value is not copied into the report.
+4. **Certificate pools compiled into the binary are flagged.** A `(*crypto/x509.CertPool).AppendCertsFromPEM` call whose argument resolves to a package-level variable declared with `//go:embed` produces `GOLEM-CRYPTO-X509-EMBEDDED-POOL` (low): an embedded trust pool ignores later CA updates and distrust decisions.
+
+5. **Assignments and value declarations are checked for string literals bound to names that look like key material or secrets**, such as private keys, public keys, secrets, passwords, tokens, credentials, IVs, nonces, salts, and generic keys. The literal value is not copied into the report.
 
 The crypto section emits `libraries`, `assets`, `operations`, `materials`, `protocols`, and `findings`. IDs are stable, records are deduplicated, and evidence is attached both to files and to the aggregate report. Findings distinguish type-resolved evidence from name-and-literal indicators through the `confidence` field.
 

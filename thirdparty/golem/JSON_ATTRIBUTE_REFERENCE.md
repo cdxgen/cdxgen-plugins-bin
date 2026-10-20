@@ -411,6 +411,8 @@ The `crypto` section is populated from core analysis and does not require `--dat
 | `range.*`                              | object  | Source range.                          | Editor jump links.                     |
 | `properties`                           | object  | Optional metadata.                     | Extended pipeline integrations.        |
 
+Crypto finding rule identifiers: `GOLEM-CRYPTO-WEAK-MD5`, `GOLEM-CRYPTO-WEAK-SHA1`, `GOLEM-CRYPTO-WEAK-DES`, `GOLEM-CRYPTO-WEAK-RC4`, `GOLEM-CRYPTO-LITERAL-MATERIAL`, `GOLEM-CRYPTO-TLS-INSECURE-SKIP-VERIFY`, and the trust-customisation set `GOLEM-CRYPTO-TLS-CUSTOM-ROOTS` (low), `GOLEM-CRYPTO-TLS-CUSTOM-VERIFY` (medium), `GOLEM-CRYPTO-TLS-VERIFY-REPLACED` (high), and `GOLEM-CRYPTO-X509-EMBEDDED-POOL` (low). The trust-customisation findings resolve `crypto/tls.Config` and `crypto/x509.VerifyOptions` composite literals and `(*crypto/x509.CertPool).AppendCertsFromPEM` calls through type information; `properties` carries `field`, `type`, or `variable` details.
+
 ## API endpoint reference
 
 Every HTTP or RPC route registration observed in the source lands in
