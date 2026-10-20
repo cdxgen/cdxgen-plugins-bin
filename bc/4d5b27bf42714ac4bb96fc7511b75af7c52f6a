@@ -1,0 +1,26 @@
+.github/workflows/golem-e2e.yml
+  h_0926447d100ad2 132
+.github/workflows/kosi-eap.yml
+  h_0926447d100ad2 36
+.github/workflows/kosi-test.yml
+  h_0926447d100ad2 42,82
+.github/workflows/native-builds.yml
+  h_0926447d100ad2 32,66,144,192,241
+.github/workflows/release.yml
+  h_0926447d100ad2 24,46,72,89,111,137,154,176,202,228,242,254,259,264,269,274,279
+.github/workflows/test.yml
+  h_0926447d100ad2 27,48,75,92,113,140,158,180,207,229,302,318,348,364,394,420,434,451,456,461,466,471,476,481,486,491,558,587,592,639
+.github/workflows/trivy-cdxgen-sbom-e2e.yml
+  h_0926447d100ad2 87
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "bc4d5b27bf42714ac4bb96fc7511b75af7c52f6a",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
