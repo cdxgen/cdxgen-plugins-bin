@@ -1,0 +1,28 @@
+thirdparty/trustinspector/certs.go
+  h_0926447d100ad2 43-45,99,102,112-115,119,125
+thirdparty/trustinspector/go.mod
+  h_0926447d100ad2 5-8
+thirdparty/trustinspector/host.go
+  h_0926447d100ad2 6,26-28,30,33-37,42,46-47,57,111-114,117,120-121,124-125,128,135,140,149-161
+thirdparty/trustinspector/host_test.go
+  h_0926447d100ad2 41-44,115,119-125,127-137,147-154,163-180
+thirdparty/trustinspector/keystores.go
+  h_0926447d100ad2 245-251,257-258
+thirdparty/trustinspector/keystores_test.go
+  h_0926447d100ad2 4-7,9-10,42-106
+thirdparty/trustinspector/main.go
+  h_0926447d100ad2 408,411
+thirdparty/trustinspector/testdata/windows-host-report.json
+  h_0926447d100ad2 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "170a6ce97da83f2b0ff775080b867ce0247ee447",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
