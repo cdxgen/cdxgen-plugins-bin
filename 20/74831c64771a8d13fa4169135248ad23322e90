@@ -1,0 +1,25 @@
+thirdparty/trustinspector/README.md
+  s_52f5c4eaf6e6b7::t_84910bc6cb4868 203-206
+  s_52f5c4eaf6e6b7::t_b185b2453c79ab 47-69,78-82,87-100
+  s_52f5c4eaf6e6b7::t_f28f3395004619 35-43,290,295,297
+  s_52f5c4eaf6e6b7::t_cfb49e6f0e8e98 228-229,236-238,252-259,262-264,267-272,278-285,296
+docs/TRUSTINSPECTOR.md
+  s_52f5c4eaf6e6b7::t_09926c26cd810e 42-44
+  s_52f5c4eaf6e6b7::t_f28f3395004619 33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2074831c64771a8d13fa4169135248ad23322e90",
+  "prompts": {},
+  "sessions": {
+    "s_52f5c4eaf6e6b7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6df25678-2bd9-411d-a772-3a7751696245",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
