@@ -1,6 +1,6 @@
 PATH := $(PATH):/usr/local/go/bin:$(HOME)/go/bin
 appname := trustinspector-cdxgen
-sources := main.go
+sources := main.go certs.go formats.go keystores.go rootfs.go host.go
 version ?= $(shell node -p "require('../../package.json').version")
 ldflags := -s -w -X main.version=$(version)
 
