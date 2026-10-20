@@ -1,0 +1,14 @@
+.gitignore
+  h_0926447d100ad2 116-117
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8638464124249a7fa5d0195d8d2179a54b694c1b",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
