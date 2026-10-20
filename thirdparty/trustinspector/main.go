@@ -62,18 +62,30 @@ type trustMaterial struct {
 
 	// report-2 certificate identity. certificate is the parsed certificate
 	// kept for issuer linking; it is never serialized.
-	CertSHA256       string   `json:"certSha256,omitempty"`
-	SPKISHA256       string   `json:"spkiSha256,omitempty"`
-	SPKISHA256Base64 string   `json:"spkiSha256Base64,omitempty"`
-	CertVersion      int      `json:"version,omitempty"`
-	IsCA             *bool    `json:"isCA,omitempty"`
-	SelfSigned       *bool    `json:"selfSigned,omitempty"`
-	Role             string   `json:"role,omitempty"`
-	PathLen          *int     `json:"pathLen,omitempty"`
-	SubjectKeyId     string   `json:"subjectKeyId,omitempty"`
-	AuthorityKeyId   string   `json:"authorityKeyId,omitempty"`
-	Issuers          []string `json:"issuers,omitempty"`
-	HostStores       []string `json:"hostStores,omitempty"`
+	CertSHA256       string `json:"certSha256,omitempty"`
+	SPKISHA256       string `json:"spkiSha256,omitempty"`
+	SPKISHA256Base64 string `json:"spkiSha256Base64,omitempty"`
+	CertVersion      int    `json:"version,omitempty"`
+	IsCA             *bool  `json:"isCA,omitempty"`
+	SelfSigned       *bool  `json:"selfSigned,omitempty"`
+	// SelfSignedUnverified marks a selfSigned decided by the self-issued
+	// fallback because the signature could not be checked (PLAN 2.5).
+	SelfSignedUnverified bool     `json:"selfSignedUnverified,omitempty"`
+	Role                 string   `json:"role,omitempty"`
+	PathLen              *int     `json:"pathLen,omitempty"`
+	SubjectKeyId         string   `json:"subjectKeyId,omitempty"`
+	AuthorityKeyId       string   `json:"authorityKeyId,omitempty"`
+	Issuers              []string `json:"issuers,omitempty"`
+	// IssuersUnverified lists parents whose names and key identifiers chain
+	// but whose signature on this certificate could not be checked.
+	IssuersUnverified []string `json:"issuersUnverified,omitempty"`
+	HostStores        []string `json:"hostStores,omitempty"`
+	// KeyName names the public key ("RSA-2048", "ECDSA-P256", "ML-DSA-65",
+	// or the dotted OID when unknown); KeyBits is its size, absent for
+	// post-quantum keys; KeyAlgorithmOid is the SPKI algorithm OID.
+	KeyName         string `json:"keyName,omitempty"`
+	KeyBits         int    `json:"keyBits,omitempty"`
+	KeyAlgorithmOid string `json:"keyAlgorithmOid,omitempty"`
 
 	// report-2 certificate extensions and URLs.
 	KeyUsage               []string `json:"keyUsage,omitempty"`

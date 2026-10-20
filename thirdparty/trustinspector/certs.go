@@ -2,10 +2,15 @@ package main
 
 import (
 	"bytes"
+	"crypto/ecdsa"
+	"crypto/ed25519"
+	"crypto/rsa"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/asn1"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -25,6 +30,44 @@ const dnsNamesLimit = 20
 // linking is skipped and an envelope warning is emitted. It is a variable so
 // tests can tighten it; production keeps 5000.
 var issuerLinkLimit = 5000
+
+// pqAlgorithm is a post-quantum algorithm as certificates identify it:
+// ML-DSA (FIPS 204, RFC 9881), SLH-DSA (FIPS 205, RFC 9909) and ML-KEM
+// (FIPS 203, RFC 9935). Keys and signatures are named from these OIDs, not
+// from crypto/x509, which (as of Go 1.27) knows ML-DSA but neither SLH-DSA
+// nor ML-KEM. PLAN section 2.5 is the contract; cdxgen and safer-exec use the
+// same names.
+type pqAlgorithm struct{ oid, name string }
+
+var pqAlgorithms = []pqAlgorithm{
+	{"2.16.840.1.101.3.4.3.17", "ML-DSA-44"},
+	{"2.16.840.1.101.3.4.3.18", "ML-DSA-65"},
+	{"2.16.840.1.101.3.4.3.19", "ML-DSA-87"},
+	{"2.16.840.1.101.3.4.3.20", "SLH-DSA-SHA2-128s"},
+	{"2.16.840.1.101.3.4.3.21", "SLH-DSA-SHA2-128f"},
+	{"2.16.840.1.101.3.4.3.22", "SLH-DSA-SHA2-192s"},
+	{"2.16.840.1.101.3.4.3.23", "SLH-DSA-SHA2-192f"},
+	{"2.16.840.1.101.3.4.3.24", "SLH-DSA-SHA2-256s"},
+	{"2.16.840.1.101.3.4.3.25", "SLH-DSA-SHA2-256f"},
+	{"2.16.840.1.101.3.4.3.26", "SLH-DSA-SHAKE-128s"},
+	{"2.16.840.1.101.3.4.3.27", "SLH-DSA-SHAKE-128f"},
+	{"2.16.840.1.101.3.4.3.28", "SLH-DSA-SHAKE-192s"},
+	{"2.16.840.1.101.3.4.3.29", "SLH-DSA-SHAKE-192f"},
+	{"2.16.840.1.101.3.4.3.30", "SLH-DSA-SHAKE-256s"},
+	{"2.16.840.1.101.3.4.3.31", "SLH-DSA-SHAKE-256f"},
+	{"2.16.840.1.101.3.4.4.1", "ML-KEM-512"},
+	{"2.16.840.1.101.3.4.4.2", "ML-KEM-768"},
+	{"2.16.840.1.101.3.4.4.3", "ML-KEM-1024"},
+}
+
+func pqAlgorithmName(oid string) (string, bool) {
+	for _, a := range pqAlgorithms {
+		if a.oid == oid {
+			return a.name, true
+		}
+	}
+	return "", false
+}
 
 // nameConstraintsOID is the RFC 5280 section 4.2.1.10 extension. Go does not
 // expose a "hasNameConstraints" bit, so presence of the extension is checked
@@ -186,11 +229,13 @@ func materialLess(a, b trustMaterial) bool {
 func buildCertificateFields(cert *x509.Certificate) *trustMaterial {
 	certSHA := sha256SumHex(cert.Raw)
 	spkiSHA := sha256SumHex(cert.RawSubjectPublicKeyInfo)
-	selfSigned := certificateSelfSigned(cert)
+	selfSigned, unverified := certificateSelfSigned(cert)
+	keyName, keyBits, keyOID := publicKeyID(cert)
+	isCA := cert.IsCA
 	material := &trustMaterial{
 		certificate:            cert,
 		Kind:                   "certificate",
-		Name:                   firstNonEmpty(cert.Subject.CommonName, ""),
+		Name:                   cert.Subject.CommonName,
 		Algorithm:              publicKeyType(cert.PublicKeyAlgorithm),
 		KeyStrength:            certificateKeyStrength(cert),
 		CreatedAt:              cert.NotBefore.UTC().Format(time.RFC3339),
@@ -205,9 +250,15 @@ func buildCertificateFields(cert *x509.Certificate) *trustMaterial {
 		SPKISHA256:             spkiSHA,
 		SPKISHA256Base64:       base64.StdEncoding.EncodeToString(sha256SumBytes(cert.RawSubjectPublicKeyInfo)),
 		CertVersion:            cert.Version,
+		IsCA:                   &isCA,
+		SelfSigned:             &selfSigned,
+		SelfSignedUnverified:   unverified,
 		Role:                   certificateRole(cert, selfSigned),
-		SubjectKeyId:           strings.ToLower(hex.EncodeToString(cert.SubjectKeyId)),
-		AuthorityKeyId:         strings.ToLower(hex.EncodeToString(cert.AuthorityKeyId)),
+		KeyName:                keyName,
+		KeyBits:                keyBits,
+		KeyAlgorithmOid:        keyOID,
+		SubjectKeyId:           hex.EncodeToString(cert.SubjectKeyId),
+		AuthorityKeyId:         hex.EncodeToString(cert.AuthorityKeyId),
 		KeyUsage:               keyUsageNames(cert.KeyUsage),
 		ExtKeyUsage:            extKeyUsageNames(cert),
 		SignatureAlgorithm:     signatureAlgorithmName(cert),
@@ -220,28 +271,9 @@ func buildCertificateFields(cert *x509.Certificate) *trustMaterial {
 		PolicyOIDs:             policyOIDStrings(cert),
 		HasNameConstraints:     certificateHasNameConstraints(cert),
 	}
-	if selfSigned {
-		value := true
-		material.SelfSigned = &value
-	} else {
-		value := false
-		material.SelfSigned = &value
-	}
-	if cert.IsCA {
-		value := true
-		material.IsCA = &value
-	} else {
-		value := false
-		material.IsCA = &value
-	}
 	if cert.MaxPathLen > 0 || cert.MaxPathLenZero {
 		pathLen := cert.MaxPathLen
 		material.PathLen = &pathLen
-	}
-	if material.Name == "" {
-		// The caller falls back to the first subject RDN value and then the
-		// file basename when the subject has no CN; that needs the path, so
-		// it is done by the caller (setCertificateName).
 	}
 	return material
 }
@@ -262,10 +294,67 @@ func setCertificateName(material *trustMaterial, cert *x509.Certificate, relPath
 	material.Name = baseName(relPath)
 }
 
-// certificateSelfSigned follows PLAN section 2.3: subject equals issuer AND
-// the self-signature verifies.
-func certificateSelfSigned(cert *x509.Certificate) bool {
-	return bytes.Equal(cert.RawSubject, cert.RawIssuer) && cert.CheckSignatureFrom(cert) == nil
+// certificateSelfSigned follows PLAN sections 2.3 and 2.5: subject equals
+// issuer AND the self-signature verifies. CheckSignature is used, not
+// CheckSignatureFrom, which also refuses SHA-1 signatures (most older roots
+// in CA stores) and signers that are not CAs. When the signature cannot be
+// checked (an algorithm Go does not implement, or MD5), a self-issued
+// certificate (equal names, and an authority key identifier that is absent
+// or equals the subject key identifier) counts as self-signed, unverified.
+func certificateSelfSigned(cert *x509.Certificate) (selfSigned, unverified bool) {
+	if !bytes.Equal(cert.RawSubject, cert.RawIssuer) {
+		return false, false
+	}
+	switch err := cert.CheckSignature(cert.SignatureAlgorithm, cert.RawTBSCertificate, cert.Signature); {
+	case err == nil:
+		return true, false
+	case signatureUncheckable(err) && keyIDsChain(cert, cert):
+		return true, true
+	}
+	return false, false
+}
+
+// signatureUncheckable reports whether a signature check failed only because
+// Go cannot check it, not because the signature is wrong.
+func signatureUncheckable(err error) bool {
+	var insecure x509.InsecureAlgorithmError
+	return errors.Is(err, x509.ErrUnsupportedAlgorithm) || errors.As(err, &insecure)
+}
+
+// keyIDsChain reports whether child's authority key identifier, when it has
+// one, names parent's subject key identifier.
+func keyIDsChain(child, parent *x509.Certificate) bool {
+	return len(child.AuthorityKeyId) == 0 || bytes.Equal(child.AuthorityKeyId, parent.SubjectKeyId)
+}
+
+// publicKeyID names a certificate's public key ("RSA-2048", "ECDSA-P256",
+// "Ed25519", "ML-DSA-65"), with its size in bits (0 for post-quantum and
+// unknown keys) and the dotted OID of its SubjectPublicKeyInfo algorithm. A
+// key no name is known for is named by that OID (PLAN section 2.5).
+func publicKeyID(cert *x509.Certificate) (name string, bits int, oid string) {
+	var spki struct {
+		Algorithm pkix.AlgorithmIdentifier
+		Key       asn1.BitString
+	}
+	if _, err := asn1.Unmarshal(cert.RawSubjectPublicKeyInfo, &spki); err == nil {
+		oid = spki.Algorithm.Algorithm.String()
+	}
+	if pq, ok := pqAlgorithmName(oid); ok {
+		return pq, 0, oid
+	}
+	switch key := cert.PublicKey.(type) {
+	case *rsa.PublicKey:
+		return fmt.Sprintf("RSA-%d", key.N.BitLen()), key.N.BitLen(), oid
+	case *ecdsa.PublicKey:
+		bits := key.Curve.Params().BitSize
+		return fmt.Sprintf("ECDSA-P%d", bits), bits, oid
+	case ed25519.PublicKey:
+		return "Ed25519", 256, oid
+	}
+	if cert.PublicKeyAlgorithm != x509.UnknownPublicKeyAlgorithm || oid == "" {
+		return cert.PublicKeyAlgorithm.String(), 0, oid
+	}
+	return oid, 0, oid
 }
 
 // certificateRole: root (self-signed, and CA or v1), intermediate (CA, not
@@ -342,13 +431,18 @@ func extKeyUsageNames(cert *x509.Certificate) []string {
 	return sortedCopy(values)
 }
 
-// signatureAlgorithmName is Go's SignatureAlgorithm.String() (for example
-// "SHA256-RSA"); omitted for unknown algorithms.
+// signatureAlgorithmName is the post-quantum name for its OID (PLAN section
+// 2.5), else Go's SignatureAlgorithm.String() ("SHA256-RSA"), else the dotted
+// OID.
 func signatureAlgorithmName(cert *x509.Certificate) string {
-	if cert.SignatureAlgorithm == x509.UnknownSignatureAlgorithm {
-		return ""
+	oid := signatureAlgorithmOID(cert)
+	if pq, ok := pqAlgorithmName(oid); ok {
+		return pq
 	}
-	return cert.SignatureAlgorithm.String()
+	if cert.SignatureAlgorithm != x509.UnknownSignatureAlgorithm || oid == "" {
+		return cert.SignatureAlgorithm.String()
+	}
+	return oid
 }
 
 // signatureAlgorithmOID is the dotted OID from the certificate's raw DER
@@ -388,58 +482,48 @@ func certificateHasNameConstraints(cert *x509.Certificate) bool {
 }
 
 // linkIssuers adds, for each pair (child, parent) of certificates found in
-// this run, the parent's certSha256 to child.issuers when the child's
-// signature verifies against the parent's key. Self-signed certificates
-// never list themselves. The pass is O(n^2) but CheckSignatureFrom compares
-// subject names before verifying, so only same-name pairs pay for the
-// signature check; past issuerLinkLimit certificates the pass is skipped.
+// this run whose names chain (child issuer == parent subject), the parent's
+// certSha256 to child.issuers when the child's signature verifies under the
+// parent's key; a certificate never lists itself. CheckSignature is used,
+// which allows SHA-1 and skips CA constraint checks: the edge means "signed
+// by this key". A pair whose signature cannot be checked (PLAN section 2.5)
+// goes to issuersUnverified instead, when the key identifiers agree. Only
+// same-name pairs are verified; past issuerLinkLimit certificates the pass is
+// skipped with a warning.
 func linkIssuers(materials []trustMaterial, certs map[string]*x509.Certificate) []string {
-	if len(materials) > issuerLinkLimit {
+	var indexes []int
+	for index := range materials {
+		if materials[index].CertSHA256 != "" && certs[materials[index].CertSHA256] != nil {
+			indexes = append(indexes, index)
+		}
+	}
+	if len(indexes) > issuerLinkLimit {
 		return []string{fmt.Sprintf("issuer linking skipped: more than %d certificates found", issuerLinkLimit)}
 	}
-	byCertSHA := map[string]int{}
-	for index := range materials {
-		if materials[index].CertSHA256 != "" {
-			byCertSHA[materials[index].CertSHA256] = index
-		}
+	bySubject := map[string][]int{}
+	for _, index := range indexes {
+		subject := string(certs[materials[index].CertSHA256].RawSubject)
+		bySubject[subject] = append(bySubject[subject], index)
 	}
-	issuerSets := map[string]map[string]bool{}
-	for childKey, childIndex := range byCertSHA {
-		child := materials[childIndex]
-		childCert := certs[childKey]
-		if childCert == nil {
-			continue
-		}
-		for parentKey, parentIndex := range byCertSHA {
-			if childIndex == parentIndex {
+	for _, childIndex := range indexes {
+		child := certs[materials[childIndex].CertSHA256]
+		var verified, unverified []string
+		for _, parentIndex := range bySubject[string(child.RawIssuer)] {
+			if parentIndex == childIndex {
 				continue
 			}
-			parentCert := certs[parentKey]
-			if parentCert == nil {
-				continue
-			}
-			if childCert.CheckSignatureFrom(parentCert) == nil {
-				set, ok := issuerSets[child.CertSHA256]
-				if !ok {
-					set = map[string]bool{}
-					issuerSets[child.CertSHA256] = set
-				}
-				set[materials[parentIndex].CertSHA256] = true
+			parent := certs[materials[parentIndex].CertSHA256]
+			switch err := parent.CheckSignature(child.SignatureAlgorithm, child.RawTBSCertificate, child.Signature); {
+			case err == nil:
+				verified = append(verified, materials[parentIndex].CertSHA256)
+			case signatureUncheckable(err) && keyIDsChain(child, parent):
+				unverified = append(unverified, materials[parentIndex].CertSHA256)
 			}
 		}
+		materials[childIndex].Issuers = sortedCopy(verified)
+		materials[childIndex].IssuersUnverified = sortedCopy(unverified)
 	}
-	var warnings []string
-	for index := range materials {
-		if set := issuerSets[materials[index].CertSHA256]; len(set) > 0 {
-			issuers := make([]string, 0, len(set))
-			for issuer := range set {
-				issuers = append(issuers, issuer)
-			}
-			sort.Strings(issuers)
-			materials[index].Issuers = issuers
-		}
-	}
-	return warnings
+	return nil
 }
 
 func sortedCopy(values []string) []string {

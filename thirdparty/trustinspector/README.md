@@ -165,11 +165,31 @@ base64 form is the RFC 7469 pin format), `serialHex`, `version`, `role`
 `signatureAlgorithm` and `signatureAlgorithmOid` (so an SHA-1 signed
 intermediate is visible downstream), `dnsNames` (capped at 20 with
 `dnsNamesTruncated`), AIA/OCSP/CRL URLs, `policyOids`,
-`hasNameConstraints`, `trustRejectedPurposes`, and `issuers`: the
-`certSha256` list of certificates in the same report whose key verified this
-one's signature. Cross-signed twins share one `spkiSha256` and stay separate
-materials; certificates are deduplicated by `certSha256` with **every**
-location kept in `paths` and every location kind in `sourceTypes`.
+`hasNameConstraints`, `trustRejectedPurposes`, `keyName` (`RSA-2048`,
+`ECDSA-P256`, `Ed25519`, `ML-DSA-65`, …), `keyBits` (absent for post-quantum
+keys), `keyAlgorithmOid`, and `issuers`: the `certSha256` list of
+certificates in the same report whose subject is this one's issuer and whose
+key verified this one's signature (SHA-1 signatures included; the link means
+"signed by this key"). Cross-signed twins share one `spkiSha256` and stay
+separate materials; certificates are deduplicated by `certSha256` with
+**every** location kept in `paths` and every location kind in `sourceTypes`.
+
+Post-quantum certificates (ML-DSA, RFC 9881; SLH-DSA, RFC 9909; ML-KEM,
+RFC 9935) are named from their OIDs: `ML-DSA-65`, `SLH-DSA-SHA2-128s`,
+`ML-KEM-768`. Go 1.27 parses ML-DSA but neither SLH-DSA nor ML-KEM, so the
+names never come from `crypto/x509`. A key or signature algorithm with no
+known name is named by its dotted OID (composite ML-DSA, pre-standard
+algorithms). When Go cannot check a signature (an unimplemented algorithm,
+or MD5):
+
+- a certificate whose subject equals its issuer and whose authority key
+  identifier is absent or equals its subject key identifier still counts as
+  `selfSigned`, with `selfSignedUnverified: true`, so an SLH-DSA root is a
+  `root`;
+- a parent whose subject and key identifier match goes to
+  `issuersUnverified`, never to `issuers`.
+
+The report-1 `algorithm` and `keyStrength` fields are unchanged.
 
 A report-2 certificate material, trimmed from a real run over a demo tree
 (`trustinspector-cdxgen rootfs --embedded`), showing a cross-signed
