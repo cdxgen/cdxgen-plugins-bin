@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly OSQUERY_VERSION="5.23.1"
+readonly OSQUERY_VERSION="5.24.0"
 readonly UPX_VERSION="5.2.1"
 readonly DOSAI_VERSION="4.1.0"
 THIRDPARTY_SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -53,27 +53,27 @@ resolve_asset() {
     osquery-linux-amd64)
       asset_filename="osquery-${OSQUERY_VERSION}_1.linux_x86_64.tar.gz"
       asset_url="https://github.com/osquery/osquery/releases/download/${OSQUERY_VERSION}/${asset_filename}"
-      asset_sha256="0f37a478a1dbda24b67c81551e32d734b392c5a2f5deb156bf1c41ca204cfa67"
+      asset_sha256="3e2fbfe0d9e3cdde60cc58903d03ab3d44449c481bf1117e42351f9e4a460ade"
       ;;
     osquery-linux-arm64)
       asset_filename="osquery-${OSQUERY_VERSION}_1.linux_aarch64.tar.gz"
       asset_url="https://github.com/osquery/osquery/releases/download/${OSQUERY_VERSION}/${asset_filename}"
-      asset_sha256="9ae763820166f75f19970b5147b1930a308865a923ab127f4b8bbaea7b69962a"
+      asset_sha256="f2a8a2a46b6bd6433189991fe64b225d0fd5c453787af470bcf98563e937b425"
       ;;
     osquery-darwin-arm64)
       asset_filename="osquery-${OSQUERY_VERSION}_1.macos_arm64.tar.gz"
       asset_url="https://github.com/osquery/osquery/releases/download/${OSQUERY_VERSION}/${asset_filename}"
-      asset_sha256="5484f0b62e05a7b2fa9d6e43f038915ea2b7ce063d59bd671ede0cf8dd0552da"
+      asset_sha256="df23caf7c1162eef4fcda0a49e28b8ec34fb502df9fa08fb294ccecf6abaecbb"
       ;;
     osquery-windows-amd64)
       asset_filename="osquery-${OSQUERY_VERSION}.windows_x86_64.zip"
       asset_url="https://github.com/osquery/osquery/releases/download/${OSQUERY_VERSION}/${asset_filename}"
-      asset_sha256="7bd411050ef6b5aae1b23956aec0dc5ce6e800c5656f0cd463ac70a6e1bdf30b"
+      asset_sha256="2a55cf9d27765f0c7ce9e3484bdf1aee560df65442f39189d7201107f21544a5"
       ;;
     osquery-windows-arm64)
       asset_filename="osquery-${OSQUERY_VERSION}.windows_arm64.zip"
       asset_url="https://github.com/osquery/osquery/releases/download/${OSQUERY_VERSION}/${asset_filename}"
-      asset_sha256="0913d05cc3fc92dd9253c945caacde10a776408f267cc1cc853a05de24dba900"
+      asset_sha256="a858cf4640b2b0a95df4e76a141ad6874ced1320302363da17d0069d95782605"
       ;;
     dosai-linux-amd64)
       asset_filename="Dosai-linux-amd64"
