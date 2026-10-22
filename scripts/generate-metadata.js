@@ -27,7 +27,7 @@ const trivyVersion = trivyVersionFromGoMod(
     "utf-8",
   ),
 );
-const dosaiVersion = "v5.0.0-rc.2";
+const dosaiVersion = "v4.1.0";
 const trustInspectorVersion = pluginsPackageJson.version;
 const golemVersion = pluginsPackageJson.version;
 const rusiVersion = pluginsPackageJson.version;
