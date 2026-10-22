@@ -7,7 +7,7 @@ import { depsJsonToBom, readBundledDepsJson } from "./dotnet-bundle-sbom.js";
 const pluginsPackageJson = JSON.parse(
   fs.readFileSync(new URL("../package.json", import.meta.url), "utf-8"),
 );
-const osqueryVersion = "5.23.1";
+const osqueryVersion = "5.24.0";
 const sourcekittenVersion = "0.38.0";
 // trivy-cdxgen reports the Trivy release it wraps, as pinned in its go.mod,
 // with a -cdx suffix; thirdparty/trivy/Makefile and build.ps1 stamp the same
@@ -27,7 +27,7 @@ const trivyVersion = trivyVersionFromGoMod(
     "utf-8",
   ),
 );
-const dosaiVersion = "v5.0.0-rc.2";
+const dosaiVersion = "v4.1.0";
 const trustInspectorVersion = pluginsPackageJson.version;
 const golemVersion = pluginsPackageJson.version;
 const rusiVersion = pluginsPackageJson.version;
