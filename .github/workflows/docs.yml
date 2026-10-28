@@ -9,11 +9,9 @@ on:
       - ".github/workflows/docs.yml"
   workflow_dispatch:
 
-# Pages deployment needs the token and OIDC; keep the rest read-only.
+# Only the deploy job needs the Pages token and OIDC.
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -38,6 +36,9 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
