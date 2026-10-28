@@ -1,0 +1,8 @@
+rules:
+  # These jobs install the latest published @cdxgen/cdxgen on purpose: they
+  # test and release this package against the cdxgen users get today.
+  adhoc-packages:
+    ignore:
+      - native-builds.yml
+      - release.yml
+      - test.yml
