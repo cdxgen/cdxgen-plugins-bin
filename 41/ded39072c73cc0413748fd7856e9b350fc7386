@@ -1,0 +1,14 @@
+.github/zizmor.yml
+  h_0926447d100ad2 1-8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "41ded39072c73cc0413748fd7856e9b350fc7386",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
