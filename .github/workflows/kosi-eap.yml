@@ -46,20 +46,21 @@ jobs:
             | grep -oE "<version>2\.[0-9.]+(-(RC|Beta|Alpha)[0-9]*|-dev-[0-9]+)</version>" \
             | sed -E 's/<\/?version>//g' | sort -V | tail -1)
           echo "version=${latest:-2.4.20-RC}" >> "$GITHUB_OUTPUT"
+          echo "KOTLIN_VERSION=${latest:-2.4.20-RC}" >> "$GITHUB_ENV"
           echo "tracking Kotlin $latest"
       - name: Build against the EAP
-        run: ./gradlew -Pkosi.testHeapGb=6 -PkotlinVersion=${{ steps.eap.outputs.version }} build --no-daemon || true
+        run: ./gradlew -Pkosi.testHeapGb=6 -PkotlinVersion="$KOTLIN_VERSION" build --no-daemon || true
       - name: Corpus ratchet (fixtures, both syntax slots + resolved)
         id: corpusQuick
-        run: ./gradlew -Pkosi.testHeapGb=6 -PkotlinVersion=${{ steps.eap.outputs.version }} corpusQuick --no-daemon
+        run: ./gradlew -Pkosi.testHeapGb=6 -PkotlinVersion="$KOTLIN_VERSION" corpusQuick --no-daemon
       - name: eap tier (future-syntax fixture)
         id: eapTier
-        run: ./gradlew -Pkosi.testHeapGb=6 -PkotlinVersion=${{ steps.eap.outputs.version }} kosiEap --no-daemon
+        run: ./gradlew -Pkosi.testHeapGb=6 -PkotlinVersion="$KOTLIN_VERSION" kosiEap --no-daemon
       - name: Report (the job warns; it never blocks a release)
         if: always()
         run: |
           {
-            echo "EAP run against Kotlin ${{ steps.eap.outputs.version }} finished."
+            echo "EAP run against Kotlin $KOTLIN_VERSION finished."
             echo "corpusQuick: ${{ steps.corpusQuick.outcome }}"
             echo "eap tier: ${{ steps.eapTier.outcome }}"
           } >> "$GITHUB_STEP_SUMMARY"
