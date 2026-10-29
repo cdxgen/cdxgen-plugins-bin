@@ -94,6 +94,30 @@ fn test_schema_invalid_component_type() {
     assert!(has_severity(&f.findings, "schema.invalid", Severity::Error));
 }
 
+#[test]
+fn test_schema_spdx_3_29_license_id() {
+    // Bugroff and FDK-MPEG-H joined the SPDX License List in 3.29.0; cdxgen
+    // emits them as license.id, so the bundled spdx.schema.json must accept them.
+    for spec in ["1.6", "1.7"] {
+        let mut bom = valid_bom_1_6();
+        bom["specVersion"] = json!(spec);
+        bom["components"][0]["licenses"] =
+            json!([{ "license": { "id": "Bugroff" } }, { "license": { "id": "FDK-MPEG-H" } }]);
+        let f = validate_bom(&bom);
+        assert!(f.valid, "{spec}: {:?}", f.findings);
+        assert!(!has_finding(&f.findings, "schema.invalid"));
+    }
+}
+
+#[test]
+fn test_schema_unknown_license_id() {
+    let mut bom = valid_bom_1_6();
+    bom["components"][0]["licenses"] = json!([{ "license": { "id": "Not-A-Real-License-1.0" } }]);
+    let f = validate_bom(&bom);
+    assert!(!f.valid);
+    assert!(has_severity(&f.findings, "schema.invalid", Severity::Error));
+}
+
 // ---------------------------------------------------------------------------
 // Metadata rules
 // ---------------------------------------------------------------------------
