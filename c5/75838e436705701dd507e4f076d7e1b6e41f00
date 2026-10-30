@@ -1,0 +1,29 @@
+.github/workflows/kosi-eap.yml
+  s_e2c0e1c79ef582::t_fc19f710a682ba 40-42
+.github/workflows/kosi-test.yml
+  s_e2c0e1c79ef582::t_d135134f8f36f7 46-48,92-94,130-132,195-197
+.github/workflows/native-builds.yml
+  s_e2c0e1c79ef582::t_043135431f6693 148-150,199-201,252-254
+.github/workflows/test.yml
+  s_e2c0e1c79ef582::t_07024ddba2923f 233-235,325-327,374-376,458
+scripts/maven-central-mirror.js
+  s_e2c0e1c79ef582::t_c3e2fd6f7f4d20 1-177
+scripts/maven-central-mirror.test.js
+  s_e2c0e1c79ef582::t_4cab52a694cc0a 1-27
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c575838e436705701dd507e4f076d7e1b6e41f00",
+  "prompts": {},
+  "sessions": {
+    "s_e2c0e1c79ef582": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1f6a37eb-06ad-446a-a950-7d064e017a4c",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
