@@ -1,0 +1,18 @@
+.github/workflows/native-builds.yml
+  h_0926447d100ad2 34
+.github/workflows/release.yml
+  h_0926447d100ad2 26,91,156,230
+.github/workflows/test.yml
+  h_0926447d100ad2 29,94,160,422,589,641
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c458d821abfe01d9f452b0ef2f089f4d957d593e",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
