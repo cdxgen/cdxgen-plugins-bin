@@ -43,6 +43,11 @@ jobs:
         with:
           distribution: temurin
           java-version: 21
+      - name: Use Node.js
+        if: runner.environment == 'github-hosted'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+        with:
+          node-version: 24.x
       - name: Route Maven Central through Google's mirror
         if: runner.environment == 'github-hosted'
         run: node "$GITHUB_WORKSPACE/scripts/maven-central-mirror.js"
@@ -89,6 +94,11 @@ jobs:
       # P14: the vuln-repo finding floors are measured against warmed
       # classpaths, and a declared classpath that is missing FAILS its bench
       # row — so CI warms before it benches.
+      - name: Use Node.js
+        if: runner.environment == 'github-hosted'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+        with:
+          node-version: 24.x
       - name: Route Maven Central through Google's mirror
         if: runner.environment == 'github-hosted'
         run: node "$GITHUB_WORKSPACE/scripts/maven-central-mirror.js"
@@ -127,6 +137,11 @@ jobs:
             https://github.com/graalvm/graalvm-ce-builds/releases/download/graal-25.3.4.1/graalvm-community-jdk-25i3-25.0.4.1_macos-aarch64_bin.tar.gz
           echo "ebfab1d74420f355a459076162012d6835fa6068bd9d2f230f1fcaf7ee0dd923  /tmp/graalvm.tar.gz" | shasum -a 256 -c -
           tar xzf /tmp/graalvm.tar.gz -C "$HOME/tools/"
+      - name: Use Node.js
+        if: runner.environment == 'github-hosted'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+        with:
+          node-version: 24.x
       - name: Route Maven Central through Google's mirror
         if: runner.environment == 'github-hosted'
         run: node "$GITHUB_WORKSPACE/scripts/maven-central-mirror.js"
@@ -192,6 +207,11 @@ jobs:
           echo "b2bc38d0c4141426eb44d0eefa3cc172c96faf92727d703b61541699128b6fc7  /tmp/graalvm.tar.gz" | sha256sum -c -
           tar xzf /tmp/graalvm.tar.gz -C "$HOME/tools/"
           "$HOME/tools"/graalvm-community-*/bin/native-image --version
+      - name: Use Node.js
+        if: runner.environment == 'github-hosted'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+        with:
+          node-version: 24.x
       - name: Route Maven Central through Google's mirror
         if: runner.environment == 'github-hosted'
         run: node "$GITHUB_WORKSPACE/scripts/maven-central-mirror.js"
