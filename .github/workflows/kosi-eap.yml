@@ -37,6 +37,9 @@ jobs:
         with:
           distribution: temurin
           java-version: 21
+      - name: Route Maven Central through Google's mirror
+        if: runner.environment == 'github-hosted'
+        run: node "$GITHUB_WORKSPACE/scripts/maven-central-mirror.js"
       - name: Resolve newest Kotlin EAP/RC version
         id: eap
         run: |

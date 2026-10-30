@@ -145,6 +145,9 @@ jobs:
       with:
         distribution: temurin
         java-version: 21
+    - name: Route Maven Central through Google's mirror
+      if: runner.environment == 'github-hosted'
+      run: node ./scripts/maven-central-mirror.js
     - name: Set up pinned GraalVM and build kosi natives (see thirdparty/kosi Makefile)
       run: |
         mkdir -p "$HOME/tools"
@@ -193,6 +196,9 @@ jobs:
       with:
         distribution: temurin
         java-version: 21
+    - name: Route Maven Central through Google's mirror
+      if: runner.environment == 'github-hosted'
+      run: node ./scripts/maven-central-mirror.js
     - name: Set up pinned GraalVM and build kosi natives
       run: |
         mkdir -p "$HOME/tools"
@@ -243,6 +249,9 @@ jobs:
         distribution: temurin
         java-version: 21
       if: matrix.os == 'macos-15'
+    - name: Route Maven Central through Google's mirror
+      if: matrix.os == 'macos-15' && runner.environment == 'github-hosted'
+      run: node ./scripts/maven-central-mirror.js
     - name: Set up pinned GraalVM and build kosi natives
       run: |
         mkdir -p "$HOME/tools"
