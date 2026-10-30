@@ -1,0 +1,23 @@
+.github/workflows/kosi-eap.yml
+  s_79a7c562b49300::t_d13feb0a20b790 44
+.github/workflows/kosi-test.yml
+  s_79a7c562b49300::t_50cc52144f48eb 50,101,144,214
+.github/workflows/test.yml
+  s_79a7c562b49300::t_4267922561f676 237,334,388
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "744024cce0bc890d4f28b31a0b6e9fc92c963fd9",
+  "prompts": {},
+  "sessions": {
+    "s_79a7c562b49300": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e06ad8c2-0767-47dd-913e-35689e5f05ba",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
