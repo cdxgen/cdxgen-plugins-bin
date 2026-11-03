@@ -5,8 +5,10 @@
 // through overlay/patches, so go.mod names about four times the modules the
 // binary contains. The build info each Go binary embeds (`go version -m`) is
 // the exact list: this script keeps the components it names, adds any it names
-// that cdxgen missed, records the Go standard library the binary was built
-// with, and rewires the dependency graph around the modules it drops.
+// that cdxgen missed, and rewires the dependency graph around the modules it
+// drops. The Go standard library is not listed: the SBOM names the modules a
+// helper depends on, and the Go release it was built with is part of its
+// build, which `go version -m` on the binary shows.
 //
 // Usage: node prune-go-sbom.js <sbom.cdx.json> <binary>...
 // Files ending in .sha256 or .json are ignored, so a shell glob over the build
@@ -98,30 +100,6 @@ function moduleComponent(module) {
   return component;
 }
 
-// `go1.26.8-X:jsonv2` names the release and the GOEXPERIMENT it was built
-// with; the standard library's version is the release alone.
-export function goReleaseVersion(goVersion) {
-  const match = goVersion.match(/^go(\d+(?:\.\d+)*(?:(?:rc|beta)\d+)?)/);
-  return match ? `v${match[1]}` : undefined;
-}
-
-function stdlibComponent(goVersion) {
-  const version = goReleaseVersion(goVersion);
-  if (!version) {
-    return undefined;
-  }
-  const purl = `pkg:golang/stdlib@${version}`;
-  return {
-    type: "library",
-    name: "stdlib",
-    version,
-    description: "The Go standard library the binary was built with.",
-    purl,
-    "bom-ref": purl,
-    scope: "required",
-  };
-}
-
 // The modules of a binary that go.mod requires at another version: the binary
 // was built from other sources than the SBOM describes, such as a stale file
 // left in the build directory.
@@ -170,11 +148,7 @@ export function pruneGoSbom(bom, allBuildInfos) {
   // Each linked module with the keys cdxgen may know it by: its own and, when
   // go.mod replaces it, the replacement's.
   const linked = new Map();
-  const goVersions = new Set();
   for (const info of buildInfos) {
-    if (info.goVersion) {
-      goVersions.add(info.goVersion);
-    }
     for (const module of info.modules) {
       const keys = [moduleKey(module)];
       if (module.replacement) {
@@ -219,15 +193,6 @@ export function pruneGoSbom(bom, allBuildInfos) {
     keptRefs.add(component["bom-ref"]);
     linkedRefs.add(component["bom-ref"]);
     added.push(component["bom-ref"]);
-  }
-  for (const goVersion of [...goVersions].sort()) {
-    const component = stdlibComponent(goVersion);
-    if (component && !keptRefs.has(component["bom-ref"])) {
-      kept.push(component);
-      keptRefs.add(component["bom-ref"]);
-      linkedRefs.add(component["bom-ref"]);
-      added.push(component["bom-ref"]);
-    }
   }
 
   // An edge into a dropped module is replaced by the edges that module led to,

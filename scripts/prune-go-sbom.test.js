@@ -7,7 +7,6 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import {
-  goReleaseVersion,
   parseGoVersionM,
   pruneGoSbom,
 } from "./prune-go-sbom.js";
@@ -45,13 +44,6 @@ test("parseGoVersionM reads the release, the modules and their replacements", ()
       ["github.com/example/local", "v0.0.0", undefined],
     ],
   );
-});
-
-test("goReleaseVersion drops the GOEXPERIMENT suffix", () => {
-  assert.equal(goReleaseVersion("go1.26.8-X:jsonv2"), "v1.26.8");
-  assert.equal(goReleaseVersion("go1.27.1"), "v1.27.1");
-  assert.equal(goReleaseVersion("go1.28rc1"), "v1.28rc1");
-  assert.equal(goReleaseVersion("devel +abc"), undefined);
 });
 
 function golang(path, version) {
@@ -106,7 +98,7 @@ test("pruneGoSbom keeps the linked modules and rewires the graph around the rest
       ],
     },
   ]);
-  assert.deepEqual(result, { dropped: 2, added: 2, skipped: [] });
+  assert.deepEqual(result, { dropped: 2, added: 1, skipped: [] });
   assert.deepEqual(
     bom.components.map((component) => component["bom-ref"]),
     [
@@ -116,9 +108,10 @@ test("pruneGoSbom keeps the linked modules and rewires the graph around the rest
       fork["bom-ref"],
       notGo["bom-ref"],
       "pkg:golang/github.com/example/missing@v2.0.0",
-      "pkg:golang/stdlib@v1.26.8",
     ],
   );
+  // The Go release the binary was built with is not a component.
+  assert.ok(!JSON.stringify(bom).includes("stdlib"));
   const missing = bom.components.find(
     (component) => component.name === "github.com/example/missing",
   );
@@ -140,7 +133,6 @@ test("pruneGoSbom keeps the linked modules and rewires the graph around the rest
     linked["bom-ref"],
     behindUnlinked["bom-ref"],
     orphan["bom-ref"],
-    "pkg:golang/stdlib@v1.26.8",
   ]);
   assert.equal(edges[unlinked["bom-ref"]], undefined);
   assert.deepEqual(edges[notGo["bom-ref"]], []);
@@ -171,7 +163,7 @@ test("pruneGoSbom skips a binary built from other module versions than go.mod", 
   );
   assert.deepEqual(
     bom.components.map((component) => component.purl),
-    ["pkg:golang/golang.org/x/mod@v0.41.0", "pkg:golang/stdlib@v1.27.1"],
+    ["pkg:golang/golang.org/x/mod@v0.41.0"],
   );
   assert.throws(
     () => pruneGoSbom({ components: [current] }, [stale]),
