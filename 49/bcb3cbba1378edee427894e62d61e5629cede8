@@ -1,0 +1,21 @@
+scripts/prune-go-sbom.js
+  s_79a7c562b49300::t_f4b63618316f2c 8-11
+scripts/prune-go-sbom.test.js
+  s_79a7c562b49300::t_5b98dff898b9ff 101,113-114,166
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "49bcb3cbba1378edee427894e62d61e5629cede8",
+  "prompts": {},
+  "sessions": {
+    "s_79a7c562b49300": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e06ad8c2-0767-47dd-913e-35689e5f05ba",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
