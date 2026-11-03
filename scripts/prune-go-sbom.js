@@ -5,8 +5,10 @@
 // through overlay/patches, so go.mod names about four times the modules the
 // binary contains. The build info each Go binary embeds (`go version -m`) is
 // the exact list: this script keeps the components it names, adds any it names
-// that cdxgen missed, records the Go standard library the binary was built
-// with, and rewires the dependency graph around the modules it drops.
+// that cdxgen missed, and rewires the dependency graph around the modules it
+// drops. The Go standard library is not listed as a component: the SBOM names
+// the modules a helper depends on, and the Go release it was built with is part
+// of its build, so the script records that release in the SBOM's formulation.
 //
 // Usage: node prune-go-sbom.js <sbom.cdx.json> <binary>...
 // Files ending in .sha256 or .json are ignored, so a shell glob over the build
@@ -99,27 +101,65 @@ function moduleComponent(module) {
 }
 
 // `go1.26.8-X:jsonv2` names the release and the GOEXPERIMENT it was built
-// with; the standard library's version is the release alone.
-export function goReleaseVersion(goVersion) {
-  const match = goVersion.match(/^go(\d+(?:\.\d+)*(?:(?:rc|beta)\d+)?)/);
-  return match ? `v${match[1]}` : undefined;
+// with. Returns the release (`1.26.8`) and the experiments, or undefined for a
+// development toolchain.
+export function parseGoRelease(goVersion) {
+  const match = goVersion.match(
+    /^go(\d+(?:\.\d+)*(?:(?:rc|beta)\d+)?)(?:-X:([\w,]+))?/,
+  );
+  return match
+    ? { release: match[1], experiments: match[2] ? match[2].split(",") : [] }
+    : undefined;
 }
 
-function stdlibComponent(goVersion) {
-  const version = goReleaseVersion(goVersion);
-  if (!version) {
+// The Go toolchain a binary was built with, as a formulation component shaped
+// like the toolchains cdxgen's --include-formulation records for Ruby and PHP
+// (lib/inventory/envcontext.js): a platform with a pkg:generic purl, the CPE
+// vulnerability data uses for Go, the version banner as its description, and
+// no bom-ref.
+export function goToolchainComponent(goVersion) {
+  const parsed = parseGoRelease(goVersion);
+  if (!parsed) {
     return undefined;
   }
-  const purl = `pkg:golang/stdlib@${version}`;
-  return {
-    type: "library",
-    name: "stdlib",
-    version,
-    description: "The Go standard library the binary was built with.",
-    purl,
-    "bom-ref": purl,
-    scope: "required",
+  const { release, experiments } = parsed;
+  const component = {
+    type: "platform",
+    name: "go",
+    version: release,
+    description: goVersion,
+    purl: `pkg:generic/go@${release}`,
+    cpe: `cpe:2.3:a:golang:go:${release}:*:*:*:*:*:*:*`,
   };
+  if (experiments.length) {
+    component.properties = [
+      { name: "cdx:go:goexperiment", value: experiments.join(",") },
+    ];
+  }
+  return component;
+}
+
+export const GO_FORMULA_REF = "formula:go-build";
+
+// Records the Go toolchains in a formula of their own, replacing the one a
+// previous run of this script wrote, so running it twice changes nothing.
+function recordGoToolchains(bom, buildInfos) {
+  const components = [
+    ...new Set(buildInfos.map((info) => info.goVersion).filter(Boolean)),
+  ]
+    .sort()
+    .map(goToolchainComponent)
+    .filter(Boolean);
+  const others = (bom.formulation || []).filter(
+    (formula) => formula["bom-ref"] !== GO_FORMULA_REF,
+  );
+  if (components.length) {
+    others.push({ "bom-ref": GO_FORMULA_REF, components });
+  }
+  if (others.length) {
+    bom.formulation = others;
+  }
+  return components.length;
 }
 
 // The modules of a binary that go.mod requires at another version: the binary
@@ -170,11 +210,7 @@ export function pruneGoSbom(bom, allBuildInfos) {
   // Each linked module with the keys cdxgen may know it by: its own and, when
   // go.mod replaces it, the replacement's.
   const linked = new Map();
-  const goVersions = new Set();
   for (const info of buildInfos) {
-    if (info.goVersion) {
-      goVersions.add(info.goVersion);
-    }
     for (const module of info.modules) {
       const keys = [moduleKey(module)];
       if (module.replacement) {
@@ -219,15 +255,6 @@ export function pruneGoSbom(bom, allBuildInfos) {
     keptRefs.add(component["bom-ref"]);
     linkedRefs.add(component["bom-ref"]);
     added.push(component["bom-ref"]);
-  }
-  for (const goVersion of [...goVersions].sort()) {
-    const component = stdlibComponent(goVersion);
-    if (component && !keptRefs.has(component["bom-ref"])) {
-      kept.push(component);
-      keptRefs.add(component["bom-ref"]);
-      linkedRefs.add(component["bom-ref"]);
-      added.push(component["bom-ref"]);
-    }
   }
 
   // An edge into a dropped module is replaced by the edges that module led to,
@@ -303,7 +330,8 @@ export function pruneGoSbom(bom, allBuildInfos) {
   bom.dependencies = [...dependencies]
     .map(([ref, dependsOn]) => ({ ref, dependsOn: [...dependsOn].sort() }))
     .sort((a, b) => a.ref.localeCompare(b.ref));
-  return { dropped: dropped.size, added: added.length, skipped };
+  const toolchains = recordGoToolchains(bom, buildInfos);
+  return { dropped: dropped.size, added: added.length, toolchains, skipped };
 }
 
 function isCandidateBinary(file) {
@@ -353,7 +381,7 @@ if (isDirectExecution) {
     console.error(`${sbomFile} was left unpruned: ${err.message}`);
     process.exit(1);
   }
-  const { dropped, added, skipped } = result;
+  const { dropped, added, toolchains, skipped } = result;
   for (const { info, conflicts } of skipped) {
     const sample = conflicts
       .slice(0, 3)
@@ -365,6 +393,6 @@ if (isDirectExecution) {
   }
   fs.writeFileSync(sbomFile, JSON.stringify(bom, null, 2));
   console.log(
-    `${sbomFile}: kept ${bom.components.length} components, dropped ${dropped} modules the binaries do not link, added ${added}`,
+    `${sbomFile}: kept ${bom.components.length} components, dropped ${dropped} modules the binaries do not link, added ${added}, recorded ${toolchains} Go toolchain(s) in the formulation`,
   );
 }
