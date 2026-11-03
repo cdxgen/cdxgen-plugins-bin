@@ -7,6 +7,9 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import {
+  GO_FORMULA_REF,
+  goToolchainComponent,
+  parseGoRelease,
   parseGoVersionM,
   pruneGoSbom,
 } from "./prune-go-sbom.js";
@@ -44,6 +47,21 @@ test("parseGoVersionM reads the release, the modules and their replacements", ()
       ["github.com/example/local", "v0.0.0", undefined],
     ],
   );
+});
+
+test("parseGoRelease and goToolchainComponent read the release and experiments", () => {
+  assert.deepEqual(parseGoRelease("go1.27.1"), {
+    release: "1.27.1",
+    experiments: [],
+  });
+  assert.deepEqual(parseGoRelease("go1.26.8-X:jsonv2,greenteagc"), {
+    release: "1.26.8",
+    experiments: ["jsonv2", "greenteagc"],
+  });
+  assert.deepEqual(parseGoRelease("go1.28rc1").release, "1.28rc1");
+  assert.equal(parseGoRelease("devel +abc"), undefined);
+  assert.equal(goToolchainComponent("devel +abc"), undefined);
+  assert.equal(goToolchainComponent("go1.27.1").properties, undefined);
 });
 
 function golang(path, version) {
@@ -98,7 +116,7 @@ test("pruneGoSbom keeps the linked modules and rewires the graph around the rest
       ],
     },
   ]);
-  assert.deepEqual(result, { dropped: 2, added: 1, skipped: [] });
+  assert.deepEqual(result, { dropped: 2, added: 1, toolchains: 1, skipped: [] });
   assert.deepEqual(
     bom.components.map((component) => component["bom-ref"]),
     [
@@ -110,8 +128,22 @@ test("pruneGoSbom keeps the linked modules and rewires the graph around the rest
       "pkg:golang/github.com/example/missing@v2.0.0",
     ],
   );
-  // The Go release the binary was built with is not a component.
+  // The Go release the binary was built with is not a component; it is in the
+  // formulation, with the experiment it was built with.
   assert.ok(!JSON.stringify(bom).includes("stdlib"));
+  assert.deepEqual(bom.formulation.map((formula) => formula["bom-ref"]), [
+    GO_FORMULA_REF,
+  ]);
+  const [go] = bom.formulation[0].components;
+  assert.equal(go.version, "1.26.8");
+  assert.equal(go.type, "platform");
+  assert.equal(go.purl, "pkg:generic/go@1.26.8");
+  assert.equal(go.description, "go1.26.8-X:jsonv2");
+  assert.equal(go["bom-ref"], undefined);
+  assert.equal(go.cpe, "cpe:2.3:a:golang:go:1.26.8:*:*:*:*:*:*:*");
+  assert.deepEqual(go.properties, [
+    { name: "cdx:go:goexperiment", value: "jsonv2" },
+  ]);
   const missing = bom.components.find(
     (component) => component.name === "github.com/example/missing",
   );
@@ -137,6 +169,9 @@ test("pruneGoSbom keeps the linked modules and rewires the graph around the rest
   assert.equal(edges[unlinked["bom-ref"]], undefined);
   assert.deepEqual(edges[notGo["bom-ref"]], []);
   assert.deepEqual(edges[orphan["bom-ref"]], []);
+  // A second run replaces the formula instead of adding another.
+  pruneGoSbom(bom, [{ goVersion: "go1.26.8-X:jsonv2", modules: [] }]);
+  assert.equal(bom.formulation.length, 1);
 });
 
 test("pruneGoSbom skips a binary built from other module versions than go.mod", () => {
@@ -164,6 +199,11 @@ test("pruneGoSbom skips a binary built from other module versions than go.mod", 
   assert.deepEqual(
     bom.components.map((component) => component.purl),
     ["pkg:golang/golang.org/x/mod@v0.41.0"],
+  );
+  // The stale binary's Go release is not recorded either.
+  assert.deepEqual(
+    bom.formulation[0].components.map((component) => component.version),
+    ["1.27.1"],
   );
   assert.throws(
     () => pruneGoSbom({ components: [current] }, [stale]),
