@@ -1,0 +1,23 @@
+thirdparty/rusi/JSON_ATTRIBUTE_REFERENCE.md
+  s_426da3a0ed2071::t_b63b76bf25149a 59-64
+thirdparty/rusi/crates/rusi-core/src/lib.rs
+  s_426da3a0ed2071::t_0e94aedae1fb0b 129-134,935,1503-1512,15651-15652,15683-15725,15865-15866,16227-16228
+thirdparty/rusi/crates/rusi-driver/src/lib.rs
+  s_426da3a0ed2071::t_8cec7dce7e66a4 125-126,662-668,2871-2872,2918-2932
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "1cfa3d61dcc96be1e0eee3a34e01f74148d4e5a0",
+  "prompts": {},
+  "sessions": {
+    "s_426da3a0ed2071": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2d2ced60-0a55-491e-96fb-d14f9d931046",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
