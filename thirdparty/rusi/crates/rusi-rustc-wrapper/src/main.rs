@@ -7,9 +7,11 @@ extern crate rustc_interface;
 extern crate rustc_middle;
 extern crate rustc_span;
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::OnceLock;
 
 use anyhow::{Context, Result};
@@ -507,6 +509,7 @@ impl EmbeddedCollector {
                 files: &mut self.files,
                 crypto: &mut self.crypto,
                 function_ids: &self.function_ids,
+                last_site: None,
             };
             visitor.visit_body(body);
         }
@@ -874,6 +877,7 @@ impl EmbeddedCollector {
         if segments.len() > 1 && segments.last().is_some_and(|last| last == "self") {
             segments.pop();
         }
+        let site = span_site(tcx, &self.analysis_root, span);
         let path = segments.join("::");
         let alias = binding
             .filter(|binding| *binding != "self" && *binding != last_segment(&path))
@@ -883,7 +887,7 @@ impl EmbeddedCollector {
             alias,
             package_path: self.package.clone(),
             purl: String::new(),
-            position: position_from_span(tcx, &self.analysis_root, span),
+            position: site.position,
         };
         if !self.imports.iter().any(|existing| {
             existing.path == import.path
@@ -893,8 +897,7 @@ impl EmbeddedCollector {
         }) {
             self.imports.push(import.clone());
         }
-        let file_path = file_path_from_span(tcx, &self.analysis_root, span);
-        let file = self.file_entry(&file_path);
+        let file = self.file_entry(&site.file_path);
         if !file.imports.iter().any(|existing| {
             existing.path == import.path
                 && existing.alias == import.alias
@@ -914,7 +917,11 @@ impl EmbeddedCollector {
     ) -> Result<Declaration> {
         let def_id = owner.to_def_id();
         let qualified_name = def_path(tcx, def_id);
-        let file_path = file_path_from_span(tcx, &self.analysis_root, tcx.def_span(def_id));
+        let SpanSite {
+            file_path,
+            position,
+            ..
+        } = span_site(tcx, &self.analysis_root, tcx.def_span(def_id));
         let name = tcx
             .opt_item_name(def_id)
             .map(|symbol| symbol.to_string())
@@ -932,7 +939,7 @@ impl EmbeddedCollector {
             file_path: file_path.clone(),
             signature: declaration_signature(tcx, def_id),
             receiver,
-            position: position_from_span(tcx, &self.analysis_root, tcx.def_span(def_id)),
+            position,
         };
         if !self
             .declarations
@@ -1016,6 +1023,10 @@ struct BodyVisitor<'tcx, 'a> {
     files: &'a mut BTreeMap<String, FileEvidence>,
     crypto: &'a mut CryptoEvidence,
     function_ids: &'a HashMap<LocalDefId, String>,
+    /// The last span resolved by [`Self::site`]. One call can be recorded as
+    /// a usage, a crypto component and a signal, each asking for the same
+    /// span in turn.
+    last_site: Option<(Span, SpanSite)>,
 }
 
 /// A call as both HIR and MIR name it, so that MIR's data flow can take the
@@ -1149,6 +1160,17 @@ impl<'tcx> Visitor<'tcx> for BodyVisitor<'tcx, '_> {
 }
 
 impl<'tcx> BodyVisitor<'tcx, '_> {
+    fn site(&mut self, span: Span) -> SpanSite {
+        if let Some((cached, site)) = &self.last_site
+            && *cached == span
+        {
+            return site.clone();
+        }
+        let site = span_site(self.tcx, self.analysis_root, span);
+        self.last_site = Some((span, site.clone()));
+        site
+    }
+
     /// Records the call at `span`. `callsite` is the whole call's span and
     /// the function it calls, when typeck knows one, which is what MIR's
     /// data flow finds the resolution by (see [`CallsiteKey`]).
@@ -1159,8 +1181,11 @@ impl<'tcx> BodyVisitor<'tcx, '_> {
         usage_kind: &str,
         resolved: ResolvedCall,
     ) {
-        let file_path = file_path_from_span(self.tcx, self.analysis_root, span);
-        let position = position_from_span(self.tcx, self.analysis_root, span);
+        let SpanSite {
+            file_path,
+            position,
+            key,
+        } = self.site(span);
         let mut properties = IndexMap::new();
         properties.insert("callType".to_string(), resolved.call_type.clone());
         properties.insert(
@@ -1202,12 +1227,7 @@ impl<'tcx> BodyVisitor<'tcx, '_> {
         let usage = LibraryUsage {
             id: stable_id(
                 "usage",
-                &[
-                    &file_path,
-                    usage_kind,
-                    &resolved.callee_display,
-                    &span_key(self.tcx, span),
-                ],
+                &[&file_path, usage_kind, &resolved.callee_display, &key],
             ),
             kind: usage_kind.to_string(),
             name: resolved.callee_display.clone(),
@@ -1251,10 +1271,14 @@ impl<'tcx> BodyVisitor<'tcx, '_> {
     }
 
     fn push_signal(&mut self, span: Span, category: &str, description: &str) {
-        let file_path = file_path_from_span(self.tcx, self.analysis_root, span);
+        let SpanSite {
+            file_path,
+            position,
+            key,
+        } = self.site(span);
         let signal = SecuritySignal {
             cfg_gate: None,
-            id: stable_id("signal", &[&file_path, category, &span_key(self.tcx, span)]),
+            id: stable_id("signal", &[&file_path, category, &key]),
             category: category.to_string(),
             severity: "medium".to_string(),
             confidence: "high".to_string(),
@@ -1262,7 +1286,7 @@ impl<'tcx> BodyVisitor<'tcx, '_> {
             package_path: self.package.to_string(),
             purl: String::new(),
             file_path: file_path.clone(),
-            position: position_from_span(self.tcx, self.analysis_root, span),
+            position,
         };
         if !self
             .security_signals
@@ -1282,8 +1306,11 @@ impl<'tcx> BodyVisitor<'tcx, '_> {
     }
 
     fn push_crypto_component(&mut self, span: Span, rule: &CryptoRule) {
-        let file_path = file_path_from_span(self.tcx, self.analysis_root, span);
-        let position = position_from_span(self.tcx, self.analysis_root, span);
+        let SpanSite {
+            file_path,
+            position,
+            key,
+        } = self.site(span);
         let library = CryptoLibrary {
             id: stable_id("crypto-library", &[rule.provider, &file_path]),
             path: rule.provider.to_string(),
@@ -1302,10 +1329,7 @@ impl<'tcx> BodyVisitor<'tcx, '_> {
             self.crypto.libraries.push(library.clone());
         }
         let component = CryptoComponent {
-            id: stable_id(
-                "crypto-component",
-                &[rule.symbol, &file_path, &span_key(self.tcx, span)],
-            ),
+            id: stable_id("crypto-component", &[rule.symbol, &file_path, &key]),
             kind: rule.kind.to_string(),
             algorithm: rule.algorithm.to_string(),
             provider: rule.provider.to_string(),
@@ -1326,10 +1350,7 @@ impl<'tcx> BodyVisitor<'tcx, '_> {
         }
         if let Some((category, severity, summary)) = rule.finding {
             let finding = CryptoFinding {
-                id: stable_id(
-                    "crypto-finding",
-                    &[category, rule.symbol, &span_key(self.tcx, span)],
-                ),
+                id: stable_id("crypto-finding", &[category, rule.symbol, &key]),
                 category: category.to_string(),
                 severity: severity.to_string(),
                 confidence: "high".to_string(),
@@ -1394,19 +1415,20 @@ impl<'tcx> BodyVisitor<'tcx, '_> {
         if !looks_like_secret_name(name) {
             return;
         }
-        let file_path = file_path_from_span(self.tcx, self.analysis_root, span);
+        let SpanSite {
+            file_path,
+            position,
+            key,
+        } = self.site(span);
         let material = CryptoMaterial {
-            id: stable_id(
-                "crypto-material",
-                &[kind, name, &file_path, &span_key(self.tcx, span)],
-            ),
+            id: stable_id("crypto-material", &[kind, name, &file_path, &key]),
             kind: kind.to_string(),
             name: name.to_string(),
             package_path: self.package.to_string(),
             file_path: file_path.clone(),
             function: self.caller_decl.qualified_name.clone(),
             confidence: confidence.to_string(),
-            position: position_from_span(self.tcx, self.analysis_root, span),
+            position,
             properties: IndexMap::new(),
         };
         if !self
@@ -5296,13 +5318,14 @@ fn sink_matches(
     }
     if results.is_empty() {
         let normalized = normalize_symbol(&call.callee_display);
+        let resolved_rust_call = call.native_symbol.is_none() && !call.target_ids.is_empty();
         for pattern in &patterns.sinks {
-            let candidate = normalize_symbol(&pattern.pattern);
+            let candidate = normalize_symbol_cached(&pattern.pattern);
+            let candidate = &*candidate;
             if !candidate.contains("::") && normalized.contains("::") {
                 continue;
             }
-            if call.native_symbol.is_none()
-                && !call.target_ids.is_empty()
+            if resolved_rust_call
                 && matching_flow_models(&pattern.pattern)
                     .into_iter()
                     .any(|model| {
@@ -5314,7 +5337,7 @@ fn sink_matches(
             {
                 continue;
             }
-            if normalized == candidate || normalized.ends_with(&candidate) {
+            if normalized == candidate || normalized.ends_with(candidate) {
                 results.push((pattern.category.clone(), pattern.relevant_arguments.clone()));
             }
         }
@@ -6912,52 +6935,111 @@ fn built_in_flow_models() -> &'static [FlowModel] {
     ]
 }
 
+/// A built-in flow model with its symbol normalized once, up front.
+struct PreparedFlowModel {
+    model: &'static FlowModel,
+    native: bool,
+    pattern: String,
+    pattern_erased: String,
+    qualified: bool,
+}
+
+fn prepared_flow_models() -> &'static [PreparedFlowModel] {
+    static MODELS: OnceLock<Vec<PreparedFlowModel>> = OnceLock::new();
+    MODELS.get_or_init(|| {
+        built_in_flow_models()
+            .iter()
+            .map(|model| {
+                let pattern = normalize_symbol(model.symbol);
+                PreparedFlowModel {
+                    model,
+                    native: matches!(
+                        model.kind,
+                        FlowModelKind::NativeSource | FlowModelKind::NativeSink
+                    ),
+                    pattern_erased: strip_generic_arguments(&pattern),
+                    qualified: pattern.contains("::"),
+                    pattern,
+                }
+            })
+            .collect()
+    })
+}
+
+/// The built-in flow models that `symbol` names. The answer depends only on
+/// the symbol, and the data-flow passes ask about the same callee many times
+/// per body, so each distinct symbol is matched once per wrapper process.
 fn matching_flow_models(symbol: &str) -> Vec<&'static FlowModel> {
-    built_in_flow_models()
+    thread_local! {
+        static MATCHES: RefCell<HashMap<String, Vec<&'static FlowModel>>> =
+            RefCell::new(HashMap::new());
+    }
+    if let Some(models) = MATCHES.with_borrow(|matches| matches.get(symbol).cloned()) {
+        return models;
+    }
+    let models = compute_matching_flow_models(symbol);
+    MATCHES.with_borrow_mut(|matches| matches.insert(symbol.to_string(), models.clone()));
+    models
+}
+
+fn compute_matching_flow_models(symbol: &str) -> Vec<&'static FlowModel> {
+    let normalized = canonical_call_symbol(symbol);
+    let normalized_erased = strip_generic_arguments(&normalized);
+    let qualified = normalized.contains("::");
+    let in_std = normalized.starts_with("std::")
+        || normalized.starts_with("core::")
+        || normalized.starts_with("alloc::");
+    let trait_method = impl_trait_method_parts(symbol).map(|(trait_name, method_name)| {
+        format!("{}::{}", normalize_symbol(&trait_name), method_name)
+    });
+    let last = last_segment(&normalized);
+    let last_erased = last_segment(&normalized_erased);
+    prepared_flow_models()
         .iter()
-        .filter(|model| flow_model_matches(symbol, model))
+        .filter(|prepared| {
+            if prepared.native && (in_std || (!prepared.qualified && qualified)) {
+                return false;
+            }
+            if let Some(trait_method) = &trait_method
+                && (prepared.pattern == *trait_method
+                    || ends_with_path(&prepared.pattern, trait_method))
+            {
+                return true;
+            }
+            if prepared.qualified {
+                normalized == prepared.pattern
+                    || ends_with_path(&normalized, &prepared.pattern)
+                    || normalized_erased == prepared.pattern_erased
+                    || ends_with_path(&normalized_erased, &prepared.pattern_erased)
+            } else {
+                normalized == prepared.pattern
+                    || last == prepared.pattern
+                    || normalized_erased == prepared.pattern_erased
+                    || last_erased == prepared.pattern_erased
+            }
+        })
+        .map(|prepared| prepared.model)
         .collect()
 }
 
-fn flow_model_matches(symbol: &str, model: &FlowModel) -> bool {
-    let normalized = canonical_call_symbol(symbol);
-    let pattern = normalize_symbol(model.symbol);
-    let normalized_erased = strip_generic_arguments(&normalized);
-    let pattern_erased = strip_generic_arguments(&pattern);
-    if matches!(
-        model.kind,
-        FlowModelKind::NativeSource | FlowModelKind::NativeSink
-    ) && (normalized.starts_with("std::")
-        || normalized.starts_with("core::")
-        || normalized.starts_with("alloc::"))
-    {
-        return false;
+/// Whether `path` ends with `::` followed by `suffix`.
+fn ends_with_path(path: &str, suffix: &str) -> bool {
+    path.strip_suffix(suffix)
+        .is_some_and(|head| head.ends_with("::"))
+}
+
+/// `normalize_symbol` for strings that recur across calls, such as the
+/// pattern symbols every unmatched call is compared against.
+fn normalize_symbol_cached(value: &str) -> Rc<str> {
+    thread_local! {
+        static NORMALIZED: RefCell<HashMap<String, Rc<str>>> = RefCell::new(HashMap::new());
     }
-    if matches!(
-        model.kind,
-        FlowModelKind::NativeSource | FlowModelKind::NativeSink
-    ) && !pattern.contains("::")
-        && normalized.contains("::")
-    {
-        return false;
+    if let Some(normalized) = NORMALIZED.with_borrow(|cache| cache.get(value).cloned()) {
+        return normalized;
     }
-    if let Some((trait_name, method_name)) = impl_trait_method_parts(symbol) {
-        let trait_method = format!("{}::{}", normalize_symbol(&trait_name), method_name);
-        if pattern == trait_method || pattern.ends_with(&format!("::{trait_method}")) {
-            return true;
-        }
-    }
-    if pattern.contains("::") {
-        normalized == pattern
-            || normalized.ends_with(&format!("::{pattern}"))
-            || normalized_erased == pattern_erased
-            || normalized_erased.ends_with(&format!("::{pattern_erased}"))
-    } else {
-        normalized == pattern
-            || last_segment(&normalized) == pattern
-            || normalized_erased == pattern_erased
-            || last_segment(&normalized_erased) == pattern_erased
-    }
+    let normalized: Rc<str> = normalize_symbol(value).into();
+    NORMALIZED.with_borrow_mut(|cache| cache.insert(value.to_string(), normalized.clone()));
+    normalized
 }
 
 /// Records the flow models that any of `symbols` names, each once.
@@ -7778,49 +7860,52 @@ fn sort_crypto(crypto: &mut CryptoEvidence) {
     crypto.findings.sort_by(|l, r| l.id.cmp(&r.id));
 }
 
-fn file_path_from_span(tcx: TyCtxt<'_>, root: &Path, span: Span) -> String {
-    match tcx
-        .sess
-        .source_map()
-        .span_to_filename(span.source_callsite())
-    {
-        FileName::Real(real) => real
-            .into_local_path()
-            .map(|path| relative_display_path(root, &path))
-            .unwrap_or_else(|| "<non-local>".to_string()),
-        other => format!("{:?}", other),
-    }
+/// Where a span's macro callsite sits in the source, resolved with one source
+/// map lookup per end of the span.
+#[derive(Clone)]
+struct SpanSite {
+    /// The file as the report names it: relative to the analysis root, or
+    /// `<non-local>` for a real file with no local path.
+    file_path: String,
+    /// The start of the span. Its filename falls back to the source map's
+    /// name where `file_path` says `<non-local>`.
+    position: Position,
+    /// File, line and start and end columns, the part of an evidence id that
+    /// tells apart two findings in one file.
+    key: String,
 }
 
-fn position_from_span(tcx: TyCtxt<'_>, root: &Path, span: Span) -> Position {
+fn span_site(tcx: TyCtxt<'_>, root: &Path, span: Span) -> SpanSite {
     let callsite = span.source_callsite();
-    let location = tcx.sess.source_map().lookup_char_pos(callsite.lo());
-    let filename = match &location.file.name {
-        FileName::Real(real) => real
-            .clone()
-            .into_local_path()
-            .map(|p| relative_display_path(root, &p))
-            .unwrap_or_else(|| format!("{:?}", location.file.name)),
-        _ => format!("{:?}", location.file.name),
+    let source_map = tcx.sess.source_map();
+    let lo = source_map.lookup_char_pos(callsite.lo());
+    let hi = source_map.lookup_char_pos(callsite.hi());
+    let debug_name = format!("{:?}", lo.file.name);
+    let (file_path, filename) = match &lo.file.name {
+        FileName::Real(real) => match real.clone().into_local_path() {
+            Some(path) => {
+                let relative = relative_display_path(root, &path);
+                (relative.clone(), relative)
+            }
+            None => ("<non-local>".to_string(), debug_name.clone()),
+        },
+        _ => (debug_name.clone(), debug_name.clone()),
     };
-    Position {
-        filename,
-        line: location.line,
-        column: location.col_display + 1,
-    }
-}
-
-fn span_key(tcx: TyCtxt<'_>, span: Span) -> String {
-    let callsite = span.source_callsite();
-    let lo = tcx.sess.source_map().lookup_char_pos(callsite.lo());
-    let hi = tcx.sess.source_map().lookup_char_pos(callsite.hi());
-    format!(
-        "{:?}:{}:{}:{}",
-        lo.file.name,
+    let key = format!(
+        "{debug_name}:{}:{}:{}",
         lo.line,
         lo.col_display + 1,
         hi.col_display + 1
-    )
+    );
+    SpanSite {
+        file_path,
+        position: Position {
+            filename,
+            line: lo.line,
+            column: lo.col_display + 1,
+        },
+        key,
+    }
 }
 
 fn span_key_simple(span: Span) -> String {
