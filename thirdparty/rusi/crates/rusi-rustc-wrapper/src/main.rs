@@ -96,21 +96,29 @@ fn impl_self_ty_name(tcx: TyCtxt<'_>, impl_def_id: DefId) -> String {
     )
 }
 
+/// An interned list of generic args. rust-lang/rust#165079 made
+/// `GenericArgs` a `Copy` handle to the interned list and removed the
+/// `GenericArgsRef` alias, which older compilers spell the same handle with.
+#[cfg(rusi_rustc_generic_args_handle)]
+type GenericArgsRef<'tcx> = ty::GenericArgs<'tcx>;
+#[cfg(not(rusi_rustc_generic_args_handle))]
+type GenericArgsRef<'tcx> = ty::GenericArgsRef<'tcx>;
+
 /// Generic args of a `TyKind::FnDef`. rustc 1.98 stores them bare; newer
 /// compilers wrap them in a `Binder`. Args with escaping bound vars cannot be
 /// resolved to an instance, so those yield `None`.
 trait FnDefArgs<'tcx> {
-    fn fn_def_args(self) -> Option<ty::GenericArgsRef<'tcx>>;
+    fn fn_def_args(self) -> Option<GenericArgsRef<'tcx>>;
 }
 
-impl<'tcx> FnDefArgs<'tcx> for ty::GenericArgsRef<'tcx> {
-    fn fn_def_args(self) -> Option<ty::GenericArgsRef<'tcx>> {
+impl<'tcx> FnDefArgs<'tcx> for GenericArgsRef<'tcx> {
+    fn fn_def_args(self) -> Option<GenericArgsRef<'tcx>> {
         Some(self)
     }
 }
 
-impl<'tcx> FnDefArgs<'tcx> for ty::Binder<'tcx, ty::GenericArgsRef<'tcx>> {
-    fn fn_def_args(self) -> Option<ty::GenericArgsRef<'tcx>> {
+impl<'tcx> FnDefArgs<'tcx> for ty::Binder<'tcx, GenericArgsRef<'tcx>> {
+    fn fn_def_args(self) -> Option<GenericArgsRef<'tcx>> {
         self.no_bound_vars()
     }
 }
