@@ -47,6 +47,16 @@ const PROBES: &[Probe] = &[
                      }
                  }",
     },
+    // rust-lang/rust#165079 made `ty::GenericArgs` a `Copy` handle to the
+    // interned list and removed `ty::GenericArgsRef` (first nightly
+    // 2026-11-01, 1.101). Before it, `GenericArgs` is the unsized list
+    // itself and cannot be taken by value.
+    Probe {
+        cfg: "rusi_rustc_generic_args_handle",
+        source: "pub fn probe(args: rustc_middle::ty::GenericArgs<'_>) -> usize {
+                     args.len()
+                 }",
+    },
     // rust-lang/rust#159103 added `ProjectionElem::PhantomDeref` (first
     // nightly 2026-08-29, 1.100).
     Probe {
