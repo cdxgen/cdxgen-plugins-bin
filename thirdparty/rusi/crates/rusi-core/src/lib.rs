@@ -126,6 +126,12 @@ pub struct CompilerBackendPayload {
     pub crypto: Option<CryptoEvidence>,
     pub call_graph: Option<CallGraph>,
     pub data_flow: Option<DataFlowEvidence>,
+    /// `rustc --version` of the toolchain the compiler backend resolved,
+    /// which is not necessarily the `rustc` first on `PATH`. The report's
+    /// runtime names this one when it is known.
+    pub rustc_version: Option<String>,
+    /// `cargo --version` of that same toolchain.
+    pub cargo_version: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -926,7 +932,7 @@ fn analyze_on_this_thread(
     );
     let metadata = load_metadata(&analysis_root)?;
     debug_log(options.debug, format_args!("pass=runtime-info"));
-    let runtime_versions = collect_runtime_versions();
+    let runtime_versions = collect_runtime_versions(compiler_payload.as_ref());
     let mut diagnostics = Vec::new();
 
     debug_log(options.debug, format_args!("pass=workspace-discovery"));
@@ -1494,9 +1500,16 @@ fn build_framework_purls(metadata: &Metadata) -> BTreeMap<String, String> {
     purls
 }
 
-fn collect_runtime_versions() -> RuntimeVersions {
-    let rustc_version = capture_command_output("rustc", &["--version"]);
-    let cargo_version = capture_command_output("cargo", &["--version"]);
+/// Versions for the report's runtime: those of the toolchain the compiler
+/// backend resolved where it says, otherwise of the `rustc` and `cargo` on
+/// `PATH`.
+fn collect_runtime_versions(compiler_payload: Option<&CompilerBackendPayload>) -> RuntimeVersions {
+    let rustc_version = compiler_payload
+        .and_then(|payload| payload.rustc_version.clone())
+        .unwrap_or_else(|| capture_command_output("rustc", &["--version"]));
+    let cargo_version = compiler_payload
+        .and_then(|payload| payload.cargo_version.clone())
+        .unwrap_or_else(|| capture_command_output("cargo", &["--version"]));
     let host = std::env::consts::ARCH.to_string() + "-" + std::env::consts::OS;
     RuntimeVersions {
         rustc_version,
@@ -15635,6 +15648,8 @@ impl ComponentSection for Holder {
             crypto: None,
             call_graph: Some(CallGraph::default()),
             data_flow: None,
+            rustc_version: None,
+            cargo_version: None,
         };
 
         let report = analyze_with_optional_compiler(
@@ -15663,6 +15678,49 @@ impl ComponentSection for Holder {
         );
         assert!(report.call_graph.is_some());
         assert!(report.data_flow.is_some());
+    }
+
+    #[test]
+    fn report_runtime_names_the_compiler_backend_toolchain() {
+        let options = |backend: &str| AnalyzeOptionsInput {
+            include_dependencies: false,
+            max_call_candidates: crate::DEFAULT_MAX_CALL_CANDIDATES,
+            dir: fixture_path("basic-app"),
+            backend: backend.to_string(),
+            analysis_scope: AnalysisScope::Default,
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "security".to_string(),
+            custom_data_flow_patterns: None,
+            include_tests: false,
+            debug: false,
+        };
+        let compiler_payload = CompilerBackendPayload {
+            rustc_version: Some("rustc 1.101.0-nightly (2d20b42b8 2026-11-04)".to_string()),
+            cargo_version: Some("cargo 1.101.0-nightly (0f8bc8e7a 2026-10-30)".to_string()),
+            ..CompilerBackendPayload::default()
+        };
+
+        let report =
+            analyze_with_optional_compiler(options(BACKEND_COMPILER), Some(compiler_payload))
+                .expect("analysis succeeds");
+        assert_eq!(
+            report.runtime.rustc_version,
+            "rustc 1.101.0-nightly (2d20b42b8 2026-11-04)"
+        );
+        assert_eq!(
+            report.runtime.cargo_version,
+            "cargo 1.101.0-nightly (0f8bc8e7a 2026-10-30)"
+        );
+
+        // A payload that could not read the toolchain's versions leaves the
+        // ones found on PATH in place.
+        let report = analyze_with_optional_compiler(
+            options(BACKEND_COMPILER),
+            Some(CompilerBackendPayload::default()),
+        )
+        .expect("analysis succeeds");
+        assert!(report.runtime.rustc_version.starts_with("rustc "));
+        assert!(report.runtime.cargo_version.starts_with("cargo "));
     }
 
     #[test]
@@ -15804,6 +15862,8 @@ impl ComponentSection for Holder {
             }),
             call_graph: None,
             data_flow: None,
+            rustc_version: None,
+            cargo_version: None,
         };
 
         let report = analyze_with_optional_compiler(
@@ -16164,6 +16224,8 @@ impl ComponentSection for Holder {
             crypto: None,
             call_graph: Some(CallGraph::default()),
             data_flow: None,
+            rustc_version: None,
+            cargo_version: None,
         };
 
         let stable_report = analyze(AnalyzeOptionsInput {

@@ -122,6 +122,8 @@ impl DriverProtocolEnvelope {
 
     pub fn into_compiler_payload(self) -> CompilerBackendPayload {
         CompilerBackendPayload {
+            rustc_version: known_version(&self.capabilities.rustc_version),
+            cargo_version: known_version(&self.capabilities.cargo_version),
             diagnostics: self.payload.diagnostics,
             files: self.payload.files,
             imports: self.payload.imports,
@@ -655,6 +657,13 @@ fn is_dated_nightly(toolchain: &str) -> bool {
         4 | 7 => byte == b'-',
         _ => byte.is_ascii_digit(),
     })
+}
+
+/// The first line of captured version output (`rustc -Vv` puts the release
+/// there), or `None` when the command failed.
+fn known_version(captured: &str) -> Option<String> {
+    let first = captured.lines().next()?.trim();
+    (!first.is_empty() && first != "unknown").then(|| first.to_string())
 }
 
 fn capture_toolchain_rustc_version(toolchain: &str, rustup_available: bool) -> String {
@@ -2859,7 +2868,8 @@ mod tests {
 
     use super::{
         BACKEND_KIND_EMBEDDED, BACKEND_KIND_STUB, DRIVER_PROTOCOL_VERSION, DriverOptions,
-        DriverProtocolEnvelope, cargo_check_target_args, detect_capabilities, run_driver,
+        DriverProtocolEnvelope, cargo_check_target_args, detect_capabilities, known_version,
+        run_driver,
     };
     // Used only by the symlink tests, which need directory symlinks.
     #[cfg(unix)]
@@ -2903,6 +2913,21 @@ mod tests {
             .get_or_init(|| Mutex::new(()))
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    #[test]
+    fn known_version_keeps_the_release_line_of_captured_output() {
+        let verbose = "rustc 1.100.0-beta.10 (01ddda61f 2026-11-04)\nbinary: rustc\nhost: aarch64-pc-windows-msvc\n";
+        assert_eq!(
+            known_version(verbose).as_deref(),
+            Some("rustc 1.100.0-beta.10 (01ddda61f 2026-11-04)")
+        );
+        assert_eq!(
+            known_version("cargo 1.99.1 (5f94df478 2026-08-27)").as_deref(),
+            Some("cargo 1.99.1 (5f94df478 2026-08-27)")
+        );
+        assert_eq!(known_version("unknown"), None);
+        assert_eq!(known_version(""), None);
     }
 
     #[test]

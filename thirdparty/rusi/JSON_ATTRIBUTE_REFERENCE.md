@@ -56,12 +56,12 @@ This document describes the report emitted by `rusi`. Field names map directly t
 
 ### `RuntimeInfo`
 
-| Field               | Type     | Meaning                                                    |
-| ------------------- | -------- | ---------------------------------------------------------- |
-| `rustc_version`     | `string` | Captured `rustc -Vv` or toolchain-specific version output. |
-| `cargo_version`     | `string` | Captured Cargo version.                                    |
-| `host`              | `string` | Host triple or host approximation.                         |
-| `working_directory` | `string` | Canonical analysis root directory.                         |
+| Field               | Type     | Meaning                                                                                                                                                       |
+| ------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `rustc_version`     | `string` | `rustc --version` of the toolchain the compiler backend resolved (`--toolchain`, or the one `auto` picked). The stable backend reports the `rustc` on `PATH`. |
+| `cargo_version`     | `string` | `cargo --version` of that same toolchain, or of the `cargo` on `PATH` for the stable backend.                                                                 |
+| `host`              | `string` | Host triple or host approximation.                                                                                                                            |
+| `working_directory` | `string` | Canonical analysis root directory.                                                                                                                            |
 
 ### `AnalysisOptions`
 
