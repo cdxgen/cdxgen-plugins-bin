@@ -1,0 +1,19 @@
+thirdparty/rusi/Cargo.lock
+  s_426da3a0ed2071::t_63e0884106a135 249,251
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "07cc724283ce379b8dfcd0b8d6f9eac00432b280",
+  "prompts": {},
+  "sessions": {
+    "s_426da3a0ed2071": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2d2ced60-0a55-491e-96fb-d14f9d931046",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
