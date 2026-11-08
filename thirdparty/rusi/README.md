@@ -452,6 +452,33 @@ Modeled request/response ecosystems include:
 - `nickel`
 - common outbound client stacks such as `reqwest`, `surf`, `ureq`, and `isahc`
 
+### Forwarded headers
+
+Most reverse proxies pass the client-supplied `Forwarded` and `X-Forwarded-*`
+headers through unchanged, and the frameworks above read them when they
+decide the client IP, host and scheme. Two categories make the visible parts
+of that explicit:
+
+- `proxy-derived` sources, with the taint kind (`client-ip`, `host`, `scheme`
+  or `forwarded-header`) on the source node's `properties.taint-kind`: the
+  axum `Host` extractor, the header-derived `axum_client_ip` extractors, the
+  actix `ConnectionInfo` accessors reached through `connection_info()`, and
+  `headers().get("x-forwarded-for")`-style reads where a literal names one of
+  the forwarded headers (`properties.header`). The actix accessors and the
+  header read key on the receiving chain, so the same method name on an
+  unrelated receiver stays untagged. The socket view (`peer_addr()`,
+  `axum::extract::ConnectInfo`) is deliberately not a source: no middleware
+  rewrites it from a header.
+- the `trusted-proxy-config` signal, with `framework` and `headers`
+  properties, for axum-client-ip's `ClientIpSource` layer configuration. The
+  `ConnectInfo` variant is the socket address rather than a header and emits
+  nothing. No tower-http or actix-web middleware that rewrites the peer from
+  a forwarded header exists to model.
+
+Neither category claims a deployment is vulnerable; the values are spoofable
+only behind a proxy that passes the headers through, which a source scan
+cannot see.
+
 ## Strengths
 
 - Works on stable Rust by default.

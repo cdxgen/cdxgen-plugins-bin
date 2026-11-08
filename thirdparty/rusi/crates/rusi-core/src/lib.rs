@@ -436,7 +436,13 @@ enum SimpleExpr {
         position: Position,
     },
     Compose(Vec<SimpleExpr>),
-    Literal,
+    /// A literal. `text` carries the token text for string literals and is
+    /// empty otherwise; the forwarded-header rules read it to tell
+    /// `headers().get("X-Forwarded-For")` from a `headers().get(name)` whose
+    /// name the analysis cannot see.
+    Literal {
+        text: String,
+    },
     Field {
         base: Box<SimpleExpr>,
         // Field name is consulted for access-path-aware reads/writes (P3.5).
@@ -1793,7 +1799,7 @@ fn rewrite_expr_paths(
         }
         SimpleExpr::Field { base, .. } => rewrite_expr_paths(base, resolution, module_path),
         SimpleExpr::Reference { expr, .. } => rewrite_expr_paths(expr, resolution, module_path),
-        SimpleExpr::Var(_) | SimpleExpr::Literal | SimpleExpr::Unknown => {}
+        SimpleExpr::Var(_) | SimpleExpr::Literal { .. } | SimpleExpr::Unknown => {}
     }
 }
 
@@ -2333,6 +2339,63 @@ impl FunctionFrame {
 }
 
 impl SourceCollector {
+        /// Emits the trusted-proxy-config signal when an expression's text uses
+    /// axum-client-ip's `ClientIpSource`: the enum the crate's README passes
+    /// into `Router::layer` to choose which header the `ClientIp` extractor
+    /// reads. The variant names the header family, and `ConnectInfo` is the
+    /// socket address rather than a header, so it turns the signal off rather
+    /// than naming one. The signal records that the application resolves the
+    /// client IP from a header the client could have sent; whether the proxy
+    /// in front actually passes such headers through is a deployment fact a
+    /// source scan cannot see.
+    fn trusted_proxy_signal_for_receiver(&mut self, receiver_text: &str, span: Span) {
+        let normalized = receiver_text.replace(' ', "");
+        let Some(position) = normalized.find("ClientIpSource") else {
+            return;
+        };
+        let variant = normalized[position + "ClientIpSource".len()..]
+            .split("::")
+            .find(|segment| !segment.is_empty())
+            .unwrap_or("")
+            .trim_matches(|c: char| !c.is_ascii_alphanumeric())
+            .to_string();
+        if variant.is_empty() || variant == "ConnectInfo" {
+            return;
+        }
+        let headers = match variant.as_str() {
+            "RightmostForwarded" | "Forwarded" => "forwarded",
+            "RightmostXForwardedFor" | "XForwardedFor" | "XRealIp" => "x-forwarded",
+            _ => "",
+        };
+        let mut properties = IndexMap::new();
+        properties.insert("framework".to_string(), "axum-client-ip".to_string());
+        if !headers.is_empty() {
+            properties.insert("headers".to_string(), headers.to_string());
+        }
+        self.security_signals.push(SecuritySignal {
+            id: stable_id(
+                "signal",
+                &[
+                    &self.file_ctx.relative_file_path,
+                    "trusted-proxy-config",
+                    &span_key(span),
+                ],
+            ),
+            category: "trusted-proxy-config".to_string(),
+            severity: "low".to_string(),
+            confidence: "high".to_string(),
+            description: format!(
+                "client IP resolved from a forwarded header via ClientIpSource::{variant}"
+            ),
+            package_path: self.file_ctx.package_path.clone(),
+            purl: String::new(),
+            file_path: self.file_ctx.relative_file_path.clone(),
+            position: position_from_span(&self.file_ctx.relative_file_path, span),
+            cfg_gate: self.current_cfg_gate(),
+            properties,
+        });
+    }
+
     /// Starts a loop region in the current function's frame.
     fn open_loop(&mut self) {
         if let Some(frame) = self.current_function.as_mut() {
@@ -2843,6 +2906,7 @@ impl<'ast> Visit<'ast> for SourceCollector {
                 file_path: declaration.file_path.clone(),
                 position: declaration.position.clone(),
                 cfg_gate: self.current_cfg_gate(),
+                properties: IndexMap::new(),
             });
         }
 
@@ -3107,7 +3171,7 @@ impl<'ast> Visit<'ast> for SourceCollector {
         }
     }
 
-    fn visit_expr_call(&mut self, node: &'ast ExprCall) {
+fn visit_expr_call(&mut self, node: &'ast ExprCall) {
         let callee_name = callee_text_from_expr(&node.func);
         if let Some(rule) = classify_stable_crypto_call(&callee_name, None) {
             self.push_crypto_component(&rule, node.span(), "syntax-call");
@@ -3142,6 +3206,7 @@ impl<'ast> Visit<'ast> for SourceCollector {
                     file_path: self.file_ctx.relative_file_path.clone(),
                     position: position_from_span(&self.file_ctx.relative_file_path, node.span()),
                     cfg_gate: self.current_cfg_gate(),
+                    properties: IndexMap::new(),
                 });
             }
         }
@@ -3200,6 +3265,7 @@ impl<'ast> Visit<'ast> for SourceCollector {
         if let Some(rule) = classify_stable_crypto_call(&callee_name, Some(&receiver_text)) {
             self.push_crypto_component(&rule, node.span(), "syntax-call");
         }
+        self.trusted_proxy_signal_for_receiver(&receiver_text, node.span());
         let usage_id = stable_id(
             "usage",
             &[
@@ -3384,6 +3450,7 @@ impl<'ast> Visit<'ast> for SourceCollector {
             file_path: self.file_ctx.relative_file_path.clone(),
             position: position_from_span(&self.file_ctx.relative_file_path, node.span()),
             cfg_gate: self.current_cfg_gate(),
+            properties: IndexMap::new(),
         });
         syn::visit::visit_expr_unsafe(self, node);
     }
@@ -3694,7 +3761,7 @@ fn rename_binding_in_operation(operation: &mut Operation, from: &str, to: &str) 
 fn rename_binding_in_expr(expr: &mut SimpleExpr, from: &str, to: &str) {
     match expr {
         SimpleExpr::Var(name) if name == from => *name = to.to_string(),
-        SimpleExpr::Var(_) | SimpleExpr::Literal | SimpleExpr::Unknown => {}
+        SimpleExpr::Var(_) | SimpleExpr::Literal { .. } | SimpleExpr::Unknown => {}
         SimpleExpr::Call { args, .. } => {
             for arg in args {
                 rename_binding_in_expr(arg, from, to);
@@ -3783,7 +3850,7 @@ fn collect_expr_vars(expr: &SimpleExpr, out: &mut BTreeSet<String>) {
         }
         SimpleExpr::Field { base, .. } => collect_expr_vars(base, out),
         SimpleExpr::Reference { expr, .. } => collect_expr_vars(expr, out),
-        SimpleExpr::Literal | SimpleExpr::Unknown => {}
+        SimpleExpr::Literal { .. } | SimpleExpr::Unknown => {}
     }
 }
 
@@ -3846,7 +3913,7 @@ fn rewrite_bound_closure_expr(
         }
         SimpleExpr::Field { base, .. } => rewrite_bound_closure_expr(base, binding_in_effect),
         SimpleExpr::Reference { expr, .. } => rewrite_bound_closure_expr(expr, binding_in_effect),
-        SimpleExpr::Var(_) | SimpleExpr::Literal | SimpleExpr::Unknown => {}
+        SimpleExpr::Var(_) | SimpleExpr::Literal { .. } | SimpleExpr::Unknown => {}
     }
 }
 
@@ -4107,7 +4174,7 @@ fn closure_value_expr(closure: &ExprClosure) -> SimpleExpr {
 fn blank_binding_in_expr(expr: &mut SimpleExpr, name: &str) {
     match expr {
         SimpleExpr::Var(var) if var == name => *expr = SimpleExpr::Unknown,
-        SimpleExpr::Var(_) | SimpleExpr::Literal | SimpleExpr::Unknown => {}
+        SimpleExpr::Var(_) | SimpleExpr::Literal { .. } | SimpleExpr::Unknown => {}
         SimpleExpr::Call { args, .. } => {
             for arg in args {
                 blank_binding_in_expr(arg, name);
@@ -4150,7 +4217,6 @@ fn http_source_type_patterns() -> &'static [&'static str] {
         "axum::extract::Json<",
         "axum::extract::Form<",
         "axum::extract::RawQuery",
-        "axum::extract::Host",
         "actix_web::web::Path<",
         "actix_web::web::Query<",
         "actix_web::web::Json<",
@@ -4185,6 +4251,27 @@ fn http_source_type_patterns() -> &'static [&'static str] {
         "hyper::Request<",
         "warp::filters::path::Tail",
         "poem_openapi::payload::Json<",
+    ]
+}
+
+/// Handler parameter types whose value the client can choose through the
+/// `Forwarded` and `X-Forwarded-*` headers behind a reverse proxy that passes
+/// them through unchanged. They are `proxy-derived` sources rather than the
+/// generic `http-request`: the socket view (`axum::extract::ConnectInfo<`,
+/// `HttpRequest::peer_addr`) is deliberately absent, because no middleware
+/// rewrites it from a header.
+///
+/// `axum::extract::Host` was previously in [`http_source_type_patterns`]; a
+/// handler taking it is re-categorised rather than newly discovered.
+fn proxy_derived_source_type_patterns() -> &'static [&'static str] {
+    &[
+        "axum::extract::Host",
+        "axum_client_ip::InsecureClientIp",
+        "axum_client_ip::SecureClientIp",
+        "axum_client_ip::ClientIp",
+        "axum_client_ip::RightmostXForwardedFor",
+        "axum_client_ip::RightmostForwarded",
+        "axum_client_ip::XRealIp",
     ]
 }
 
@@ -4241,7 +4328,12 @@ fn infer_param_source_categories(param_types: &[String]) -> BTreeMap<usize, Stri
     let mut sources = BTreeMap::new();
     for (index, ty) in param_types.iter().enumerate() {
         let normalized = ty.replace(' ', "");
-        if http_source_type_patterns()
+        if proxy_derived_source_type_patterns()
+            .iter()
+            .any(|pattern| normalized.contains(pattern))
+        {
+            sources.insert(index, "proxy-derived".to_string());
+        } else if http_source_type_patterns()
             .iter()
             .any(|pattern| normalized.contains(pattern))
         {
@@ -4987,7 +5079,12 @@ fn simple_expr(expr: &Expr) -> SimpleExpr {
         Expr::Let(syn::ExprLet { expr, .. }) => simple_expr(expr),
         Expr::Await(syn::ExprAwait { base, .. }) => simple_expr(base),
         Expr::Macro(expr_macro) => parse_macro_like_call(expr_macro).unwrap_or(SimpleExpr::Unknown),
-        Expr::Lit(_) => SimpleExpr::Literal,
+        Expr::Lit(lit) => SimpleExpr::Literal {
+            text: match &lit.lit {
+                Lit::Str(lit_str) => lit_str.value(),
+                _ => String::new(),
+            },
+        },
         Expr::If(syn::ExprIf {
             cond,
             then_branch,
@@ -6266,7 +6363,7 @@ fn infer_expr_type(
             // `headers.get(&key)` fired the HTTP-client `get` sink.
             external_method_return(&receiver_type, method_name)
         }
-        SimpleExpr::Compose(_) | SimpleExpr::Literal | SimpleExpr::Unknown => None,
+        SimpleExpr::Compose(_) | SimpleExpr::Literal { .. } | SimpleExpr::Unknown => None,
     }
 }
 
@@ -9811,7 +9908,7 @@ fn first_call_position(expr: &SimpleExpr) -> Option<Position> {
         SimpleExpr::Field { base, .. } | SimpleExpr::Reference { expr: base, .. } => {
             first_call_position(base)
         }
-        SimpleExpr::Var(_) | SimpleExpr::Literal | SimpleExpr::Unknown => None,
+        SimpleExpr::Var(_) | SimpleExpr::Literal { .. } | SimpleExpr::Unknown => None,
     }
 }
 
@@ -9916,7 +10013,7 @@ fn first_named_use(operations: &[Operation], name: &str) -> Option<Position> {
             SimpleExpr::Field { base, .. } | SimpleExpr::Reference { expr: base, .. } => {
                 in_expr(base, name)
             }
-            SimpleExpr::Var(_) | SimpleExpr::Literal | SimpleExpr::Unknown => None,
+            SimpleExpr::Var(_) | SimpleExpr::Literal { .. } | SimpleExpr::Unknown => None,
         }
     }
     operations.iter().find_map(|operation| match operation {
@@ -10033,7 +10130,7 @@ fn summary_dependencies(
             SimpleExpr::Field { base, .. } | SimpleExpr::Reference { expr: base, .. } => {
                 visit(base, package_path, local_index, out)
             }
-            SimpleExpr::Var(_) | SimpleExpr::Literal | SimpleExpr::Unknown => {}
+            SimpleExpr::Var(_) | SimpleExpr::Literal { .. } | SimpleExpr::Unknown => {}
         }
     }
     let mut dependencies = BTreeSet::new();
@@ -10735,6 +10832,9 @@ fn eval_abstract_expr(
                 .chain(args.iter())
                 .cloned()
                 .collect::<Vec<_>>();
+            if forwarded_method_source(&callee, receiver, args).is_some() {
+                return BTreeSet::from([AbstractOrigin::Source("proxy-derived".to_string())]);
+            }
             if let Some(source_match) = find_source_pattern(&callee, &patterns.sources) {
                 return BTreeSet::from([AbstractOrigin::Source(source_match.category.to_string())]);
             }
@@ -10784,7 +10884,7 @@ fn eval_abstract_expr(
             // the read semantics.
             eval_abstract_expr(expr, env, summaries, package_path, local_index, patterns)
         }
-        SimpleExpr::Literal | SimpleExpr::Unknown => BTreeSet::new(),
+        SimpleExpr::Literal { .. } | SimpleExpr::Unknown => BTreeSet::new(),
     }
 }
 
@@ -11605,6 +11705,22 @@ impl<'a> DataFlowBuilder<'a> {
                         return taint.clone();
                     }
                 }
+                if let Some((kind, header)) = forwarded_method_source(method, receiver, args) {
+                    let mut properties = IndexMap::new();
+                    properties.insert("taint-kind".to_string(), kind.to_string());
+                    if let Some(header) = header {
+                        properties.insert("header".to_string(), header.to_string());
+                    }
+                    let path = self.new_source_path_with_properties(
+                        function,
+                        method,
+                        "proxy-derived",
+                        position.clone(),
+                        None,
+                        properties,
+                    );
+                    return ConcreteTaint { paths: vec![path] };
+                }
                 if let Some(source_match) = find_source_pattern(method, &self.patterns.sources) {
                     let path = self.new_source_path(
                         function,
@@ -11698,7 +11814,7 @@ impl<'a> DataFlowBuilder<'a> {
                 }
             }
             SimpleExpr::Reference { expr, .. } => self.eval_concrete_expr(function, expr, env),
-            SimpleExpr::Literal | SimpleExpr::Unknown => ConcreteTaint { paths: vec![] },
+            SimpleExpr::Literal { .. } | SimpleExpr::Unknown => ConcreteTaint { paths: vec![] },
         }
     }
 
@@ -11709,6 +11825,28 @@ impl<'a> DataFlowBuilder<'a> {
         category: &str,
         position: Position,
         parameter_index: Option<usize>,
+    ) -> TaintPath {
+        self.new_source_path_with_properties(
+            function,
+            name,
+            category,
+            position,
+            parameter_index,
+            IndexMap::new(),
+        )
+    }
+
+    /// As [`new_source_path`], with properties carried onto the source node.
+    /// The forwarded-header rules record the taint kind there, and the
+    /// lower-cased header name for a direct literal read.
+    fn new_source_path_with_properties(
+        &mut self,
+        function: &FunctionRecord,
+        name: &str,
+        category: &str,
+        position: Position,
+        parameter_index: Option<usize>,
+        properties: IndexMap<String, String>,
     ) -> TaintPath {
         let mut pos = position.clone();
         if pos.filename.is_empty() {
@@ -11737,7 +11875,7 @@ impl<'a> DataFlowBuilder<'a> {
             category: category.to_string(),
             parameter_index,
             type_name: None,
-            properties: IndexMap::new(),
+            properties,
         };
         self.record_node(&node);
         TaintPath {
@@ -11981,6 +12119,92 @@ impl<'a> DataFlowBuilder<'a> {
     }
 }
 
+/// The forwarded-header family a literal-constrained read recognises, matching
+/// chen's ForwardedHeaders.FORWARDED_HEADERS: the RFC 7239 header, its
+/// de-facto X-Forwarded-* family, and the two single-value client-IP spellings
+/// proxies emit.
+const FORWARDED_HEADER_LITERALS: &[&str] = &[
+    "forwarded",
+    "x-forwarded-for",
+    "x-forwarded-host",
+    "x-forwarded-proto",
+    "x-forwarded-port",
+    "x-real-ip",
+    "client-ip",
+];
+
+/// The canonical, lower-cased form of a header literal when it names one of
+/// the forwarded headers, compared case-insensitively.
+fn canonical_forwarded_header(text: &str) -> Option<&'static str> {
+    let trimmed = text.trim();
+    FORWARDED_HEADER_LITERALS
+        .iter()
+        .find(|header| header.eq_ignore_ascii_case(trimmed))
+        .copied()
+}
+
+/// Reports whether the receiver of a method call is itself a call of `method`
+/// (`req.connection_info().host()`) or a field of that name
+/// (`parts.headers.get(..)`): the receiving chain is what pins a
+/// not-very-distinctive method name to the framework object it is read on.
+fn receiver_from(receiver: &SimpleExpr, method: &str, field: &str) -> bool {
+    match receiver {
+        SimpleExpr::MethodCall {
+            method: name, ..
+        } if name == method => true,
+        SimpleExpr::Field {
+            field: name, ..
+        } if name == field => true,
+        _ => false,
+    }
+}
+
+/// A forwarded-header value read through a method call. The bare method name
+/// is not distinctive enough for a pattern: `host` and `scheme` exist on many
+/// types and `get` exists on every map. Each rule therefore keys on the
+/// receiving chain as well, which is also what keeps the same method name on
+/// an unrelated receiver quiet:
+///
+/// - `connection_info().realip_remote_addr()`, `.host()` and `.scheme()` read
+///   what actix resolves from Forwarded and X-Forwarded-* (actix-web
+///   src/info.rs: realip_remote_addr consults Forwarded then X-Forwarded-For,
+///   host consults Forwarded then X-Forwarded-Host, scheme consults Forwarded
+///   then X-Forwarded-Proto).
+/// - `headers().get("x-forwarded-for")` and `get_all(..)` read the header
+///   itself, but only when a string literal names one of the forwarded
+///   headers: a `headers().get(name)` whose name the analysis cannot see is
+///   not a forwarded-header read.
+///
+/// Returns the taint kind, and the canonical header name for a direct read.
+/// `HttpRequest::peer_addr()` and `axum::extract::ConnectInfo` are the socket
+/// view, which no middleware rewrites, and are deliberately not listed.
+fn forwarded_method_source(
+    method: &str,
+    receiver: &SimpleExpr,
+    args: &[SimpleExpr],
+) -> Option<(&'static str, Option<&'static str>)> {
+    match method {
+        "realip_remote_addr" | "host" | "scheme"
+            if receiver_from(receiver, "connection_info", "connection_info") =>
+        {
+            let kind = match method {
+                "realip_remote_addr" => "client-ip",
+                "host" => "host",
+                _ => "scheme",
+            };
+            Some((kind, None))
+        }
+        "get" | "get_all" if receiver_from(receiver, "headers", "headers") => {
+            let header = match args.first() {
+                Some(SimpleExpr::Literal { text }) => canonical_forwarded_header(text)?,
+                _ => return None,
+            };
+            Some(("forwarded-header", Some(header)))
+        }
+        _ => None,
+    }
+}
+
 fn find_source_pattern(callee: &str, patterns: &[DataFlowPattern]) -> Option<SourcePatternMatch> {
     let normalized = normalize_pattern_text(callee);
     patterns
@@ -12119,7 +12343,7 @@ fn simple_expr_looks_sqlish(expr: &SimpleExpr) -> bool {
             simple_expr_looks_sqlish(receiver) || args.iter().any(simple_expr_looks_sqlish)
         }
         SimpleExpr::Reference { expr, .. } => simple_expr_looks_sqlish(expr),
-        SimpleExpr::Literal | SimpleExpr::Unknown => false,
+        SimpleExpr::Literal { .. } | SimpleExpr::Unknown => false,
     }
 }
 
@@ -12469,6 +12693,7 @@ fn compute_stats(report: &Report) -> Stats {
 
 #[cfg(test)]
 mod tests {
+    use indexmap::IndexMap;
     use std::collections::{BTreeSet, HashMap};
     use std::fs;
     use std::path::PathBuf;
@@ -15328,6 +15553,125 @@ impl ComponentSection for Holder {
         }
     }
 
+    /// The forwarded-header rules: proxy-derived flows for the header-derived
+    /// accessors, none for the socket view, a same-named method on an
+    /// unrelated receiver, a non-literal or out-of-family header read, and the
+    /// ClientIpSource config signal with its ConnectInfo twin.
+    #[test]
+    fn forwarded_headers_app_emits_proxy_derived_flows() {
+        let report = analyze(AnalyzeOptionsInput {
+            dir: fixture_path("forwarded-headers-app"),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "security".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        let data_flow = report.data_flow.expect("dataflow emitted");
+        for function_name in [
+            "axum_host_handler",
+            "insecure_client_ip",
+            "rightmost_x_forwarded_for",
+            "x_real_ip",
+            "configured_client_ip",
+            "actix_connection_info",
+            "actix_scheme",
+            "actix_realip",
+            "read_x_forwarded_for",
+        ] {
+            assert!(
+                data_flow.slices.iter().any(|slice| {
+                    slice.sink_category == "html-response"
+                        && slice.sink_function.contains(function_name)
+                        && slice.source_category == "proxy-derived"
+                }),
+                "missing proxy-derived flow for {function_name}"
+            );
+        }
+        for function_name in [
+            "twin_host",
+            "twin_peer_addr",
+            "twin_connect_info",
+            "twin_dynamic_header",
+            "twin_other_header",
+            "twin_map_get",
+            "twin_host_method",
+        ] {
+            assert!(
+                !data_flow.slices.iter().any(|slice| {
+                    slice.sink_function.contains(function_name)
+                        && slice.source_category == "proxy-derived"
+                }),
+                "unexpected proxy-derived flow for {function_name}"
+            );
+        }
+
+        // The literal read records the header it started from, and the actix
+        // accessors their taint kind, on the source node's properties.
+        let nodes: HashMap<_, _> = data_flow
+            .nodes
+            .iter()
+            .map(|node| (node.id.clone(), node))
+            .collect();
+        let header_read = data_flow
+            .slices
+            .iter()
+            .find(|slice| slice.sink_function.contains("read_x_forwarded_for"))
+            .expect("header-read slice");
+        let source_node = nodes[&header_read.source_id];
+        assert_eq!(
+            source_node.properties.get("header").map(String::as_str),
+            Some("x-forwarded-for")
+        );
+        assert_eq!(
+            source_node.properties.get("taint-kind").map(String::as_str),
+            Some("forwarded-header")
+        );
+        let actix_host = data_flow
+            .slices
+            .iter()
+            .find(|slice| slice.sink_function.contains("actix_connection_info"))
+            .expect("actix host slice");
+        assert_eq!(
+            nodes[&actix_host.source_id]
+                .properties
+                .get("taint-kind")
+                .map(String::as_str),
+            Some("host")
+        );
+    }
+
+    #[test]
+    fn forwarded_headers_app_emits_trusted_proxy_signals() {
+        let report = analyze(AnalyzeOptionsInput {
+            dir: fixture_path("forwarded-headers-app"),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "security".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        let signals: Vec<_> = report
+            .security_signals
+            .iter()
+            .filter(|signal| signal.category == "trusted-proxy-config")
+            .collect();
+        assert_eq!(
+            signals.len(),
+            1,
+            "exactly the RightmostXForwardedFor layer, not the ConnectInfo twin"
+        );
+        let signal = signals[0];
+        assert_eq!(
+            signal.properties.get("framework").map(String::as_str),
+            Some("axum-client-ip")
+        );
+        assert_eq!(
+            signal.properties.get("headers").map(String::as_str),
+            Some("x-forwarded")
+        );
+    }
+
     #[test]
     fn sql_zoo_emits_multi_library_sql_slices() {
         let report = analyze(AnalyzeOptionsInput {
@@ -15840,6 +16184,7 @@ impl ComponentSection for Holder {
                     line: 9,
                     column: 1,
                 },
+                properties: IndexMap::new(),
             }],
             crypto: Some(CryptoEvidence {
                 components: vec![CryptoComponent {
@@ -18417,7 +18762,7 @@ pub fn run(rows: Vec<Vec<String>>) {
             .collect();
         operations.push(Operation::Assign {
             target: format!("x{links}"),
-            value: SimpleExpr::Literal,
+            value: SimpleExpr::Literal { text: String::new() },
         });
         let loops = loop_forest(&[LoopRegion {
             start: 0,
@@ -18477,7 +18822,7 @@ pub fn run(rows: Vec<Vec<String>>) {
         };
         let tainted = match value {
             SimpleExpr::Var(name) => state.contains(name),
-            SimpleExpr::Literal => true,
+            SimpleExpr::Literal { .. } => true,
             _ => false,
         };
         if tainted {
@@ -18513,7 +18858,7 @@ pub fn run(rows: Vec<Vec<String>>) {
         }
         starts.push(operations.len());
         operations.push(assign("a", SimpleExpr::Var("b".to_string())));
-        operations.push(assign("b", SimpleExpr::Literal));
+        operations.push(assign("b", SimpleExpr::Literal { text: String::new() }));
         let end = operations.len();
         for start in starts {
             regions.push(LoopRegion { start, end });
@@ -18586,7 +18931,7 @@ pub fn run(rows: Vec<Vec<String>>) {
             }
             let target = names[rng.below(names.len())];
             let value = match rng.below(6) {
-                0 => SimpleExpr::Literal,
+                0 => SimpleExpr::Literal { text: String::new() },
                 1 => SimpleExpr::Unknown,
                 _ => SimpleExpr::Var(names[rng.below(names.len())].to_string()),
             };
