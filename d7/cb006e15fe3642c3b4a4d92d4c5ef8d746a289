@@ -1,0 +1,57 @@
+thirdparty/kosi/modules/kosi-evidence/src/main/kotlin/io/cdxgen/kosi/evidence/ForwardedHeaders.kt
+  s_9d1b258b13890d::t_d68d063d80ff2e 50-51
+  s_9d1b258b13890d::t_ef0609542bea81 1-49,52-180
+  s_9d1b258b13890d::t_6b40f20331c1ea 181-182
+docs/KOSI.md
+  s_9d1b258b13890d::t_e93daaffab7bf0 31-52
+thirdparty/kosi/JSON_ATTRIBUTE_REFERENCE.md
+  s_9d1b258b13890d::t_aaee2eb2356b7c 477,722,735-752
+thirdparty/kosi/fixtures/forwarded-headers/build.gradle.kts
+  s_9d1b258b13890d::t_95a03263b605c5 1-3
+thirdparty/kosi/fixtures/forwarded-headers/src/main/kotlin/fixtures/forwarded/Main.kt
+  s_9d1b258b13890d::t_2a09612bb249bc 1-112
+thirdparty/kosi/fixtures/forwarded-headers/src/main/kotlin/io/ktor/server/application/Application.kt
+  s_9d1b258b13890d::t_170f0bc8537264 1-3
+thirdparty/kosi/fixtures/forwarded-headers/src/main/kotlin/io/ktor/server/plugins/forwardedheaders/Plugins.kt
+  s_9d1b258b13890d::t_5a71a9d12bf385 1-4
+thirdparty/kosi/fixtures/forwarded-headers/src/main/kotlin/io/vertx/core/http/HttpServerRequest.kt
+  s_9d1b258b13890d::t_fa3ad8d3857978 1-7
+thirdparty/kosi/fixtures/forwarded-headers/src/main/kotlin/io/vertx/core/net/SocketAddress.kt
+  s_9d1b258b13890d::t_406f8414fdd06f 1-3
+thirdparty/kosi/fixtures/forwarded-headers/src/main/kotlin/jakarta/servlet/http/HttpServletRequest.kt
+  s_9d1b258b13890d::t_7e0783b000265c 1-7
+thirdparty/kosi/fixtures/forwarded-headers/src/main/kotlin/jakarta/servlet/http/ServletRequest.kt
+  s_9d1b258b13890d::t_d825493e7961ec 1-12
+thirdparty/kosi/fixtures/forwarded-headers/src/main/kotlin/org/apache/catalina/valves/RemoteIpValve.kt
+  s_9d1b258b13890d::t_db37b2526db966 1-3
+thirdparty/kosi/fixtures/forwarded-headers/src/main/kotlin/org/eclipse/jetty/server/ForwardedRequestCustomizer.kt
+  s_9d1b258b13890d::t_1519922e894b83 1-3
+thirdparty/kosi/fixtures/forwarded-headers/src/main/kotlin/org/springframework/web/filter/ForwardedHeaderFilter.kt
+  s_9d1b258b13890d::t_77ffdcbf40f768 1-5
+thirdparty/kosi/fixtures/forwarded-headers/src/main/kotlin/org/springframework/web/servlet/support/ServletUriComponentsBuilder.kt
+  s_9d1b258b13890d::t_a01c4c6c74bacb 1-10
+thirdparty/kosi/fixtures/forwarded-headers/src/main/resources/application.properties
+  s_9d1b258b13890d::t_efcd2ab0719c70 1
+thirdparty/kosi/modules/kosi-corpus/src/main/kotlin/io/cdxgen/kosi/corpus/Annotation.kt
+  s_9d1b258b13890d::t_337f4f2d76b2aa 251
+thirdparty/kosi/modules/kosi-front/src/main/kotlin/io/cdxgen/kosi/front/Analyzer.kt
+  s_9d1b258b13890d::t_1cb7d49cdb25c4 1311-1314
+thirdparty/kosi/modules/kosi-models/src/main/resources/models/security-pack-v0.json
+  s_9d1b258b13890d::t_c1a5eb37f6fb47 3961-4044
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d7cb006e15fe3642c3b4a4d92d4c5ef8d746a289",
+  "prompts": {},
+  "sessions": {
+    "s_9d1b258b13890d": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_2af49bff-c8ba-4475-948a-9135fdf9dfab",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
