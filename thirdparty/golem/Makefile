@@ -14,8 +14,11 @@ generate_sbom = cdxgen -t go --exclude "testdata/**" -o build/sbom-golem-postbui
 .PHONY: all windows darwin linux linuxmusl test fmt fmt-check lint sbom clean
 all: test windows linux darwin sbom
 
+# The analyzer package runs every corpus case and golden fixture, which takes
+# longer than go test's default 10-minute timeout on a CI runner; this is the
+# limit go-test.yml uses.
 test:
-	go test ./...
+	go test -timeout 30m ./...
 
 fmt:
 	gofmt -w .
