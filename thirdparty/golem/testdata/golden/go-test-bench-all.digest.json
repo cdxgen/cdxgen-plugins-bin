@@ -36,10 +36,10 @@
   },
   "dataFlow": {
     "mode": "all",
-    "nodeCount": 810,
-    "edgeCount": 944,
-    "sliceCount": 183,
-    "uniqueFlowCount": 159,
+    "nodeCount": 821,
+    "edgeCount": 954,
+    "sliceCount": 184,
+    "uniqueFlowCount": 160,
     "summaryCount": 0,
     "flowsByCategoryPair": {
       "http-input-\u003ecommand-execution": 6,
@@ -56,17 +56,18 @@
       "parameter-\u003elogging": 3,
       "parameter-\u003epanic": 4,
       "parameter-\u003eredirect": 1,
-      "parameter-\u003etemplate-injection": 2
+      "parameter-\u003etemplate-injection": 2,
+      "proxy-derived-\u003eredirect": 1
     },
     "flowsBySeverity": {
       "critical": 7,
       "high": 25,
-      "medium": 151
+      "medium": 152
     },
-    "flowKeySetHash": "1ff46046dd96a60f",
+    "flowKeySetHash": "a1c9274d38013449",
     "edgeConnectivity": 1,
     "integrityViolations": 0,
-    "dependencyCrossingSlices": 96,
+    "dependencyCrossingSlices": 97,
     "sampleFlows": [
       {
         "flowKey": "df-flow|http-input|filesystem|(*github.com/go-openapi/runtime/middleware.untypedParamBinder).Bind|(*net/http.Request).FormFile|os.Open|0|path,user-input|",
@@ -119,7 +120,7 @@
         "sourceAt": ".../bson/bsoncodec/map_codec.go:245",
         "sinkAt": ".../src/reflect/value.go:3269",
         "severity": "medium",
-        "pathLength": 4,
+        "pathLength": 3,
         "connected": true,
         "taintKinds": "secret,user-input"
       },
@@ -130,7 +131,7 @@
         "sourceAt": ".../bson/bsoncodec/map_codec.go:245",
         "sinkAt": ".../src/reflect/value.go:3269",
         "severity": "medium",
-        "pathLength": 3,
+        "pathLength": 4,
         "connected": true,
         "taintKinds": "secret,user-input"
       },

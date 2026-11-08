@@ -36,10 +36,10 @@
   },
   "dataFlow": {
     "mode": "security",
-    "nodeCount": 321,
-    "edgeCount": 346,
-    "sliceCount": 165,
-    "uniqueFlowCount": 143,
+    "nodeCount": 325,
+    "edgeCount": 350,
+    "sliceCount": 166,
+    "uniqueFlowCount": 144,
     "summaryCount": 0,
     "flowsByCategoryPair": {
       "http-input-\u003ecommand-execution": 6,
@@ -55,17 +55,18 @@
       "parameter-\u003elogging": 2,
       "parameter-\u003epanic": 1,
       "parameter-\u003eredirect": 1,
-      "parameter-\u003etemplate-injection": 2
+      "parameter-\u003etemplate-injection": 2,
+      "proxy-derived-\u003eredirect": 1
     },
     "flowsBySeverity": {
       "critical": 7,
       "high": 20,
-      "medium": 138
+      "medium": 139
     },
-    "flowKeySetHash": "fa2ecf443b793549",
+    "flowKeySetHash": "3a81bb9535bc7de5",
     "edgeConnectivity": 1,
     "integrityViolations": 0,
-    "dependencyCrossingSlices": 87,
+    "dependencyCrossingSlices": 88,
     "sampleFlows": [
       {
         "flowKey": "df-flow|sha256:0016713881a274e120a8beaf17971e0733c4abf79cd0fe27c11d71126ea2053a",

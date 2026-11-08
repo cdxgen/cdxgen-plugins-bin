@@ -36,23 +36,24 @@
   },
   "dataFlow": {
     "mode": "security",
-    "nodeCount": 23,
-    "edgeCount": 24,
-    "sliceCount": 10,
-    "uniqueFlowCount": 6,
+    "nodeCount": 24,
+    "edgeCount": 25,
+    "sliceCount": 11,
+    "uniqueFlowCount": 7,
     "summaryCount": 0,
     "flowsByCategoryPair": {
       "http-input-\u003eformatted-output": 3,
       "http-input-\u003epanic": 4,
-      "http-input-\u003eredirect": 3
+      "http-input-\u003eredirect": 3,
+      "proxy-derived-\u003eredirect": 1
     },
     "flowsBySeverity": {
-      "medium": 10
+      "medium": 11
     },
-    "flowKeySetHash": "7596dc747c38879b",
+    "flowKeySetHash": "d4cc2006198de68b",
     "edgeConnectivity": 1,
     "integrityViolations": 0,
-    "dependencyCrossingSlices": 6,
+    "dependencyCrossingSlices": 7,
     "sampleFlows": [
       {
         "flowKey": "df-flow|http-input|formatted-output|(*github.com/go-chi/chi/v5/middleware.DefaultLogFormatter).NewLogEntry|github.com/go-chi/chi/v5/middleware.cW|fmt.Fprintf|4|user-input|[*]",
@@ -163,6 +164,17 @@
         "pathLength": 3,
         "connected": true,
         "taintKinds": "url,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:b4043355f4b009babfdd9bd50a3775fd8e13c659a5dd2b97a01575713663f986",
+        "source": "net/http.(Request).Host",
+        "sink": "net/http.Redirect",
+        "sourceAt": "middleware/strip.go:55",
+        "sinkAt": "middleware/strip.go:56",
+        "severity": "medium",
+        "pathLength": 3,
+        "connected": true,
+        "taintKinds": "host,url,user-input"
       }
     ]
   }

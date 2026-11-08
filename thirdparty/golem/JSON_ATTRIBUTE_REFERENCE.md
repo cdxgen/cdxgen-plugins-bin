@@ -203,6 +203,7 @@ The `dataFlow` section exists only when `--dataflow` is not `none`.
 | `sanitizesCategories[]` | string array    | Sink categories suppressed after sanitization.              | Category-aware sink suppression.              |
 | `relevantArguments[]`   | integer array   | Sink argument indexes to inspect.                           | Accurate sink targeting for APIs.             |
 | `receiverRelevant`      | boolean         | Whether method receiver is sink-relevant.                   | Receiver-side taint checks.                   |
+| `argumentLiterals[]`    | string array    | Header names a literal-constrained source accepts at its first argument. | Distinguish forwarded-header reads from generic ones. |
 | `ruleId`, `ruleName`    | strings         | Rule metadata attached to slices.                           | Findings normalization and suppression logic. |
 | `severity`, `riskScore` | string, integer | Priority metadata for matched sink rules.                   | Sort and threshold in triage queues.          |
 | `confidence`            | string          | Confidence hint for pattern evidence.                       | Review prioritization.                        |
@@ -317,6 +318,47 @@ Present whenever data flow ran. The counts are always serialized, so zero rooted
 | `reachablePackages[]`                   | string array | Non-standard packages with a reached function other than an initializer, on the same graph. A blank-imported package appears only if the program dispatches into it (e.g. a registered `database/sql` driver). | Gating call-graph usage evidence without depending on `--callgraph`. |
 | `rootCount`                              | integer      | Resolved roots.                                                                                                                  | Sanity check.                                     |
 | `rootedSliceCount`, `unrootedSliceCount` | integers     | Slices whose `reachableFromRoots` is true / false.                                                                               | Application-driven share of flows.                |
+
+## Forwarded-header vocabulary
+
+`proxy-derived` is a source category for request values a client can choose
+through the `Forwarded` and `X-Forwarded-*` headers. It appears on
+`dataFlow.slices[].sourceCategory` (and on the source node's `category`) with
+one of four taint kinds next to `user-input`:
+
+| Taint kind         | Meaning                                                                     |
+| ------------------ | --------------------------------------------------------------------------- |
+| `client-ip`        | The address the application treats as the client's.                        |
+| `host`             | The host the application sees.                                              |
+| `scheme`           | The protocol the application sees.                                          |
+| `forwarded-header` | A direct read of a forwarded header by literal name.                       |
+
+The accessors tagged are `(*http.Request).RemoteAddr` and `(*http.Request).Host`
+(rewritten by middleware such as chi `middleware.RealIP` and gorilla
+`handlers.ProxyHeaders`), gin `(*Context).ClientIP`, echo `Context.RealIP` and
+`Context.Scheme`, fiber `(*Ctx).IP` and `(*Ctx).IPs`, and a
+`(*net/http.Header).Get` (or gin `(*Context).GetHeader`) call whose argument
+literal is one of `forwarded`, `x-forwarded-for`, `x-forwarded-host`,
+`x-forwarded-proto`, `x-forwarded-port`, `x-real-ip` or `client-ip`. The
+lower-cased header name rides on the source node's `properties.header`.
+`(*http.Request).TLS` and gin `(*Context).RemoteIP` are the socket view, which
+no middleware rewrites, and are deliberately not tagged.
+
+`trusted-proxy-config` is a security-signal category for the code that turns
+forwarded-header handling on. Its properties carry `framework` and, where a
+literal names it, `headers` (`forwarded`, `x-forwarded` or `all`). The rules
+key on the framework's own resolved symbol: chi `middleware.RealIP`, gorilla
+`handlers.ProxyHeaders`, gin `SetTrustedProxies`, the `ForwardedByClientIP` and
+`RemoteIPHeaders` engine fields, echo's `IPExtractor` with its two extractors,
+and fiber's `ProxyHeader` and `EnableTrustedProxyCheck` config fields. An
+explicitly empty value (`SetTrustedProxies(nil)`, `ForwardedByClientIP: false`,
+an empty `ProxyHeader`) turns the signal off.
+
+Neither category means a deployment is vulnerable. Static analysis can see
+where the application reads proxy-derived values and where it turns on
+forwarded-header handling; it cannot see whether the proxy in front strips or
+overwrites the headers a client sends. Both are spoofable only behind a proxy
+that passes them through.
 
 ## Crypto JSON reference
 

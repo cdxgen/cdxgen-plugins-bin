@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"go/constant"
 	"go/types"
 	"regexp"
 	"sort"
@@ -35,8 +36,21 @@ type ModelEntry struct {
 	// than by type or provenance, and it is the only evidence available at the
 	// boundary of a library whose callers are not in the analysed module.
 	// Entries carrying it name no Package or Function and match no call site.
-	ParameterName string     `json:"parameterName,omitempty"`
-	Arity         *AritySpec `json:"arity,omitempty"`
+	ParameterName string `json:"parameterName,omitempty"`
+	// Field names the struct field a field-shaped entry describes, together
+	// with Receiver. The entry matches a read of that field on that type —
+	// r.RemoteAddr — not a call, so it takes part in none of the call-keyed
+	// indexes and is looked up through MatchFieldSource instead.
+	Field string `json:"field,omitempty"`
+	// ArgumentLiterals constrains a call-shaped entry to call sites whose
+	// first source-level argument is one of these string constants, compared
+	// case-insensitively. It is how a header-reading method is a source for
+	// the forwarded header family rather than for every header: the entry
+	// matches the callee by name and then the call by what it asks for.
+	// MatchFunction returns such entries unconditionally; the call site
+	// applies the literal test through LiteralArgumentMatches.
+	ArgumentLiterals []string   `json:"argumentLiterals,omitempty"`
+	Arity            *AritySpec `json:"arity,omitempty"`
 	// Arguments names the parameters that carry the value this entry is
 	// about, by source-level position: the receiver of a method is not
 	// one of them, whatever SSA does with it. See ArgumentRelevantAt.
@@ -84,6 +98,12 @@ func (e ModelEntry) QualifiedName() string {
 			name = "(" + e.Receiver + ")"
 		} else {
 			name = "(" + e.Receiver + ")." + name
+		}
+		// A field-shaped entry names the field it reads: the source is
+		// r.RemoteAddr, spelled "(net/http.Request).RemoteAddr" the way a
+		// method on the same type would be.
+		if e.Field != "" {
+			name = "(" + strings.TrimPrefix(e.Receiver, "*") + ")." + e.Field
 		}
 	}
 	if e.Package != "" && e.Package != "std" {
@@ -171,6 +191,12 @@ type DB struct {
 	// rather than a call site, with their patterns compiled once.
 	byParameterName []compiledParameterSource
 
+	// byField maps "packagePath.receiverType.fieldName" → field-shaped
+	// entries, both receiver spellings. A field source describes a read of a
+	// struct field, which is an instruction rather than a call, so it cannot
+	// share the call-keyed indexes.
+	byField map[string][]*ModelEntry
+
 	// byConversionType maps "packagePath.TypeName" to entries whose Match is
 	// "conversion": the model describes converting a value *to* that named
 	// type, not calling a function.
@@ -189,6 +215,7 @@ func NewDB() *DB {
 		byName:           make(map[string][]*ModelEntry),
 		byNamePrefix:     make(map[string][]*ModelEntry),
 		byConversionType: make(map[string][]*ModelEntry),
+		byField:          make(map[string][]*ModelEntry),
 		matchedSymbols:   make(map[string]bool),
 	}
 }
@@ -256,6 +283,16 @@ func (db *DB) indexEntry(e *ModelEntry) {
 			return
 		}
 		db.byParameterName = append(db.byParameterName, compiledParameterSource{entry: e, re: re})
+		return
+	}
+
+	// A field-shaped source names a receiver type and a field and no
+	// function: the tainted thing is the field read itself. It is indexed
+	// under both receiver spellings and matched by MatchFieldSource.
+	if e.Field != "" && e.Receiver != "" {
+		recv := strings.TrimPrefix(e.Receiver, "*")
+		db.byField[pkg+"."+recv+"."+e.Field] = append(db.byField[pkg+"."+recv+"."+e.Field], e)
+		db.byField[pkg+".(*"+recv+")."+e.Field] = append(db.byField[pkg+".(*"+recv+")."+e.Field], e)
 		return
 	}
 
@@ -474,7 +511,13 @@ func (db *DB) MatchParameterType(t types.Type) []ModelEntry {
 	typeName := named.Obj().Name()
 	var out []ModelEntry
 	for _, entry := range db.entries {
-		if entry.Kind != "source" || entry.Receiver == "" || entry.Function != "" {
+		// A field-shaped entry (Receiver and Field set, no Function) also
+		// carries a receiver and no function, but it describes one field of
+		// the type, not the parameter as a whole; the whole-parameter
+		// *http.Request source would otherwise arrive with the RemoteAddr
+		// and Host categories welded on, and every request-typed handler
+		// would report proxy-derived flows it never wrote.
+		if entry.Kind != "source" || entry.Receiver == "" || entry.Function != "" || entry.Field != "" {
 			continue
 		}
 		if !packageMatches(entry, pkgPath) {
@@ -485,6 +528,82 @@ func (db *DB) MatchParameterType(t types.Type) []ModelEntry {
 		}
 	}
 	return out
+}
+
+// MatchFieldSource returns field-shaped source entries that describe a read of
+// fieldName through t, where t is the base the field is read through. A
+// pointer to the receiver type is unwrapped, so r.RemoteAddr through a
+// *http.Request and the same field on a value resolve through one lookup.
+func (db *DB) MatchFieldSource(t types.Type, fieldName string) []ModelEntry {
+	named := namedOf(t)
+	if named == nil || named.Obj() == nil || fieldName == "" {
+		return nil
+	}
+	pkgPath := ""
+	if p := named.Obj().Pkg(); p != nil {
+		pkgPath = p.Path()
+	}
+	if pkgPath == "" {
+		return nil
+	}
+	typeName := named.Obj().Name()
+	var out []ModelEntry
+	for _, key := range []string{pkgPath + "." + typeName + "." + fieldName, pkgPath + ".(*" + typeName + ")." + fieldName} {
+		for _, e := range db.byField[key] {
+			out = append(out, *e)
+			db.matchedSymbols[e.ID] = true
+		}
+	}
+	return out
+}
+
+// LiteralArgument returns the entry's argument literal the call passes at its
+// first source-level argument, lower-cased, when the entry carries the
+// constraint and the call satisfies it. ok is false only for a constrained
+// entry the call does not satisfy; an unconstrained entry accepts any call and
+// names no literal.
+//
+// The receiver is not one of the source-level arguments (see
+// ArgumentRelevantAt), and a non-constant argument never satisfies the
+// constraint: the entry says the code names this header, not that a runtime
+// value happens to equal it.
+func (e ModelEntry) LiteralArgument(common *ssa.CallCommon) (literal string, ok bool) {
+	if len(e.ArgumentLiterals) == 0 {
+		return "", true
+	}
+	arg := e.firstSourceArgument(common)
+	if arg == nil {
+		return "", false
+	}
+	c, isConst := arg.(*ssa.Const)
+	if !isConst || c.Value == nil || c.Value.Kind() != constant.String {
+		return "", false
+	}
+	got := strings.ToLower(constant.StringVal(c.Value))
+	for _, want := range e.ArgumentLiterals {
+		if strings.EqualFold(want, got) {
+			return got, true
+		}
+	}
+	return "", false
+}
+
+// firstSourceArgument returns the SSA value the call passes at source-level
+// argument 0, skipping the receiver of a static method call.
+func (e *ModelEntry) firstSourceArgument(common *ssa.CallCommon) ssa.Value {
+	if common == nil {
+		return nil
+	}
+	offset := 0
+	if !common.IsInvoke() {
+		if callee := common.StaticCallee(); callee != nil && callee.Signature != nil && callee.Signature.Recv() != nil {
+			offset = 1
+		}
+	}
+	if offset >= len(common.Args) {
+		return nil
+	}
+	return common.Args[offset]
 }
 
 // namedOf unwraps pointers and aliases to the named type underneath.

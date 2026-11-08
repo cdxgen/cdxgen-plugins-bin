@@ -492,13 +492,19 @@ type DataFlowPattern struct {
 	// call fills from its other arguments, as io.Copy fills its destination and
 	// json.Unmarshal fills the value behind its pointer. Without it the taint of
 	// what went in is lost at the call, because nothing was returned.
-	WritesToArguments []int  `json:"writesToArguments,omitempty"`
-	ReceiverRelevant  bool   `json:"receiverRelevant,omitempty"`
-	RuleID            string `json:"ruleId,omitempty"`
-	RuleName          string `json:"ruleName,omitempty"`
-	Severity          string `json:"severity,omitempty"`
-	RiskScore         int    `json:"riskScore,omitempty"`
-	Confidence        string `json:"confidence,omitempty"`
+	WritesToArguments []int `json:"writesToArguments,omitempty"`
+	// ArgumentLiterals constrains the pattern to call sites whose first
+	// source-level argument is one of these string constants, compared
+	// case-insensitively. It is how a header-reading call is a source for the
+	// forwarded header family rather than for every header: the pattern
+	// matches the symbol and the call must name the literal.
+	ArgumentLiterals []string `json:"argumentLiterals,omitempty"`
+	ReceiverRelevant bool     `json:"receiverRelevant,omitempty"`
+	RuleID           string   `json:"ruleId,omitempty"`
+	RuleName         string   `json:"ruleName,omitempty"`
+	Severity         string   `json:"severity,omitempty"`
+	RiskScore        int      `json:"riskScore,omitempty"`
+	Confidence       string   `json:"confidence,omitempty"`
 }
 type DataFlowPatternSet struct {
 	Sources      []DataFlowPattern `json:"sources,omitempty"`

@@ -6,6 +6,8 @@
 // by value, matching the real library.
 package echo
 
+import "net/http"
+
 // Map is echo's ad-hoc JSON map alias. shortTypeName collapses it to
 // "object".
 type Map map[string]any
@@ -17,6 +19,12 @@ type Context interface {
 	BindJSON(i any) error
 	JSON(code int, i any) error
 	JSONPretty(code int, i any, indent string) error
+	// RealIP returns the client address as echo resolves it, from the
+	// configured IPExtractor or X-Forwarded-For/X-Real-IP.
+	RealIP() string
+	// Scheme returns the protocol echo resolves it from, reading
+	// X-Forwarded-Proto when the connection is not TLS.
+	Scheme() string
 }
 
 type HandlerFunc func(c Context) error
@@ -28,7 +36,20 @@ type Group struct{}
 func (g *Group) GET(path string, h HandlerFunc, middleware ...MiddlewareFunc) {}
 func (g *Group) POST(path string, h HandlerFunc, middleware ...MiddlewareFunc) {}
 
-type Echo struct{}
+// IPExtractorFunc is the extractor an Echo instance uses to resolve the
+// client address.
+type IPExtractorFunc func(*http.Request) string
+
+// ExtractIPFromXFFHeader builds an extractor that reads X-Forwarded-For.
+func ExtractIPFromXFFHeader() IPExtractorFunc { return nil }
+
+// ExtractIPFromRealIPHeader builds an extractor that reads X-Real-IP.
+func ExtractIPFromRealIPHeader() IPExtractorFunc { return nil }
+
+type Echo struct {
+	// IPExtractor decides how RealIP resolves the client address.
+	IPExtractor IPExtractorFunc
+}
 
 func New() *Echo { return &Echo{} }
 

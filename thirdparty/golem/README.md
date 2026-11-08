@@ -119,6 +119,36 @@ By default, Golem drops call graph edges and data-flow slices that are entirely 
 
 Keeping dependency-internal flows raises the question a consumer actually asks: is this flow something the application can drive, or library code analyzing itself? Every slice answers it with `reachableFromRoots`, true when any function the slice traverses is reachable from the entry roots. The verdict is always computed on an RTA call graph, whatever `--callgraph` selected, because static and VTA graphs miss interface, func-value and registration dispatch (a blank-imported `database/sql` driver is used even though main never names it), and CHA marks every implementation of a used interface reachable. It is function-level: a reached function does not prove a caller passes tainted data. The field is absent when there is no entry root beyond package initializers (a library) or no graph could be built — never as a synonym for "unreachable". `dataFlow.sliceReachability` records the status, algorithm, root kinds and rooted/unrooted counts.
 
+### Forwarded-header tracking
+
+Most reverse proxies pass the client-supplied `Forwarded` and `X-Forwarded-*`
+headers through unchanged, and several frameworks read them when deciding the
+client IP, host and scheme the application sees. Golem tags the parts of that
+problem visible in code, in both taint engines:
+
+- The `proxy-derived` source category, with the taint kind `client-ip`, `host`,
+  `scheme` or `forwarded-header` next to `user-input`, marks the accessors that
+  return proxy-resolved values: `(*http.Request).RemoteAddr` and `.Host` (both
+  rewritten by middleware such as chi `middleware.RealIP` and gorilla
+  `handlers.ProxyHeaders`), gin `(*Context).ClientIP`, echo `Context.RealIP`
+  and `Context.Scheme`, fiber `(*Ctx).IP` and `(*Ctx).IPs`, and a literal
+  `Header.Get`/gin `GetHeader` read of a forwarded header, whose lower-cased
+  name rides on the source node's `properties.header`. The socket view
+  (`(*http.Request).TLS`, gin `(*Context).RemoteIP`) is deliberately not
+  tagged: no middleware rewrites it from a header.
+- The `trusted-proxy-config` security signal, with `framework` and, where a
+  literal names it, `headers` properties, marks the code that turns
+  forwarded-header handling on. The rules key on the framework's own resolved
+  symbol, never an option name, and an explicitly empty value
+  (`SetTrustedProxies(nil)`, `ForwardedByClientIP: false`, an empty
+  `ProxyHeader`) emits nothing.
+
+Neither category claims a deployment is vulnerable. What static analysis sees
+is where the application trusts headers and where it reads proxy-derived
+values; whether the proxy in front strips client-supplied ones is invisible to
+a source scan, so the values are spoofable only behind a proxy that passes the
+headers through.
+
 ### Resource Limits
 
 Large repositories can be controlled with these limits:

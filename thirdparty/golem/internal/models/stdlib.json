@@ -559,6 +559,63 @@
     "confidence": "high"
   },
   {
+    "id": "go.http-request-remoteaddr.source",
+    "kind": "source",
+    "module": "std",
+    "package": "net/http",
+    "receiver": "*Request",
+    "field": "RemoteAddr",
+    "category": "proxy-derived",
+    "taintKinds": [
+      "user-input",
+      "client-ip"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "RemoteAddr is rewritten by forwarded-header middleware (chi middleware.RealIP, gorilla handlers.ProxyHeaders), so behind a pass-through proxy the client chooses it"
+  },
+  {
+    "id": "go.http-request-host.source",
+    "kind": "source",
+    "module": "std",
+    "package": "net/http",
+    "receiver": "*Request",
+    "field": "Host",
+    "category": "proxy-derived",
+    "taintKinds": [
+      "user-input",
+      "host"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "Host is rewritten from X-Forwarded-Host by forwarded-header middleware (gorilla handlers.ProxyHeaders), so behind a pass-through proxy the client chooses it"
+  },
+  {
+    "id": "go.http-forwarded-header.source",
+    "kind": "source",
+    "module": "std",
+    "package": "net/http",
+    "receiver": "Header",
+    "function": "Get",
+    "argumentLiterals": [
+      "forwarded",
+      "x-forwarded-for",
+      "x-forwarded-host",
+      "x-forwarded-proto",
+      "x-forwarded-port",
+      "x-real-ip",
+      "client-ip"
+    ],
+    "category": "proxy-derived",
+    "taintKinds": [
+      "user-input",
+      "forwarded-header"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "Reads a Forwarded or X-Forwarded-* header by literal name, a value the client can choose behind a pass-through proxy"
+  },
+  {
     "id": "go.http-url-query.source",
     "kind": "source",
     "module": "std",
