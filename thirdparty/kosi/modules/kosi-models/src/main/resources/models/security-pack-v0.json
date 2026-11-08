@@ -3958,6 +3958,90 @@
     {
       "category": "untrusted-input",
       "pattern": "ratpack.http.Request.getBodyStream"
+    },
+    {
+      "category": "proxy-derived",
+      "pattern": "jakarta.servlet.ServletRequest.getRemoteAddr"
+    },
+    {
+      "category": "proxy-derived",
+      "pattern": "jakarta.servlet.ServletRequest.getRemoteHost"
+    },
+    {
+      "category": "proxy-derived",
+      "pattern": "jakarta.servlet.ServletRequest.getServerName"
+    },
+    {
+      "category": "proxy-derived",
+      "pattern": "jakarta.servlet.http.HttpServletRequest.getRequestURL"
+    },
+    {
+      "category": "proxy-derived",
+      "pattern": "jakarta.servlet.ServletRequest.getScheme"
+    },
+    {
+      "category": "proxy-derived",
+      "pattern": "jakarta.servlet.ServletRequest.isSecure"
+    },
+    {
+      "category": "proxy-derived",
+      "pattern": "javax.servlet.ServletRequest.getRemoteAddr"
+    },
+    {
+      "category": "proxy-derived",
+      "pattern": "javax.servlet.ServletRequest.getRemoteHost"
+    },
+    {
+      "category": "proxy-derived",
+      "pattern": "javax.servlet.ServletRequest.getServerName"
+    },
+    {
+      "category": "proxy-derived",
+      "pattern": "javax.servlet.http.HttpServletRequest.getRequestURL"
+    },
+    {
+      "category": "proxy-derived",
+      "pattern": "javax.servlet.ServletRequest.getScheme"
+    },
+    {
+      "category": "proxy-derived",
+      "pattern": "javax.servlet.ServletRequest.isSecure"
+    },
+    {
+      "category": "proxy-derived",
+      "pattern": "org.springframework.web.servlet.support.ServletUriComponentsBuilder.fromCurrentContextPath"
+    },
+    {
+      "category": "proxy-derived",
+      "pattern": "org.springframework.web.servlet.support.ServletUriComponentsBuilder.fromCurrentRequest"
+    },
+    {
+      "category": "proxy-derived",
+      "pattern": "org.springframework.web.servlet.support.ServletUriComponentsBuilder.fromCurrentRequestUri"
+    },
+    {
+      "category": "proxy-derived",
+      "pattern": "org.springframework.web.servlet.support.ServletUriComponentsBuilder.fromCurrentServletPath"
+    },
+    {
+      "category": "proxy-derived",
+      "pattern": "io.vertx.core.http.HttpServerRequest.remoteAddress"
+    },
+    {
+      "category": "proxy-derived",
+      "pattern": "io.vertx.core.http.HttpServerRequest.authority"
+    },
+    {
+      "category": "proxy-derived",
+      "pattern": "io.vertx.core.http.HttpServerRequest.host"
+    },
+    {
+      "category": "proxy-derived",
+      "pattern": "jakarta.servlet.ServletRequest.getServerPort"
+    },
+    {
+      "category": "proxy-derived",
+      "pattern": "javax.servlet.ServletRequest.getServerPort"
     }
   ]
 }

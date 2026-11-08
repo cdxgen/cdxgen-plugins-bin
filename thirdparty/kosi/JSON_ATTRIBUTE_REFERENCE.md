@@ -474,6 +474,7 @@ first parameter is index 0.
 | `sourceName`, `sinkName` | string | callee FQNs matched from the pack. A source is also named `endpoint-params <handler>` for a seeded handler parameter, `literal <name>` for a literal-source store, and `static <owner>.<field> written in <functions>` for a read of a static field another function stored taint into — an `object`'s, a companion's or a top-level property, or a container singleton's field (a Spring stereotype, `@Singleton`, `@ApplicationScoped`) |
 | `sourceFunction`, `sinkFunction` | string | the function each END lives in — two different functions (and modules) for an interprocedural slice |
 | `sourceCategory`, `sinkCategory` | string | pack categories (independent: `untrusted-input` can reach `log-injection`) |
+| (proxy-derived) | string | a source category for request values a client can choose through `Forwarded`/`X-Forwarded-*` headers behind a pass-through proxy: servlet `getRemoteAddr`/`getRemoteHost`/`getServerName`/`getServerPort`/`getScheme`/`isSecure`/`getRequestURL` (rewritten by Tomcat `RemoteIpValve` and Spring `ForwardedHeaderFilter`), Spring `ServletUriComponentsBuilder.fromCurrent*`, and Vert.x `HttpServerRequest.remoteAddress`/`authority`/`host`. Ktor's `RequestConnectionPoint` accessors are deliberately absent: `origin` and `local` share one type FQN, so callee matching cannot separate the plugin-adjusted view from the socket view without tagging both |
 | `sourceParameter` | string? | for a slice that entered through an endpoint HANDLER's parameter, the value-parameter it entered through — `#0` is the first non-receiver parameter. `null` for every other birth. Before this field an endpoint-rooted slice could say "this handler is reachable from untrusted input" but never WHICH input |
 | `sourceTransport` | string? | the transport that parameter's annotation names — `path`, `query`, `header`, `cookie`, `form`, `body` (the endpoints pack's `parameterAnnotations[].kind`). `null` when the handler (or framework) names no annotation for it |
 | `taintKinds` | string[] | the categories travelling on the trace |
@@ -718,7 +719,7 @@ carries the same values with their enclosing symbol.
 
 | Attribute | Type | Purpose |
 | --- | --- | --- |
-| `code` | string | closed vocabulary (02-ARCHITECTURE.md §8); `native-interop` emits today |
+| `code` | string | closed vocabulary (02-ARCHITECTURE.md §8); `native-interop` and `trusted-proxy-config` emit today |
 | `message` | string | human explanation naming the seam |
 | `modulePath`, `purl` | string | attribution (empty for cinterop `.def` files, which are not module sources) |
 | `filePath` | string | relative path, or the `.def` file's repo-relative path |
@@ -730,6 +731,24 @@ lowered function (JNI seam), a RESOLVED `System/Runtime.loadLibrary|load`
 call (the binding site), and `.def` files under the conventional cinterop
 source-set directories (`nativeInterop/cinterop`, `cinterop`). A function
 merely NAMED like a native one is a corpus negative, not a finding.
+
+## trusted-proxy-config — the forwarded-header switch
+
+The `trusted-proxy-config` signal code marks where the code turns on handling
+of the client-supplied `Forwarded` and `X-Forwarded-*` headers. The
+`message` names the framework; a deployment is exposed only when the proxy in
+front passes those headers through, which no source scan can see. The rules
+key on the framework's own resolved symbol, and an explicitly off value
+emits nothing:
+
+- Spring `ForwardedHeaderFilter` (both header families), unless it is in
+  remove-only mode (`setRemoveOnly(true)`, which strips the headers).
+- Tomcat `RemoteIpValve` (X-Forwarded-*).
+- Jetty `ForwardedRequestCustomizer` (the RFC 7239 `Forwarded` header).
+- Ktor's `ForwardedHeaders` and `XForwardedHeaders` plugins.
+- `server.forward-headers-strategy` in the application config files:
+  `native` (the container's X-Forwarded-* handling) or `framework`
+  (Spring's filter, both families); `none` emits nothing.
 
 ## crypto — CryptoEvidence (resolved tier)
 
