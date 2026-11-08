@@ -35,27 +35,26 @@
   },
   "dataFlow": {
     "mode": "security",
-    "nodeCount": 89,
-    "edgeCount": 79,
-    "sliceCount": 32,
-    "uniqueFlowCount": 15,
+    "nodeCount": 42,
+    "edgeCount": 35,
+    "sliceCount": 13,
+    "uniqueFlowCount": 8,
     "summaryCount": 0,
     "flowsByCategoryPair": {
       "http-input-\u003edata": 2,
-      "http-input-\u003eexternal-service": 2,
-      "http-input-\u003elogging": 21,
+      "http-input-\u003elogging": 4,
       "http-input-\u003epanic": 1,
       "http-input-\u003etemplate-injection": 5,
       "http-input-\u003ezip-slip": 1
     },
     "flowsBySeverity": {
-      "high": 10,
-      "medium": 22
+      "high": 8,
+      "medium": 5
     },
-    "flowKeySetHash": "62ed27df8be27332",
+    "flowKeySetHash": "178c23f05a66d6af",
     "edgeConnectivity": 1,
     "integrityViolations": 0,
-    "dependencyCrossingSlices": 27,
+    "dependencyCrossingSlices": 10,
     "sampleFlows": [
       {
         "flowKey": "df-flow|sha256:0dc4f6cbbb2026ba8276d962377ead012248f9808cb9dd2638e12400a06b40e8",
@@ -124,94 +123,6 @@
         "taintKinds": "user-input"
       },
       {
-        "flowKey": "df-flow|sha256:5648009e0744178d5d6335bec23174831f434148bb1e39b3671b6ec6c484d342",
-        "source": "net/http.(*Request).FormValue",
-        "sink": "log.Println",
-        "sourceAt": "vulnerability/idor/idor.go:127",
-        "sinkAt": "vulnerability/idor/idor.go:152",
-        "severity": "medium",
-        "pathLength": 8,
-        "connected": true,
-        "taintKinds": "secret,user-input"
-      },
-      {
-        "flowKey": "df-flow|sha256:5648009e0744178d5d6335bec23174831f434148bb1e39b3671b6ec6c484d342",
-        "source": "net/http.(*Request).FormValue",
-        "sink": "log.Println",
-        "sourceAt": "vulnerability/idor/idor.go:128",
-        "sinkAt": "vulnerability/idor/idor.go:152",
-        "severity": "medium",
-        "pathLength": 8,
-        "connected": true,
-        "taintKinds": "secret,user-input"
-      },
-      {
-        "flowKey": "df-flow|sha256:5648009e0744178d5d6335bec23174831f434148bb1e39b3671b6ec6c484d342",
-        "source": "net/http.(*Request).FormValue",
-        "sink": "log.Println",
-        "sourceAt": "vulnerability/idor/idor.go:129",
-        "sinkAt": "vulnerability/idor/idor.go:152",
-        "severity": "medium",
-        "pathLength": 8,
-        "connected": true,
-        "taintKinds": "secret,user-input"
-      },
-      {
-        "flowKey": "df-flow|sha256:5648009e0744178d5d6335bec23174831f434148bb1e39b3671b6ec6c484d342",
-        "source": "net/http.(*Request).FormValue",
-        "sink": "log.Println",
-        "sourceAt": "vulnerability/idor/idor.go:126",
-        "sinkAt": "vulnerability/idor/idor.go:152",
-        "severity": "medium",
-        "pathLength": 8,
-        "connected": true,
-        "taintKinds": "secret,user-input"
-      },
-      {
-        "flowKey": "df-flow|sha256:72d266d1e88726a832ca3a63ecf1e98b3b9ce58baaae6493ddde97792bcc183b",
-        "source": "net/http.(*Request).FormValue",
-        "sink": "log.Println",
-        "sourceAt": "vulnerability/idor/idor.go:88",
-        "sinkAt": "vulnerability/idor/idor.go:102",
-        "severity": "medium",
-        "pathLength": 8,
-        "connected": true,
-        "taintKinds": "secret,user-input"
-      },
-      {
-        "flowKey": "df-flow|sha256:72d266d1e88726a832ca3a63ecf1e98b3b9ce58baaae6493ddde97792bcc183b",
-        "source": "net/http.(*Request).FormValue",
-        "sink": "log.Println",
-        "sourceAt": "vulnerability/idor/idor.go:87",
-        "sinkAt": "vulnerability/idor/idor.go:102",
-        "severity": "medium",
-        "pathLength": 8,
-        "connected": true,
-        "taintKinds": "secret,user-input"
-      },
-      {
-        "flowKey": "df-flow|sha256:72d266d1e88726a832ca3a63ecf1e98b3b9ce58baaae6493ddde97792bcc183b",
-        "source": "net/http.(*Request).FormValue",
-        "sink": "log.Println",
-        "sourceAt": "vulnerability/idor/idor.go:85",
-        "sinkAt": "vulnerability/idor/idor.go:102",
-        "severity": "medium",
-        "pathLength": 8,
-        "connected": true,
-        "taintKinds": "secret,user-input"
-      },
-      {
-        "flowKey": "df-flow|sha256:72d266d1e88726a832ca3a63ecf1e98b3b9ce58baaae6493ddde97792bcc183b",
-        "source": "net/http.(*Request).FormValue",
-        "sink": "log.Println",
-        "sourceAt": "vulnerability/idor/idor.go:86",
-        "sinkAt": "vulnerability/idor/idor.go:102",
-        "severity": "medium",
-        "pathLength": 8,
-        "connected": true,
-        "taintKinds": "secret,user-input"
-      },
-      {
         "flowKey": "df-flow|sha256:7fbcbadf178dce70fd999d784863cbecbe57b48d2e84b3f2060f189410fb0a76",
         "source": "net/http.(*Request)",
         "sink": "(*database/sql.DB).Query",
@@ -232,61 +143,6 @@
         "pathLength": 2,
         "connected": true,
         "taintKinds": "path,user-input"
-      },
-      {
-        "flowKey": "df-flow|sha256:944e97d693390b1b1a7d35ffea39bd0e9dd69a206ce1450b87000d0a2924b451",
-        "source": "net/http.(*Request).FormValue",
-        "sink": "log.Println",
-        "sourceAt": "vulnerability/idor/idor.go:126",
-        "sinkAt": "vulnerability/idor/function.go:18",
-        "severity": "medium",
-        "pathLength": 7,
-        "connected": true,
-        "taintKinds": "secret,user-input"
-      },
-      {
-        "flowKey": "df-flow|sha256:944e97d693390b1b1a7d35ffea39bd0e9dd69a206ce1450b87000d0a2924b451",
-        "source": "net/http.(*Request).FormValue",
-        "sink": "log.Println",
-        "sourceAt": "vulnerability/idor/idor.go:128",
-        "sinkAt": "vulnerability/idor/function.go:18",
-        "severity": "medium",
-        "pathLength": 7,
-        "connected": true,
-        "taintKinds": "secret,user-input"
-      },
-      {
-        "flowKey": "df-flow|sha256:944e97d693390b1b1a7d35ffea39bd0e9dd69a206ce1450b87000d0a2924b451",
-        "source": "net/http.(*Request).FormValue",
-        "sink": "log.Println",
-        "sourceAt": "vulnerability/idor/idor.go:129",
-        "sinkAt": "vulnerability/idor/function.go:18",
-        "severity": "medium",
-        "pathLength": 7,
-        "connected": true,
-        "taintKinds": "secret,user-input"
-      },
-      {
-        "flowKey": "df-flow|sha256:944e97d693390b1b1a7d35ffea39bd0e9dd69a206ce1450b87000d0a2924b451",
-        "source": "net/http.(*Request).FormValue",
-        "sink": "log.Println",
-        "sourceAt": "vulnerability/idor/idor.go:127",
-        "sinkAt": "vulnerability/idor/function.go:18",
-        "severity": "medium",
-        "pathLength": 7,
-        "connected": true,
-        "taintKinds": "secret,user-input"
-      },
-      {
-        "flowKey": "df-flow|sha256:a444f48a533b0ccdfd3f127e96ece5cfcf040d43530520307d09b7000786096b",
-        "source": "net/http.(*Request)",
-        "sink": "(net/http.Header).Get",
-        "sourceAt": "util/middleware/middleware.go:23",
-        "sinkAt": "util/middleware/middleware.go:25",
-        "severity": "high",
-        "pathLength": 1,
-        "connected": true,
-        "taintKinds": "url,user-input"
       },
       {
         "flowKey": "df-flow|sha256:b00cae2508e9201cc311e7766984397dc8f3d623bab155e6b634cb10b951b995",
@@ -311,24 +167,35 @@
         "taintKinds": "secret,user-input"
       },
       {
-        "flowKey": "df-flow|sha256:c4a6cb2cb0d00ee2a24fcec43799b6e178b1ca5802d042c48a8897ceb5cb0be3",
-        "source": "net/http.(*Request)",
-        "sink": "(net/http.Header).Get",
-        "sourceAt": "util/middleware/middleware.go:68",
-        "sinkAt": "util/middleware/middleware.go:69",
-        "severity": "high",
-        "pathLength": 1,
+        "flowKey": "df-flow|sha256:f739d63e77208b96347d4c4454b59739b2ddcac5f5bf56d871dfa58d63a7f84d",
+        "source": "net/http.(Header).Get",
+        "sink": "log.Printf",
+        "sourceAt": "util/middleware/middleware.go:25",
+        "sinkAt": "util/middleware/middleware.go:25",
+        "severity": "medium",
+        "pathLength": 3,
         "connected": true,
-        "taintKinds": "url,user-input"
+        "taintKinds": "secret,user-input"
       },
       {
-        "flowKey": "df-flow|sha256:c71a4b6e04d14aaa25db4f690544e2379f2d9a995cb65c391c1de601966ced1b",
-        "source": "net/http.(*Request).FormValue",
+        "flowKey": "df-flow|sha256:f739d63e77208b96347d4c4454b59739b2ddcac5f5bf56d871dfa58d63a7f84d",
+        "source": "net/http.(*Request)",
         "sink": "log.Printf",
-        "sourceAt": "vulnerability/idor/idor.go:124",
-        "sinkAt": "vulnerability/idor/idor.go:138",
+        "sourceAt": "util/middleware/middleware.go:23",
+        "sinkAt": "util/middleware/middleware.go:26",
         "severity": "medium",
-        "pathLength": 4,
+        "pathLength": 2,
+        "connected": true,
+        "taintKinds": "secret,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:f739d63e77208b96347d4c4454b59739b2ddcac5f5bf56d871dfa58d63a7f84d",
+        "source": "net/http.(*Request)",
+        "sink": "log.Printf",
+        "sourceAt": "util/middleware/middleware.go:23",
+        "sinkAt": "util/middleware/middleware.go:28",
+        "severity": "medium",
+        "pathLength": 2,
         "connected": true,
         "taintKinds": "secret,user-input"
       }

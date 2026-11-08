@@ -541,13 +541,21 @@ func (db *DB) MatchSymbol(obj types.Object) []ModelEntry {
 
 	seen := make(map[string]bool)
 	for _, key := range keys {
-		for _, e := range db.byPackageFunc[key] {
-			if seen[e.ID] {
-				continue
+		// The receiver gate MatchFunction applies on the same lookup: a
+		// method is not the package-level function of the same name. An
+		// interface-invoke call to a Get method reached byPackageFunc under
+		// the unqualified "net/http.Get" key and matched the package-level
+		// SSRF sink, so a header read travelled through an interface came
+		// back marked as an outbound request.
+		if recvTypeName == "" {
+			for _, e := range db.byPackageFunc[key] {
+				if seen[e.ID] {
+					continue
+				}
+				seen[e.ID] = true
+				results = append(results, *e)
+				db.matchedSymbols[e.ID] = true
 			}
-			seen[e.ID] = true
-			results = append(results, *e)
-			db.matchedSymbols[e.ID] = true
 		}
 		for _, e := range db.byReceiver[key] {
 			if seen[e.ID] {
