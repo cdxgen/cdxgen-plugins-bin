@@ -1,0 +1,116 @@
+thirdparty/golem/internal/analyzer/dataflow.go
+  s_9d1b258b13890d::t_69dea6f4b3c316 478-492,2918
+  s_9d1b258b13890d::t_905356d7fe6b8a 644-665
+  s_9d1b258b13890d::t_da5e44d8e7a802 666,1428,2886-2917
+  s_9d1b258b13890d::t_6f5dcc2217c61c 1453-1470,1474-1487
+  s_9d1b258b13890d::t_0310db5744dae1 1405-1424
+  s_9d1b258b13890d::t_1581ebeff339c6 2919
+thirdparty/golem/internal/model/model.go
+  s_9d1b258b13890d::t_196451e8409473 495-507
+thirdparty/golem/internal/models/models.go
+  s_9d1b258b13890d::t_48e1aacabaa3f0 218
+  s_9d1b258b13890d::t_2c0b770b829e20 7
+  s_9d1b258b13890d::t_82b8c00b6de228 297,533-607
+  s_9d1b258b13890d::t_5ebc1348304db9 39-53
+  s_9d1b258b13890d::t_09b93f693404da 289-295
+  s_9d1b258b13890d::t_87cb5da5099ad9 514-520
+  s_9d1b258b13890d::t_3280cb60ce6649 102-107
+  s_9d1b258b13890d::t_ec1fbfd417e32c 194-198
+  s_9d1b258b13890d::t_af7c8a4df1af55 199,296,298,608
+thirdparty/golem/testdata/trusted-proxy/main.go
+  s_9d1b258b13890d::t_645e034cd2ef72 1-114
+thirdparty/golem/internal/seam/intra.go
+  s_9d1b258b13890d::t_3870d9a6ef42b5 954,1363-1391
+  s_9d1b258b13890d::t_8ad3eabd07c7d6 915-922,952-953
+  s_9d1b258b13890d::t_a163b528998f1a 1392
+thirdparty/golem/internal/analyzer/vocabulary_test.go
+  s_9d1b258b13890d::t_9fc1a9209e50a7 206-209
+  s_9d1b258b13890d::t_6037b42402a22e 158-163
+  s_9d1b258b13890d::t_349f37ccf39b32 210-211
+thirdparty/golem/internal/analyzer/security.go
+  s_9d1b258b13890d::t_5b7cdb6f4cb60c 147
+  s_9d1b258b13890d::t_49a02be9fd7f02 170-383,390-391,397-398,402,408,411-412,415,421,430-431,433
+  s_9d1b258b13890d::t_a6a935debdeda8 10,384-389,392-396,399-401,403-407,409-410,413-414,416-420,422-429,432,434-438
+thirdparty/golem/internal/seam/seam.go
+  s_9d1b258b13890d::t_00ac0e8c94eb95 390-405,417-425,449-456
+  s_9d1b258b13890d::t_4b50758efad725 507-518
+  s_9d1b258b13890d::t_577999c606fdb1 927
+thirdparty/golem/JSON_ATTRIBUTE_REFERENCE.md
+  s_9d1b258b13890d::t_d13f551267a891 206,322-362
+thirdparty/golem/README.md
+  s_9d1b258b13890d::t_311491f6dad903 122-151
+thirdparty/golem/internal/analyzer/analyzer_test.go
+  s_9d1b258b13890d::t_31e96ed005f65b 247-296
+thirdparty/golem/internal/corpus/annotations.go
+  s_9d1b258b13890d::t_ea75d10ace8f81 400
+thirdparty/golem/internal/models/stdlib.json
+  s_9d1b258b13890d::t_8c2ff32555d803 561-617
+thirdparty/golem/internal/models/thirdparty.json
+  s_9d1b258b13890d::t_19f54349a2858a 138-169,308-339,396-436
+thirdparty/golem/testdata/bench/annotations/go-test-bench.golem
+  s_9d1b258b13890d::t_d21ecc77f8736a 71-77
+thirdparty/golem/testdata/bench/manifest.json
+  s_9d1b258b13890d::t_3f461ebfd5358c 79-98,224-228
+thirdparty/golem/testdata/corpus/forwarded-headers-negative/go.mod
+  s_9d1b258b13890d::t_3212e3b9565346 1-3
+thirdparty/golem/testdata/corpus/forwarded-headers-negative/main.go
+  s_9d1b258b13890d::t_d3c1013ed20bb2 1-46
+thirdparty/golem/testdata/corpus/forwarded-headers-read/go.mod
+  s_9d1b258b13890d::t_241aa24e8b7e51 1-3
+thirdparty/golem/testdata/corpus/forwarded-headers-read/main.go
+  s_9d1b258b13890d::t_37c4cd69a20ec8 1-34
+thirdparty/golem/testdata/corpus/framework-forwarded-accessors-negative/go.mod
+  s_9d1b258b13890d::t_2ce7c06736a1c0 1-15
+thirdparty/golem/testdata/corpus/framework-forwarded-accessors-negative/main.go
+  s_9d1b258b13890d::t_51c66c1df5c408 1-55
+thirdparty/golem/testdata/corpus/framework-forwarded-accessors/go.mod
+  s_9d1b258b13890d::t_4dc93a68376da6 1-15
+thirdparty/golem/testdata/corpus/framework-forwarded-accessors/main.go
+  s_9d1b258b13890d::t_176a861e676098 1-60
+thirdparty/golem/testdata/corpus/request-remoteaddr-host/go.mod
+  s_9d1b258b13890d::t_7555332c199dd2 1-3
+thirdparty/golem/testdata/corpus/request-remoteaddr-host/main.go
+  s_9d1b258b13890d::t_505437909da23d 1-23
+thirdparty/golem/testdata/framework-stubs/chi/middleware/middleware.go
+  s_9d1b258b13890d::t_be0c582571c368 1-10
+thirdparty/golem/testdata/framework-stubs/echo/echo.go
+  s_9d1b258b13890d::t_5972bbeaeac180 9-10,22-27,39-52
+thirdparty/golem/testdata/framework-stubs/fiber/fiber.go
+  s_9d1b258b13890d::t_75d99a899126b8 1-34
+thirdparty/golem/testdata/framework-stubs/fiber/go.mod
+  s_9d1b258b13890d::t_f6ccc06948d3e3 1-5
+thirdparty/golem/testdata/framework-stubs/gin/gin.go
+  s_9d1b258b13890d::t_4474196ccda5e4 38-48,51-61
+thirdparty/golem/testdata/framework-stubs/handlers/go.mod
+  s_9d1b258b13890d::t_e85180b60b6373 1-4
+thirdparty/golem/testdata/framework-stubs/handlers/handlers.go
+  s_9d1b258b13890d::t_52dbcc2041f2ac 1-11
+thirdparty/golem/testdata/golden/go-chi-exported-roots.digest.json
+  s_9d1b258b13890d::t_ee639037e5e09a 39-42,47-48,51,53,56,167-177
+thirdparty/golem/testdata/golden/go-chi-security.digest.json
+  s_9d1b258b13890d::t_26f5bc7dc43f1b 38-41,46-47,50,52,55,166-176
+thirdparty/golem/testdata/golden/go-test-bench-all.digest.json
+  s_9d1b258b13890d::t_5ba67e337f5207 39-42,59-60,65,67,70,123,134
+thirdparty/golem/testdata/golden/go-test-bench-security.digest.json
+  s_9d1b258b13890d::t_d56d75559dafc6 39-42,58-59,64,66,69
+thirdparty/golem/testdata/seam-parity.json
+  s_9d1b258b13890d::t_d5250efcbdad79 8-9,16-17,36
+thirdparty/golem/testdata/trusted-proxy/go.mod
+  s_9d1b258b13890d::t_f79b836e2ea567 1-21
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "94ea9c2aebe5213032ffe8e41bf0f98e5bf9ba2c",
+  "prompts": {},
+  "sessions": {
+    "s_9d1b258b13890d": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_2af49bff-c8ba-4475-948a-9135fdf9dfab",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
