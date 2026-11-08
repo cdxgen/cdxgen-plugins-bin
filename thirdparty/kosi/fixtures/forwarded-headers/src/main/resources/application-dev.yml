@@ -1,0 +1,3 @@
+# none turns the handling off
+server:
+  forward-headers-strategy: none

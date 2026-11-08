@@ -77,6 +77,26 @@
       "tier": "quick"
     },
     {
+      "name": "forwarded-headers-negative",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "forwarded-headers-read",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "framework-forwarded-accessors",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "framework-forwarded-accessors-negative",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
       "name": "func-field-dispatch",
       "type": "corpus",
       "tier": "quick"
@@ -198,6 +218,11 @@
     },
     {
       "name": "request-field-source",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "request-remoteaddr-host",
       "type": "corpus",
       "tier": "quick"
     },

@@ -248,7 +248,7 @@ data class Annotation(
             "native-interop", "unsafe-interop", "webview-config", "permissive-cors",
             "csrf-disabled", "debuggable", "cleartext-traffic", "reflection",
             "dynamic-code-load", "external-process", "serialization-config",
-            "hardcoded-material",
+            "hardcoded-material", "trusted-proxy-config",
         )
 
         /** The endpoint `foundBy`/framework vocabulary comes from the shipped pack. */

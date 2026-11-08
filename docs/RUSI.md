@@ -90,6 +90,10 @@ House analysis rules merge with the built-in pack through `--patterns`:
 rusi analyze --dir . --dataflow security --patterns ./rusi-patterns.json --out rusi-custom.json
 ```
 
+### Forwarded headers
+
+Request values a client can choose through the `Forwarded` and `X-Forwarded-*` headers are `proxy-derived` sources: the axum `Host` extractor, the `axum-client-ip` extractors (`ClientIp`, `InsecureClientIp`, `SecureClientIp`, `RightmostXForwardedFor`, `RightmostForwarded`, `XRealIp`), actix `connection_info()` `realip_remote_addr`, `host` and `scheme`, and `headers().get(..)` with a forwarded header's name as a literal. The source node's `properties` carry `taint-kind` (`client-ip`, `host`, `scheme` or `forwarded-header`) and, for a header read, `header`. The socket view (`HttpRequest::peer_addr`, axum `ConnectInfo`) is not tagged. An `axum_client_ip::ClientIpSource` layer other than `ConnectInfo` raises the `trusted-proxy-config` security signal with `framework` and `headers` properties. Neither means a deployment is vulnerable: the values are spoofable only behind a proxy that passes the headers through.
+
 ## Crypto inventory
 
 `rusi cryptos` filters the report down to cryptographic evidence for CBOM-style review. Recognized families include sha2, sha1, md5, blake3, aes-gcm, chacha20poly1305, hmac, pbkdf2, argon2, rsa, ed25519-dalek, rustls, and jsonwebtoken. The compiler backend enriches these with type-resolved call sites where the toolchain evidence allows.

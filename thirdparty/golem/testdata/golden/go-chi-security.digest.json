@@ -17,132 +17,43 @@
   },
   "callGraph": {
     "algorithm": "rta",
-    "nodeCount": 84,
-    "edgeCount": 234,
+    "nodeCount": 90,
+    "edgeCount": 306,
     "nodesByKind": {
-      "function": 84
+      "function": 90
     },
     "edgesByCallType": {
       "func-value": 1,
-      "interface": 151,
+      "interface": 223,
       "static": 82
     },
-    "nodeSetHash": "e1e637c242809a55",
-    "edgeSetHash": "d64979beafa5b463",
-    "syntheticNodes": 47,
+    "nodeSetHash": "d10060f1bcccc892",
+    "edgeSetHash": "4b0274778ab8b24e",
+    "syntheticNodes": 53,
     "stdlibNodes": 0,
     "externalNodes": 2
   },
   "dataFlow": {
     "mode": "security",
-    "nodeCount": 46,
-    "edgeCount": 39,
-    "sliceCount": 21,
-    "uniqueFlowCount": 15,
+    "nodeCount": 24,
+    "edgeCount": 25,
+    "sliceCount": 11,
+    "uniqueFlowCount": 7,
     "summaryCount": 0,
     "flowsByCategoryPair": {
-      "http-input-\u003eexternal-service": 11,
       "http-input-\u003eformatted-output": 3,
       "http-input-\u003epanic": 4,
-      "http-input-\u003eredirect": 3
+      "http-input-\u003eredirect": 3,
+      "proxy-derived-\u003eredirect": 1
     },
     "flowsBySeverity": {
-      "high": 11,
-      "medium": 10
+      "medium": 11
     },
-    "flowKeySetHash": "1678cc3a8997d86a",
+    "flowKeySetHash": "d4cc2006198de68b",
     "edgeConnectivity": 1,
     "integrityViolations": 0,
-    "dependencyCrossingSlices": 6,
+    "dependencyCrossingSlices": 7,
     "sampleFlows": [
-      {
-        "flowKey": "df-flow|http-input|external-service|github.com/go-chi/chi/v5/middleware.NoCache$1|github.com/go-chi/chi/v5/middleware.NoCache$1|(net/http.Header).Get|0|url,user-input|",
-        "source": "net/http.(*Request)",
-        "sink": "(net/http.Header).Get",
-        "sourceAt": "middleware/nocache.go:41",
-        "sinkAt": "middleware/nocache.go:45",
-        "severity": "high",
-        "pathLength": 1,
-        "connected": true,
-        "taintKinds": "url,user-input"
-      },
-      {
-        "flowKey": "df-flow|http-input|external-service|github.com/go-chi/chi/v5/middleware.RealIP$1|github.com/go-chi/chi/v5/middleware.realIP|(net/http.Header).Get|0|url,user-input|",
-        "source": "net/http.(*Request)",
-        "sink": "(net/http.Header).Get",
-        "sourceAt": "middleware/realip.go:32",
-        "sinkAt": "middleware/realip.go:45",
-        "severity": "high",
-        "pathLength": 2,
-        "connected": true,
-        "taintKinds": "url,user-input"
-      },
-      {
-        "flowKey": "df-flow|http-input|external-service|github.com/go-chi/chi/v5/middleware.Recoverer$1|github.com/go-chi/chi/v5/middleware.Recoverer$1$1|(net/http.Header).Get|0|url,user-input|",
-        "source": "net/http.(*Request)",
-        "sink": "(net/http.Header).Get",
-        "sourceAt": "middleware/recoverer.go:23",
-        "sinkAt": "middleware/recoverer.go:39",
-        "severity": "high",
-        "pathLength": 3,
-        "connected": true,
-        "taintKinds": "url,user-input"
-      },
-      {
-        "flowKey": "df-flow|http-input|external-service|github.com/go-chi/chi/v5/middleware.RequestID$1|github.com/go-chi/chi/v5/middleware.RequestID$1|(net/http.Header).Get|0|url,user-input|",
-        "source": "net/http.(*Request)",
-        "sink": "(net/http.Header).Get",
-        "sourceAt": "middleware/request_id.go:68",
-        "sinkAt": "middleware/request_id.go:70",
-        "severity": "high",
-        "pathLength": 1,
-        "connected": true,
-        "taintKinds": "url,user-input"
-      },
-      {
-        "flowKey": "df-flow|http-input|external-service|github.com/go-chi/chi/v5/middleware.realIP|github.com/go-chi/chi/v5/middleware.realIP|(net/http.Header).Get|0|url,user-input|",
-        "source": "net/http.(*Request)",
-        "sink": "(net/http.Header).Get",
-        "sourceAt": "middleware/realip.go:42",
-        "sinkAt": "middleware/realip.go:45",
-        "severity": "high",
-        "pathLength": 1,
-        "connected": true,
-        "taintKinds": "url,user-input"
-      },
-      {
-        "flowKey": "df-flow|http-input|external-service|github.com/go-chi/chi/v5/middleware.realIP|github.com/go-chi/chi/v5/middleware.realIP|(net/http.Header).Get|0|url,user-input|",
-        "source": "net/http.(*Request)",
-        "sink": "(net/http.Header).Get",
-        "sourceAt": "middleware/realip.go:42",
-        "sinkAt": "middleware/realip.go:47",
-        "severity": "high",
-        "pathLength": 1,
-        "connected": true,
-        "taintKinds": "url,user-input"
-      },
-      {
-        "flowKey": "df-flow|http-input|external-service|github.com/go-chi/chi/v5/middleware.realIP|github.com/go-chi/chi/v5/middleware.realIP|(net/http.Header).Get|0|url,user-input|",
-        "source": "net/http.(*Request)",
-        "sink": "(net/http.Header).Get",
-        "sourceAt": "middleware/realip.go:42",
-        "sinkAt": "middleware/realip.go:49",
-        "severity": "high",
-        "pathLength": 1,
-        "connected": true,
-        "taintKinds": "url,user-input"
-      },
-      {
-        "flowKey": "df-flow|http-input|formatted-output|(*github.com/go-chi/chi/v5/middleware.DefaultLogFormatter).NewLogEntry|github.com/go-chi/chi/v5/middleware.cW|fmt.Fprintf|4|user-input|[*]",
-        "source": "net/http.(*Request)",
-        "sink": "fmt.Fprintf",
-        "sourceAt": "middleware/logger.go:98",
-        "sinkAt": "middleware/terminal.go:59",
-        "severity": "medium",
-        "pathLength": 3,
-        "connected": true,
-        "taintKinds": "user-input"
-      },
       {
         "flowKey": "df-flow|http-input|formatted-output|(*github.com/go-chi/chi/v5/middleware.DefaultLogFormatter).NewLogEntry|github.com/go-chi/chi/v5/middleware.cW|fmt.Fprintf|4|user-input|[*]",
         "source": "net/http.(*Request)",
@@ -162,6 +73,17 @@
         "sinkAt": "middleware/terminal.go:59",
         "severity": "medium",
         "pathLength": 5,
+        "connected": true,
+        "taintKinds": "user-input"
+      },
+      {
+        "flowKey": "df-flow|http-input|formatted-output|(*github.com/go-chi/chi/v5/middleware.DefaultLogFormatter).NewLogEntry|github.com/go-chi/chi/v5/middleware.cW|fmt.Fprintf|4|user-input|[*]",
+        "source": "net/http.(*Request)",
+        "sink": "fmt.Fprintf",
+        "sourceAt": "middleware/logger.go:98",
+        "sinkAt": "middleware/terminal.go:59",
+        "severity": "medium",
+        "pathLength": 3,
         "connected": true,
         "taintKinds": "user-input"
       },
@@ -243,48 +165,15 @@
         "taintKinds": "url,user-input"
       },
       {
-        "flowKey": "df-flow|sha256:42778ede9a114a6b87d2ff0254c164a383bf42c0fb884ebdcd95f70e65a82699",
-        "source": "net/http.(*Request)",
-        "sink": "(net/http.Header).Get",
-        "sourceAt": "middleware/compress.go:191",
-        "sinkAt": "middleware/compress.go:215",
-        "severity": "high",
-        "pathLength": 2,
+        "flowKey": "df-flow|sha256:b4043355f4b009babfdd9bd50a3775fd8e13c659a5dd2b97a01575713663f986",
+        "source": "net/http.(Request).Host",
+        "sink": "net/http.Redirect",
+        "sourceAt": "middleware/strip.go:55",
+        "sinkAt": "middleware/strip.go:56",
+        "severity": "medium",
+        "pathLength": 3,
         "connected": true,
-        "taintKinds": "url,user-input"
-      },
-      {
-        "flowKey": "df-flow|sha256:aa88c4c973d3d52db5dee1f89db61abe7bd9da4c3de8f06294d1c22661aa45dc",
-        "source": "net/http.(*Request)",
-        "sink": "(net/http.Header).Get",
-        "sourceAt": "middleware/route_headers.go:78",
-        "sinkAt": "middleware/route_headers.go:86",
-        "severity": "high",
-        "pathLength": 1,
-        "connected": true,
-        "taintKinds": "url,user-input"
-      },
-      {
-        "flowKey": "df-flow|sha256:ab17f7c7f0d588513abc57fb34f5e40f523e503906e0cd816ea1751912863ccc",
-        "source": "net/http.(*Request)",
-        "sink": "(net/http.Header).Get",
-        "sourceAt": "middleware/content_charset.go:16",
-        "sinkAt": "middleware/content_charset.go:17",
-        "severity": "high",
-        "pathLength": 1,
-        "connected": true,
-        "taintKinds": "url,user-input"
-      },
-      {
-        "flowKey": "df-flow|sha256:c79b9b92b6ab34ea68ee9fe18076c88c4dcd61c42d37ffa4b70ffb992661716e",
-        "source": "net/http.(*Request)",
-        "sink": "(net/http.Header).Get",
-        "sourceAt": "middleware/content_type.go:27",
-        "sinkAt": "middleware/content_type.go:34",
-        "severity": "high",
-        "pathLength": 1,
-        "connected": true,
-        "taintKinds": "url,user-input"
+        "taintKinds": "host,url,user-input"
       }
     ]
   }

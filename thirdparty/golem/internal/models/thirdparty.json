@@ -136,6 +136,38 @@
   "confidence": "high"
  },
  {
+  "id": "echo-context-realip.source",
+  "kind": "source",
+  "module": "github.com/labstack/echo/v4",
+  "package": "github.com/labstack/echo/v4",
+  "receiver": "Context",
+  "function": "RealIP",
+  "category": "proxy-derived",
+  "taintKinds": [
+   "user-input",
+   "client-ip"
+  ],
+  "severity": "medium",
+  "confidence": "high",
+  "description": "RealIP returns the address echo resolves from the configured IPExtractor or X-Forwarded-For/X-Real-IP, so behind a pass-through proxy the client chooses it"
+ },
+ {
+  "id": "echo-context-scheme.source",
+  "kind": "source",
+  "module": "github.com/labstack/echo/v4",
+  "package": "github.com/labstack/echo/v4",
+  "receiver": "Context",
+  "function": "Scheme",
+  "category": "proxy-derived",
+  "taintKinds": [
+   "user-input",
+   "scheme"
+  ],
+  "severity": "medium",
+  "confidence": "high",
+  "description": "Scheme returns the protocol echo resolves from X-Forwarded-Proto when the connection is not TLS, so behind a pass-through proxy the client chooses it"
+ },
+ {
   "id": "fiber-ctx-body.source",
   "kind": "source",
   "module": "github.com/gofiber/fiber",
@@ -274,6 +306,70 @@
   "confidence": "high"
  },
  {
+  "id": "fiber-ctx-ip.source",
+  "kind": "source",
+  "module": "github.com/gofiber/fiber/v2",
+  "package": "github.com/gofiber/fiber/v2",
+  "receiver": "*Ctx",
+  "function": "IP",
+  "category": "proxy-derived",
+  "taintKinds": [
+   "user-input",
+   "client-ip"
+  ],
+  "severity": "medium",
+  "confidence": "high",
+  "description": "IP returns the address fiber extracts from Config.ProxyHeader when the proxy is trusted, so behind a pass-through proxy the client chooses it"
+ },
+ {
+  "id": "fiber-ctx-ips.source",
+  "kind": "source",
+  "module": "github.com/gofiber/fiber/v2",
+  "package": "github.com/gofiber/fiber/v2",
+  "receiver": "*Ctx",
+  "function": "IPs",
+  "category": "proxy-derived",
+  "taintKinds": [
+   "user-input",
+   "client-ip"
+  ],
+  "severity": "medium",
+  "confidence": "high",
+  "description": "IPs returns every address in X-Forwarded-For, so behind a pass-through proxy the client chooses them"
+ },
+ {
+  "id": "fiber-ctx-hostname.source",
+  "kind": "source",
+  "module": "github.com/gofiber/fiber/v2",
+  "package": "github.com/gofiber/fiber/v2",
+  "receiver": "*Ctx",
+  "function": "Hostname",
+  "category": "proxy-derived",
+  "taintKinds": [
+   "user-input",
+   "host"
+  ],
+  "severity": "medium",
+  "confidence": "high",
+  "description": "Hostname returns X-Forwarded-Host whenever the peer is trusted, and fiber trusts every peer unless EnableTrustedProxyCheck is set, so behind a pass-through proxy the client chooses it"
+ },
+ {
+  "id": "fiber-ctx-protocol.source",
+  "kind": "source",
+  "module": "github.com/gofiber/fiber/v2",
+  "package": "github.com/gofiber/fiber/v2",
+  "receiver": "*Ctx",
+  "function": "Protocol",
+  "category": "proxy-derived",
+  "taintKinds": [
+   "user-input",
+   "scheme"
+  ],
+  "severity": "medium",
+  "confidence": "high",
+  "description": "Protocol returns X-Forwarded-Proto (or a related header) whenever the peer is trusted, and fiber trusts every peer unless EnableTrustedProxyCheck is set, so behind a pass-through proxy the client chooses it"
+ },
+ {
   "id": "gin-context-bind.source",
   "kind": "source",
   "module": "github.com/gin-gonic/gin",
@@ -328,6 +424,47 @@
   ],
   "severity": "high",
   "confidence": "high"
+ },
+ {
+  "id": "gin-context-clientip.source",
+  "kind": "source",
+  "module": "github.com/gin-gonic/gin",
+  "package": "github.com/gin-gonic/gin",
+  "receiver": "*Context",
+  "function": "ClientIP",
+  "category": "proxy-derived",
+  "taintKinds": [
+   "user-input",
+   "client-ip"
+  ],
+  "severity": "medium",
+  "confidence": "high",
+  "description": "ClientIP returns the address gin resolves from RemoteIPHeaders (X-Forwarded-For by default) when ForwardedByClientIP is set, so behind a pass-through proxy the client chooses it"
+ },
+ {
+  "id": "gin-context-getheader-forwarded.source",
+  "kind": "source",
+  "module": "github.com/gin-gonic/gin",
+  "package": "github.com/gin-gonic/gin",
+  "receiver": "*Context",
+  "function": "GetHeader",
+  "argumentLiterals": [
+   "forwarded",
+   "x-forwarded-for",
+   "x-forwarded-host",
+   "x-forwarded-proto",
+   "x-forwarded-port",
+   "x-real-ip",
+   "client-ip"
+  ],
+  "category": "proxy-derived",
+  "taintKinds": [
+   "user-input",
+   "forwarded-header"
+  ],
+  "severity": "medium",
+  "confidence": "high",
+  "description": "Reads a Forwarded or X-Forwarded-* header by literal name, a value the client can choose behind a pass-through proxy"
  },
  {
   "id": "gin-context-html.sink",

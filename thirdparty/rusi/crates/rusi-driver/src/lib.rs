@@ -2185,6 +2185,7 @@ impl NativeInteropCollector {
             file_path: self.file_ctx.relative_file_path.clone(),
             position: position_from_span(&self.file_ctx.relative_file_path, span),
             cfg_gate: None,
+            properties: IndexMap::new(),
         });
     }
     /// Whether the item with these attributes is compiled for Windows only,

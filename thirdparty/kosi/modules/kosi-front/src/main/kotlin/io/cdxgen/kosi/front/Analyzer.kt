@@ -1308,6 +1308,10 @@ object Analyzer {
                     root,
                     kirModule,
                     io.cdxgen.kosi.evidence.NativeInterop.Attribution(fileRelPathByAbsolute, purlByModulePath),
+                ) + io.cdxgen.kosi.evidence.ForwardedHeaders.collect(
+                    root,
+                    kirModule,
+                    io.cdxgen.kosi.evidence.NativeInterop.Attribution(fileRelPathByAbsolute, purlByModulePath),
                 ),
                 apiEndpoints = apiEndpoints,
                 services = endpoints.services,

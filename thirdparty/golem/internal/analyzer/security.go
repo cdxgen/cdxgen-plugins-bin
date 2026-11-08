@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"golang.org/x/tools/go/packages"
@@ -143,6 +144,7 @@ func (a *Analyzer) securitySignalsForFile(pkg *packages.Package, file *ast.File)
 		}
 		return true
 	})
+	signals = append(signals, a.trustedProxySignalsForFile(pkg, file)...)
 	return dedupeSignals(signals)
 }
 
@@ -163,6 +165,224 @@ func (a *Analyzer) signalForSelector(pkg *packages.Package, sel *ast.SelectorExp
 func (a *Analyzer) signal(pkg *packages.Package, category string, severity string, symbol string, description string, recommendation string, node ast.Node, props map[string]string) model.SecuritySignal {
 	r := a.nodeRange(node)
 	return model.SecuritySignal{ID: stableID(pkg.ID, category, symbol, r.Start.Filename, fmt.Sprint(r.Start.Line), fmt.Sprint(r.Start.Column)), Category: category, Severity: severity, Confidence: "type-resolved", UsageScope: fileRole(r.Start.Filename), PackagePath: pkg.PkgPath, Symbol: symbol, Description: description, Recommendation: recommendation, Range: r, Properties: props}
+}
+
+// trustedProxySelectors maps the framework's own symbols that turn on
+// forwarded-header handling to the signal's framework and headers properties.
+// Every key is a fully resolved package path plus symbol name, so the same
+// name on an unrelated receiver or in the analysed module's own code cannot
+// match: the lookup goes through pkg.TypesInfo, which knows where the symbol
+// was declared.
+var trustedProxySelectors = map[string]struct {
+	framework string
+	headers   string // forwarded, x-forwarded or all; empty when no literal names it
+}{
+	// middleware/realip.go rewrites RemoteAddr from X-Forwarded-For, X-Real-IP
+	// and True-Client-IP.
+	"github.com/go-chi/chi/v5/middleware.RealIP": {"chi", "x-forwarded"},
+	// proxy_headers.go rewrites RemoteAddr, URL.Scheme and Host from
+	// X-Forwarded-*, X-Real-IP and the RFC 7239 Forwarded header.
+	"github.com/gorilla/handlers.ProxyHeaders": {"gorilla", "all"},
+	// SetTrustedProxies gates which proxies gin believes; the header list
+	// lives in Engine.RemoteIPHeaders, so no family is named here.
+	"github.com/gin-gonic/gin.SetTrustedProxies": {"gin", ""},
+	// The two IPExtractors echo's IPExtractor field takes; X-Real-IP is the
+	// single-value spelling of the de-facto X-Forwarded family.
+	"github.com/labstack/echo/v4.ExtractIPFromXFFHeader":    {"echo", "x-forwarded"},
+	"github.com/labstack/echo/v4.ExtractIPFromRealIPHeader": {"echo", "x-forwarded"},
+}
+
+// trustedProxyFields maps a struct field of a framework's own config type to
+// how its value turns forwarded-header handling on. The key is the field's
+// declaring package path plus the field name, resolved through TypesInfo, so a
+// same-named field on an application struct never matches.
+// trustedProxyFields maps a struct field of a framework's own config type to
+// how its value turns forwarded-header handling on. The key is the field's
+// declaring package path plus the field name, resolved through TypesInfo, so a
+// same-named field on an application struct never matches. A field counts
+// whether it is set in a composite literal (fiber.Config{ProxyHeader: ...}) or
+// assigned (r.ForwardedByClientIP = true), which is how gin's Engine fields
+// are set in practice.
+//
+// fiber's EnableTrustedProxyCheck is left out on purpose: with it off (the
+// default) fiber trusts every peer's X-Forwarded-Host and X-Forwarded-Proto,
+// and turning it on narrows that trust to Config.TrustedProxies
+// (ctx.go IsProxyTrusted), so it never turns forwarded-header handling on.
+var trustedProxyFields = map[string]trustedProxyFieldRule{
+	"github.com/gin-gonic/gin.ForwardedByClientIP": {framework: "gin", kind: ruleBoolOn},
+	"github.com/gin-gonic/gin.RemoteIPHeaders":     {framework: "gin", kind: ruleHeaderList},
+	"github.com/gofiber/fiber/v2.ProxyHeader":      {framework: "fiber", kind: ruleHeaderLiteral},
+}
+
+type trustedProxyRuleKind int
+
+const (
+	ruleBoolOn        trustedProxyRuleKind = iota // fires unless the value is a literal false
+	ruleHeaderList                                // []string literal of header names
+	ruleHeaderLiteral                             // single string literal naming the header
+)
+
+type trustedProxyFieldRule struct {
+	framework string
+	kind      trustedProxyRuleKind
+}
+
+const ginSetTrustedProxies = "github.com/gin-gonic/gin.SetTrustedProxies"
+
+// trustedProxySignalsForFile reports where the code turns on forwarded-header
+// handling. What static analysis can see is the switch, not the proxy: the
+// signal records that the application resolves the client IP, host or scheme
+// from headers a client could have sent, and whether a deployment is actually
+// exposed depends on the proxy in front, which no source scan can see.
+func (a *Analyzer) trustedProxySignalsForFile(pkg *packages.Package, file *ast.File) []model.SecuritySignal {
+	var signals []model.SecuritySignal
+	emit := func(node ast.Node, symbol string, framework, headers string) {
+		props := map[string]string{"framework": framework}
+		if headers != "" {
+			props["headers"] = headers
+		}
+		signals = append(signals, a.signal(pkg, "trusted-proxy-config", "info", symbol,
+			"Turns on forwarded-header handling for "+framework+", so the client IP, host or scheme the application sees can be chosen by the client.",
+			"Ensure the proxy in front strips or overwrites Forwarded and X-Forwarded-* headers the client sends.",
+			node, props))
+	}
+	resolve := func(id *ast.Ident) string {
+		obj := pkg.TypesInfo.Uses[id]
+		if obj == nil || obj.Pkg() == nil {
+			return ""
+		}
+		return obj.Pkg().Path() + "." + obj.Name()
+	}
+	field := func(node ast.Node, key *ast.Ident, value ast.Expr) {
+		symbol := resolve(key)
+		rule, ok := trustedProxyFields[symbol]
+		if !ok {
+			return
+		}
+		switch rule.kind {
+		case ruleBoolOn:
+			// A literal false turns the behaviour off; anything else may
+			// turn it on, and a variable is reported rather than guessed at.
+			if lit, ok := value.(*ast.Ident); ok && lit.Name == "false" {
+				return
+			}
+			emit(node, symbol, rule.framework, "")
+		case ruleHeaderLiteral:
+			lit, ok := value.(*ast.BasicLit)
+			if !ok {
+				return
+			}
+			if name, _ := strconv.Unquote(lit.Value); name != "" {
+				emit(node, symbol, rule.framework, forwardedHeaderFamily(name))
+			}
+		case ruleHeaderList:
+			emit(node, symbol, rule.framework, headerFamilyUnion(value))
+		}
+	}
+	ast.Inspect(file, func(n ast.Node) bool {
+		switch x := n.(type) {
+		case *ast.CallExpr:
+			// SetTrustedProxies(nil) or an empty list turns trust off, so
+			// the call is judged with its argument rather than as a bare
+			// selector. A non-literal argument may be anything, and the
+			// signal errs on reporting it.
+			sel, ok := x.Fun.(*ast.SelectorExpr)
+			if !ok || resolve(sel.Sel) != ginSetTrustedProxies {
+				return true
+			}
+			if !ginTrustsNothing(x) {
+				emit(sel, ginSetTrustedProxies, "gin", "")
+			}
+			return true
+		case *ast.SelectorExpr:
+			symbol := resolve(x.Sel)
+			if symbol == ginSetTrustedProxies {
+				return true
+			}
+			if meta, ok := trustedProxySelectors[symbol]; ok {
+				emit(x, symbol, meta.framework, meta.headers)
+			}
+		case *ast.KeyValueExpr:
+			if key, ok := x.Key.(*ast.Ident); ok {
+				field(x, key, x.Value)
+			}
+		case *ast.AssignStmt:
+			if len(x.Lhs) != len(x.Rhs) {
+				return true
+			}
+			for i, lhs := range x.Lhs {
+				if sel, ok := lhs.(*ast.SelectorExpr); ok {
+					field(x, sel.Sel, x.Rhs[i])
+				}
+			}
+		}
+		return true
+	})
+	return signals
+}
+
+// ginTrustsNothing reports whether a SetTrustedProxies call is passed an
+// explicitly empty trusted list: nil or an empty composite literal. Such a
+// call disables forwarded-header trust rather than enabling it.
+func ginTrustsNothing(call *ast.CallExpr) bool {
+	if len(call.Args) != 1 {
+		return false
+	}
+	switch arg := call.Args[0].(type) {
+	case *ast.Ident:
+		return arg.Name == "nil"
+	case *ast.CompositeLit:
+		return len(arg.Elts) == 0
+	}
+	return false
+}
+
+// forwardedHeaderFamily maps one header name to the family the signal's
+// headers property uses: forwarded for the RFC 7239 header, x-forwarded for
+// the de-facto family including its single-value spellings.
+func forwardedHeaderFamily(name string) string {
+	switch strings.ToLower(name) {
+	case "forwarded":
+		return "forwarded"
+	case "x-forwarded-for", "x-forwarded-host", "x-forwarded-proto", "x-forwarded-port", "x-real-ip", "client-ip":
+		return "x-forwarded"
+	}
+	return ""
+}
+
+// headerFamilyUnion resolves a []string literal of header names to one family
+// value: forwarded when only the RFC 7239 header appears, x-forwarded for the
+// de-facto family, all when both do. A non-literal list names no header, and
+// the signal then carries no headers property rather than a guess.
+func headerFamilyUnion(expr ast.Expr) string {
+	lit, ok := expr.(*ast.CompositeLit)
+	if !ok {
+		return ""
+	}
+	forwarded, xForwarded := false, false
+	for _, elt := range lit.Elts {
+		basic, ok := elt.(*ast.BasicLit)
+		if !ok {
+			continue
+		}
+		name, _ := strconv.Unquote(basic.Value)
+		switch forwardedHeaderFamily(name) {
+		case "forwarded":
+			forwarded = true
+		case "x-forwarded":
+			xForwarded = true
+		}
+	}
+	if forwarded && xForwarded {
+		return "all"
+	}
+	if forwarded {
+		return "forwarded"
+	}
+	if xForwarded {
+		return "x-forwarded"
+	}
+	return ""
 }
 
 func nativeArtifactsForPackage(pkg *packages.Package) []model.NativeArtifact {

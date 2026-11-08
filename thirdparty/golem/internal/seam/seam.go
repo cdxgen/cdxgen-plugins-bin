@@ -387,6 +387,22 @@ func (e *Engine) resolveStaticCallTaint(caller *ssa.Function, callee *ssa.Functi
 			propagated = true
 		}
 	}
+	// A literal-constrained entry names the header the call asks for by name,
+	// so it describes the call more precisely than an unconditional entry for
+	// the same symbol. When one matched, the unconditional entries are skipped:
+	// r.Header.Get("X-Forwarded-For") is a proxy-derived read, not a generic
+	// http-input one, and reporting it under both categories would double every
+	// downstream finding.
+	literalMatched := false
+	for _, entry := range sourceEntries {
+		if entry.Kind != "source" || len(entry.ArgumentLiterals) == 0 {
+			continue
+		}
+		if _, ok := entry.LiteralArgument(common); ok {
+			literalMatched = true
+			break
+		}
+	}
 	for _, entry := range sourceEntries {
 		if entry.Kind != "source" {
 			continue
@@ -396,6 +412,15 @@ func (e *Engine) resolveStaticCallTaint(caller *ssa.Function, callee *ssa.Functi
 		// is the same data the passthrough already carries, and emitting
 		// both labels doubles every downstream finding.
 		if propagated && (!argLabels.IsEmpty() || !recvLabels.IsEmpty()) {
+			continue
+		}
+		var literal string
+		if len(entry.ArgumentLiterals) > 0 {
+			var ok bool
+			if literal, ok = entry.LiteralArgument(common); !ok {
+				continue
+			}
+		} else if literalMatched {
 			continue
 		}
 		// During summary computation, do not introduce fresh source labels.
@@ -421,7 +446,14 @@ func (e *Engine) resolveStaticCallTaint(caller *ssa.Function, callee *ssa.Functi
 			// source label below still records what the call introduces.
 			result = result.Merge(argLabels).Merge(recvLabels)
 		}
-		result = result.Add(e.newSourceLabel(caller, entry, callPos))
+		label := e.newSourceLabel(caller, entry, callPos)
+		// The literal the call names (the header it reads) reaches the
+		// report as a property of the source node, where a reader can see
+		// which of the forwarded headers the flow started from.
+		if literal != "" && label.SourceNode != nil {
+			label.SourceNode.Properties = setProperty(label.SourceNode.Properties, "header", literal)
+		}
+		result = result.Add(label)
 	}
 	if !result.IsEmpty() || sanitizerFullStop {
 		return result
@@ -472,7 +504,18 @@ func (e *Engine) resolveInvokeTaint(caller *ssa.Function, common *ssa.CallCommon
 		for _, entry := range entries {
 			switch entry.Kind {
 			case "source":
-				result = result.Add(e.newSourceLabel(caller, entry, callPos))
+				// The literal constraint applies on this path as on the
+				// static one: an entry that names its header only fires for
+				// the call that names it.
+				literal, ok := entry.LiteralArgument(common)
+				if !ok {
+					continue
+				}
+				label := e.newSourceLabel(caller, entry, callPos)
+				if literal != "" && label.SourceNode != nil {
+					label.SourceNode.Properties = setProperty(label.SourceNode.Properties, "header", literal)
+				}
+				result = result.Add(label)
 			case "passthrough":
 				if argAt != nil {
 					for i := 0; i < len(common.Args); i++ {
@@ -881,7 +924,7 @@ func (e *Engine) sourceNodeFor(label TaintLabel) (model.DataFlowNode, bool) {
 	confidence := firstNonEmptyStr(label.Confidence, "high")
 	node := e.addNodeWithID(label.SourceID, "source", descriptor.Name, descriptor.Symbol, descriptor.Type,
 		descriptor.FunctionID, descriptor.PackagePath, descriptor.Pos, true, false,
-		label.SourceCategory, label.TaintKinds, "", confidence, nil)
+		label.SourceCategory, label.TaintKinds, "", confidence, descriptor.Properties)
 	return node, node.ID != ""
 }
 

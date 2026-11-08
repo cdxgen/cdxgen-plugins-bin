@@ -1,0 +1,5 @@
+# the key under a block other than server is not the server property
+server:
+  port: 8080
+management:
+  forward-headers-strategy: native

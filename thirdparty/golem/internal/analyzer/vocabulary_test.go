@@ -155,6 +155,12 @@ func legacyVocabulary(shortNames map[string]string) map[string]map[symbolKey]str
 			if p.Kind != "function" {
 				continue
 			}
+			// A literal-constrained pattern names a header the call must ask
+			// for by name, so it is not knowledge about the symbol alone and
+			// has no unconditional counterpart to compare against.
+			if len(p.ArgumentLiterals) > 0 {
+				continue
+			}
 			if m := strings.ToLower(p.Match); m != "" && m != "contains" && m != "exact" {
 				continue
 			}
@@ -195,6 +201,12 @@ func modelVocabulary(t *testing.T) map[string]map[symbolKey]string {
 	out := map[string]map[symbolKey]string{}
 	for _, e := range db.Entries() {
 		if e.ParameterName != "" || strings.EqualFold(e.Match, "prefix") {
+			continue
+		}
+		// The mirror of legacyVocabulary's exclusion: a literal-constrained
+		// entry is conditionally about the symbol, not unconditionally, so it
+		// has no legacy counterpart to compare against.
+		if len(e.ArgumentLiterals) > 0 {
 			continue
 		}
 		// A conversion sink names a named type, not a function. Legacy's

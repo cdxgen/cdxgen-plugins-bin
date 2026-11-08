@@ -475,6 +475,21 @@ func dataFlowPatternKey(p model.DataFlowPattern) string {
 	return strings.Join([]string{p.Target, p.Kind, strings.ToLower(p.Match), p.Pattern}, "\x00")
 }
 
+// forwardedHeaderLiterals is the header family a literal-constrained source
+// recognises: the RFC 7239 header, its de-facto X-Forwarded-* family, and the
+// two single-value client-IP spellings proxies emit. The list matches chen's
+// ForwardedHeaders.FORWARDED_HEADERS so the vocabulary agrees across the
+// analysers.
+var forwardedHeaderLiterals = []string{
+	"forwarded",
+	"x-forwarded-for",
+	"x-forwarded-host",
+	"x-forwarded-proto",
+	"x-forwarded-port",
+	"x-real-ip",
+	"client-ip",
+}
+
 func builtinDataFlowPatterns(packs []string) *model.DataFlowPatternSet {
 	selected := map[string]bool{}
 	if len(packs) == 0 {
@@ -625,6 +640,31 @@ func builtinDataFlowPatterns(packs []string) *model.DataFlowPatternSet {
 			"github.com/gorilla/mux.Vars", "github.com/go-chi/chi.URLParam", "github.com/go-chi/chi.URLParamFromCtx", "google.golang.org/grpc/metadata.FromIncomingContext", "google.golang.org/grpc.(*ServerStream).RecvMsg",
 		} {
 			addSource("function", name, "http-input", "user-input")
+		}
+		// Forwarded-header sources: the values a client can choose behind a
+		// reverse proxy that passes `Forwarded` and `X-Forwarded-*` through
+		// unchanged. RemoteAddr and Host are rewritten by middleware (chi
+		// middleware.RealIP, gorilla handlers.ProxyHeaders), the framework
+		// accessors resolve them from the headers, and a literal header read
+		// is a read of the header itself. The model database carries the same
+		// entries; the vocabulary test keeps the two honest.
+		addSource("field", "net/http.Request.RemoteAddr", "proxy-derived", "user-input", "client-ip")
+		addSource("field", "net/http.Request.Host", "proxy-derived", "user-input", "host")
+		for _, name := range []string{
+			"github.com/gin-gonic/gin.(*Context).ClientIP",
+			"github.com/labstack/echo/v4.Context.RealIP",
+			"github.com/gofiber/fiber/v2.(*Ctx).IP",
+			"github.com/gofiber/fiber/v2.(*Ctx).IPs",
+		} {
+			addSource("function", name, "proxy-derived", "user-input", "client-ip")
+		}
+		addSource("function", "github.com/labstack/echo/v4.Context.Scheme", "proxy-derived", "user-input", "scheme")
+		addSource("function", "github.com/gofiber/fiber/v2.(*Ctx).Hostname", "proxy-derived", "user-input", "host")
+		addSource("function", "github.com/gofiber/fiber/v2.(*Ctx).Protocol", "proxy-derived", "user-input", "scheme")
+		for _, name := range []string{"Header.Get", "Header).Get", "github.com/gin-gonic/gin.(*Context).GetHeader"} {
+			p := dfPattern("source", "function", name, "proxy-derived", "user-input", "forwarded-header")
+			p.ArgumentLiterals = forwardedHeaderLiterals
+			set.Sources = append(set.Sources, p)
 		}
 		addSink("function", "net/http.ResponseWriter.Write", "http-response", "user-input")
 		for _, name := range []string{"fmt.Fprintf", "fmt.Fprint", "fmt.Fprintln"} {
@@ -1366,9 +1406,21 @@ func (b *dataFlowBuilder) analyzeFunction(fn *ssa.Function) {
 				b.processAsyncCall(fn, state, x.Common(), x.Pos(), "go")
 			default:
 				if v, ok := instr.(ssa.Value); ok {
+					// A field-shaped source describes the read itself (the
+					// RemoteAddr or Host forwarded-header middleware rewrites),
+					// so its trace REPLACES whatever the field would inherit from
+					// its base: the flow reports proxy-derived, not the request's
+					// http-input, and never both. A write to the field still wins
+					// over the model, because it stores its trace in memory under
+					// the field's key and taintOf reads memory before values.
+					fieldSourced := false
 					for _, source := range b.matchFieldSource(v) {
+						fieldSourced = true
 						n := b.addNode("source", source.name, source.symbol, source.typ, fn, v.Pos(), true, false, source.pattern.Category, source.pattern.TaintKinds, source.fieldPath, source.pattern.Confidence, map[string]string{"pattern": source.pattern.Pattern})
 						state.values[v] = combineTraces(state.values[v], dataFlowTrace{nodeIDs: []string{n.ID}, sourceID: n.ID, sourceCategory: n.Category, sourcePURL: n.PURL, sourcePatterns: []model.DataFlowPattern{source.pattern}, taintKinds: taintsForPattern(source.pattern), confidence: source.pattern.Confidence, fieldPaths: uniqueStrings([]string{source.fieldPath}), generated: true})
+					}
+					if fieldSourced {
+						continue
 					}
 					if tr, ok := b.valueTaint(state, v); ok {
 						state.values[v] = combineTraces(state.values[v], tr)
@@ -1400,11 +1452,41 @@ func (b *dataFlowBuilder) processCall(fn *ssa.Function, state dataFlowState, cal
 			propagated = true
 		}
 	}
-	for _, pat := range b.matchCall(common, b.patterns.Sources) {
+	// A literal-constrained pattern names the header the call asks for, so it
+	// describes the call more precisely than an unconditional pattern for the
+	// same symbol. When one matched, the unconditional patterns are skipped:
+	// Header.Get("X-Forwarded-For") is a proxy-derived read, not a generic
+	// http-input one, and reporting it under both categories would double
+	// every downstream finding.
+	sourcePats := b.matchCall(common, b.patterns.Sources)
+	literalMatched := false
+	for _, pat := range sourcePats {
+		if len(pat.ArgumentLiterals) == 0 {
+			continue
+		}
+		if _, ok := patternLiteralArgument(pat, common); ok {
+			literalMatched = true
+			break
+		}
+	}
+	for _, pat := range sourcePats {
 		if propagated {
 			continue
 		}
-		n := b.addNode("source", callName(common), callSymbol(common), valueType(call), fn, call.Pos(), true, false, pat.Category, pat.TaintKinds, "", pat.Confidence, map[string]string{"pattern": pat.Pattern})
+		var literal string
+		if len(pat.ArgumentLiterals) > 0 {
+			var ok bool
+			if literal, ok = patternLiteralArgument(pat, common); !ok {
+				continue
+			}
+		} else if literalMatched {
+			continue
+		}
+		props := map[string]string{"pattern": pat.Pattern}
+		if literal != "" {
+			props["header"] = literal
+		}
+		n := b.addNode("source", callName(common), callSymbol(common), valueType(call), fn, call.Pos(), true, false, pat.Category, pat.TaintKinds, "", pat.Confidence, props)
 		state.values[call] = combineTraces(state.values[call], dataFlowTrace{nodeIDs: []string{n.ID}, sourceID: n.ID, sourceCategory: n.Category, sourcePURL: n.PURL, sourcePatterns: []model.DataFlowPattern{pat}, taintKinds: taintsForPattern(pat), confidence: pat.Confidence, generated: true})
 	}
 	if sanitized, ok := b.sanitizedCallTrace(fn, state, call, common); ok {
@@ -2801,6 +2883,40 @@ func valueConstString(v ssa.Value) string {
 		return constant.StringVal(c.Value)
 	}
 	return ""
+}
+
+// patternLiteralArgument reports the pattern's argument literal the call
+// passes at its first source-level argument, lower-cased, when the pattern
+// carries the constraint and the call satisfies it. The receiver of a static
+// method call is not a source-level argument, and a non-constant argument
+// never satisfies the constraint: the pattern says the code names this
+// header, not that a runtime value happens to equal it.
+func patternLiteralArgument(p model.DataFlowPattern, common *ssa.CallCommon) (string, bool) {
+	if len(p.ArgumentLiterals) == 0 {
+		return "", true
+	}
+	if common == nil {
+		return "", false
+	}
+	offset := 0
+	if !common.IsInvoke() {
+		if callee := common.StaticCallee(); callee != nil && callee.Signature != nil && callee.Signature.Recv() != nil {
+			offset = 1
+		}
+	}
+	if offset >= len(common.Args) {
+		return "", false
+	}
+	got := strings.ToLower(valueConstString(common.Args[offset]))
+	if got == "" {
+		return "", false
+	}
+	for _, want := range p.ArgumentLiterals {
+		if strings.EqualFold(want, got) {
+			return got, true
+		}
+	}
+	return "", false
 }
 
 func (t dataFlowTrace) empty() bool { return len(t.nodeIDs) == 0 && len(t.params) == 0 && !t.generated }

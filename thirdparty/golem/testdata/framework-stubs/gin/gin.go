@@ -35,9 +35,30 @@ func (c *Context) AbortWithStatusJSON(status int, obj any) {}
 
 func (c *Context) Status(status int) {}
 
+// ClientIP returns the client address as gin resolves it, honouring
+// Engine.ForwardedByClientIP and Engine.RemoteIPHeaders.
+func (c *Context) ClientIP() string { return "" }
+
+// RemoteIP splits the address from Request.RemoteAddr without consulting
+// any header, matching the real library.
+func (c *Context) RemoteIP() string { return "" }
+
+// GetHeader reads a request header by name.
+func (c *Context) GetHeader(key string) string { return "" }
+
 type HandlerFunc func(c *Context)
 
-type Engine struct{}
+type Engine struct {
+	// ForwardedByClientIP decides whether ClientIP consults the forwarded
+	// headers instead of the socket address.
+	ForwardedByClientIP bool
+	// RemoteIPHeaders lists the headers ClientIP reads, in order.
+	RemoteIPHeaders []string
+}
+
+// SetTrustedProxies bounds which proxy addresses gin believes when it reads
+// the forwarded headers.
+func (e *Engine) SetTrustedProxies(trustedProxies []string) error { return nil }
 
 type RouterGroup struct{}
 

@@ -366,6 +366,13 @@ path = "fixtures/native-interop"
 capabilities = ["native-interop", "jni", "cinterop", "security-signals"]
 tolerated_resolution_errors = []
 
+[[fixtures]]
+slug = "forwarded-headers"
+tier = "fixtures"
+path = "fixtures/forwarded-headers"
+capabilities = ["proxy-derived", "security-signals"]
+tolerated_resolution_errors = []
+
 # Call-graph fixtures: dispatch modes, sealed narrowing, exported roots
 # and framework-registration roots. Each carries a negative half naming what
 # a plausibly wrong dispatcher would emit.

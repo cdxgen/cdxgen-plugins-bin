@@ -406,6 +406,11 @@ pub struct SecuritySignal {
     /// conditional. See [`Declaration::cfg_gate`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cfg_gate: Option<String>,
+    /// Structured attributes a signal family attaches: the forwarded-header
+    /// config signal carries `framework` and, where the code names it,
+    /// `headers` (`forwarded`, `x-forwarded` or `all`).
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub properties: IndexMap<String, String>,
 }
 
 /// One parameter to an HTTP endpoint, extracted from the handler's

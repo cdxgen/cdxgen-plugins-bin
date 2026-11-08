@@ -68,3 +68,10 @@ want flow source=http-input sink=external-service sinkfn=~http.Get known-fail=le
 # Reflected XSS: the payload is echoed into the response body. Under the gin
 # server that is Context.String; the same route exists on the other frameworks.
 want flow source=http-input sink=http-response
+
+# chi's RedirectSlashes middleware (pkg/servechi/add$1 in this repository's chi
+# server) builds its redirect target from Request.Host, which forwarded-header
+# middleware rewrites from X-Forwarded-Host; behind a pass-through proxy the
+# client chooses the location, so the flow is proxy-derived rather than
+# http-input.
+want flow source=proxy-derived sink=redirect sinkfn=~http.Redirect

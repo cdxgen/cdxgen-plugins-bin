@@ -199,6 +199,44 @@ This document describes the report emitted by `rusi`. Field names map directly t
 | `file_path`    | `string`         | Relative file path.                                                                                                  |
 | `position`     | `Position`       | Signal location.                                                                                                     |
 | `cfg_gate`     | `string \| null` | `#[cfg(...)]` predicate this signal sits behind, as written. Omitted when unconditional. See `Declaration.cfg_gate`. |
+| `properties`   | `map`            | Structured attributes a signal family attaches. The `trusted-proxy-config` signal carries `framework` and, where the code names it, `headers` (`forwarded`, `x-forwarded` or `all`). Omitted when empty. |
+
+## Forwarded-header vocabulary
+
+`proxy-derived` is a source category for request values a client can choose
+through the `Forwarded` and `X-Forwarded-*` headers behind a reverse proxy
+that passes them through unchanged. The kind rides on the source node's
+`properties.taint-kind`: `client-ip`, `host`, `scheme`, or `forwarded-header`
+for a direct literal read, whose lower-cased header name is in
+`properties.header`.
+
+The sources are the axum `axum::extract::Host` extractor (previously filed
+under `http-request`), the header-derived client-IP extractors of
+`axum_client_ip` (`ClientIp`, `InsecureClientIp`, `SecureClientIp`,
+`RightmostXForwardedFor`, `RightmostForwarded`, `XRealIp`), the actix
+`ConnectionInfo` accessors reached through `connection_info()`
+(`realip_remote_addr()`, `host()`, `scheme()`, which actix resolves from
+Forwarded and X-Forwarded-*), and `headers().get("x-forwarded-for")`-style
+reads whose argument literal names one of `forwarded`, `x-forwarded-for`,
+`x-forwarded-host`, `x-forwarded-proto`, `x-forwarded-port`, `x-real-ip` or
+`client-ip`. The actix accessors and the header read key on the receiving
+chain (`connection_info()` / `headers()`), so the same method name on an
+unrelated receiver stays untagged, and a non-literal header name is not a
+forwarded-header read. `HttpRequest::peer_addr()` and
+`axum::extract::ConnectInfo` are the socket view, which no middleware
+rewrites, and are deliberately not sources.
+
+`trusted-proxy-config` is a security signal for the code that turns
+header-derived client IPs on: axum-client-ip's `ClientIpSource`, with
+`framework` and `headers` properties naming the variant's header family. The
+`ConnectInfo` variant is the socket address rather than a header, so it emits
+nothing. No tower-http or actix-web middleware that rewrites the peer from a
+forwarded header was found to model.
+
+Neither category means a deployment is vulnerable: static analysis sees where
+the application trusts headers, not whether the proxy in front strips the
+ones a client sends. The values are spoofable only behind a proxy that passes
+the headers through.
 
 ## Crypto / CBOM evidence
 
@@ -374,7 +412,7 @@ suffix, and that suffix decides: `-exact` is `high`, `-bounded` is `medium`,
 | -------------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `target`             | `string`   | Pattern role: `source`, `sink`, or `passthrough`. When reading custom JSON it may be omitted and inferred from the containing array.                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `pattern`            | `string`   | Pattern text used for matching.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `category`           | `string`   | Category assigned when the pattern matches. Common categories for sources: `env`, `cli`, `file`, `http-request`, `secret`, `crypto-material`. For sinks: `process-exec`, `filesystem-write`, `filesystem-read`, `filesystem-open`, `filesystem-delete`, `filesystem-permission`, `network-connect`, `network-request`, `sql-query`, `html-response`. For passthroughs: `value-wrapper`, `smart-pointer`, `lock-accessor`, `iterator-adapter`, `channel-io`, `linker-accessor`, `string-format`, `ffi-wrapper`, `sql-builder`, `pointer-arithmetic`, `auto-discovered-passthrough`. Crypto-specific: `crypto-digest`, `crypto-key`, `crypto-keygen`, `tls`, `jwt`. |
+| `category`           | `string`   | Category assigned when the pattern matches. Common categories for sources: `env`, `cli`, `file`, `http-request`, `proxy-derived`, `secret`, `crypto-material`. For sinks: `process-exec`, `filesystem-write`, `filesystem-read`, `filesystem-open`, `filesystem-delete`, `filesystem-permission`, `network-connect`, `network-request`, `sql-query`, `html-response`. For passthroughs: `value-wrapper`, `smart-pointer`, `lock-accessor`, `iterator-adapter`, `channel-io`, `linker-accessor`, `string-format`, `ffi-wrapper`, `sql-builder`, `pointer-arithmetic`, `auto-discovered-passthrough`. Crypto-specific: `crypto-digest`, `crypto-key`, `crypto-keygen`, `tls`, `jwt`. |
 | `relevant_arguments` | `number[]` | Argument indexes used by the rule. Defaults to `[]` for custom JSON. For a method call, index 0 is the receiver, so the first real argument is 1.                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `receiver_type`      | `string?`  | Restricts the rule to a method call whose receiver resolves to this type, so a rule named after a common method (`arg`, `write_all`) does not fire on every type that has one. Omitted when the rule matches on the callee alone; a rule that has it never fires on an unresolved receiver.                                                                                                                                                                                                                                                                                                        |
 

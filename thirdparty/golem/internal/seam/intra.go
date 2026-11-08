@@ -912,6 +912,14 @@ func (s *intra) evaluate(state taintState, v ssa.Value, visited map[ssa.Value]bo
 		if labels, ok := state.memory[s.pathKey(x)]; ok {
 			return labels
 		}
+		// A field-shaped source model describes this read itself (the
+		// RemoteAddr and Host a forwarded-header middleware rewrites), so the
+		// read is a source in its own right and REPLACES the labels it would
+		// otherwise inherit from the base: the flow reports proxy-derived,
+		// not the request's http-input, and never both.
+		if labels, ok := s.fieldSourceLabels(state, x.X.Type(), fieldName(x.X.Type(), x.Field), x.Pos()); ok {
+			return labels
+		}
 		// A field load through a pointer that was tainted as a whole — most
 		// often the destination of json.Unmarshal(&p) or io.Copy(&dst) —
 		// must pick up the aggregate's taint, or every flow that crosses
@@ -939,6 +947,9 @@ func (s *intra) evaluate(state taintState, v ssa.Value, visited map[ssa.Value]bo
 
 	case *ssa.Field:
 		if labels, ok := state.memory[s.pathKey(x)]; ok {
+			return labels
+		}
+		if labels, ok := s.fieldSourceLabels(state, x.X.Type(), fieldName(x.X.Type(), x.Field), x.Pos()); ok {
 			return labels
 		}
 		return s.evaluate(state, x.X, visited)
@@ -1348,6 +1359,36 @@ func (s *intra) fieldPathOf(addr ssa.Value) string {
 func fieldSuffix(x *ssa.FieldAddr) string { return "." + fieldName(x.X.Type(), x.Field) }
 
 func fieldSuffixOfField(x *ssa.Field) string { return "." + fieldName(x.X.Type(), x.Field) }
+
+// fieldSourceLabels mints the label for a field-shaped source model matching a
+// read of fieldName through baseType, such as r.RemoteAddr. ok is false when no
+// model describes the field, or during summary computation, where a fresh
+// source label would break the param-keyed matchers exactly as a call-site
+// source does (see resolveCallTaint); there the read keeps behaving as an
+// ordinary field of its base.
+func (s *intra) fieldSourceLabels(state taintState, baseType types.Type, fieldName string, pos token.Pos) (LabelSet, bool) {
+	if s.engine.duringSummary || fieldName == "" {
+		return LabelSet{}, false
+	}
+	entries := s.engine.models.MatchFieldSource(baseType, fieldName)
+	if len(entries) == 0 {
+		return LabelSet{}, false
+	}
+	out := LabelSet{}
+	for _, entry := range entries {
+		label := s.engine.newSourceLabel(s.fn, entry, pos)
+		if label.SourceNode != nil {
+			// A field-shaped model has no function to name; the field is the
+			// thing read, so naming it (and the type it lives on) is what lets
+			// a reader see which access the flow started from.
+			label.SourceNode.Name = fieldName
+			label.SourceNode.Symbol = entry.QualifiedName()
+			label.SourceNode.Type = baseType.String()
+		}
+		out = out.Add(label)
+	}
+	return out, true
+}
 
 // fieldName resolves a field index to its declared name, so a report says
 // ".Cmd" rather than ".field3".
