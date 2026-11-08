@@ -9,11 +9,7 @@ on:
       - "thirdparty/trustinspector/**"
       - ".github/workflows/go-test.yml"
   pull_request:
-    paths:
-      - "thirdparty/trivy/**"
-      - "thirdparty/golem/**"
-      - "thirdparty/trustinspector/**"
-      - ".github/workflows/go-test.yml"
+  merge_group:
   workflow_dispatch:
 
 concurrency:
@@ -27,6 +23,48 @@ defaults:
     working-directory: thirdparty
 
 jobs:
+  # The workflow runs on every pull request and merge-queue group so that its
+  # required check always reports. This job decides which tests the change
+  # needs: a job whose paths did not change is skipped, and the summary job at
+  # the end counts a skip as a pass. Pushes and manual runs test everything.
+  changes:
+    name: changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      trivy: ${{ steps.diff.outputs.trivy }}
+      golem: ${{ steps.diff.outputs.golem }}
+      trustinspector: ${{ steps.diff.outputs.trustinspector }}
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          MG_BASE: ${{ github.event.merge_group.base_sha }}
+          MG_HEAD: ${{ github.event.merge_group.head_sha }}
+        run: |
+          # A pull request is checked out as its merge commit, whose first
+          # parent is the base branch tip.
+          all=""
+          case "$EVENT" in
+            pull_request) files="$(git diff --name-only HEAD^1 HEAD)" ;;
+            merge_group) files="$(git diff --name-only "$MG_BASE" "$MG_HEAD")" ;;
+            *) files=""; all=1 ;;
+          esac
+          changed() { [ -n "$all" ] || printf '%s\n' "$files" | grep -qE "$1"; }
+          {
+            if changed '^(thirdparty/trivy/|\.github/workflows/go-test\.yml$)'; then echo trivy=true; else echo trivy=false; fi
+            if changed '^(thirdparty/golem/|\.github/workflows/go-test\.yml$)'; then echo golem=true; else echo golem=false; fi
+            if changed '^(thirdparty/trustinspector/|\.github/workflows/go-test\.yml$)'; then echo trustinspector=true; else echo trustinspector=false; fi
+          } >> "$GITHUB_OUTPUT"
+
   # The three Go tools never had a CI job of their own: their unit tests only
   # ran if a developer remembered to run them locally, and go vet nowhere.
   # This mirrors the per-tool gates the Rust crates have (cdxrs-test.yml and
@@ -35,6 +73,8 @@ jobs:
   # key trivy v0.74.0 needs on the 1.26 line.
   trivy_test:
     name: trivy-cdxgen test
+    needs: changes
+    if: needs.changes.outputs.trivy == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -59,6 +99,8 @@ jobs:
 
   golem_test:
     name: golem test
+    needs: changes
+    if: needs.changes.outputs.golem == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -87,6 +129,8 @@ jobs:
 
   trustinspector_test:
     name: trustinspector-cdxgen test
+    needs: changes
+    if: needs.changes.outputs.trustinspector == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -104,3 +148,27 @@ jobs:
         run: go test ./...
       - name: go vet
         run: go vet ./...
+
+  # The required status check for this workflow. It passes when every test job
+  # above passed or was skipped because its paths did not change; a canary
+  # toolchain row that may fail does not fail its job (continue-on-error).
+  required:
+    name: go tests
+    if: always()
+    needs: [changes, trivy_test, golem_test, trustinspector_test]
+    runs-on: ubuntu-latest
+    permissions: {}
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - name: Check the test jobs
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          for result in $RESULTS; do
+            case "$result" in
+              success|skipped) ;;
+              *) echo "a test job ended with: $result"; exit 1 ;;
+            esac
+          done
