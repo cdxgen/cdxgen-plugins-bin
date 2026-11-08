@@ -1,0 +1,19 @@
+thirdparty/golem/testdata/corpus/framework-forwarded-accessors/main.go
+  s_9d1b258b13890d::t_5daaac1fbd9952 14,22,31,39,48,56
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "27e5d80575276be73f691a98f262f93f4d9d04b8",
+  "prompts": {},
+  "sessions": {
+    "s_9d1b258b13890d": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_2af49bff-c8ba-4475-948a-9135fdf9dfab",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
