@@ -1,0 +1,22 @@
+thirdparty/golem/internal/models/match_test.go
+  s_9d1b258b13890d::t_a0e2a77482f8c8 114-253
+thirdparty/golem/internal/models/models.go
+  s_9d1b258b13890d::t_7ced50ae757007 544-554,556
+  s_9d1b258b13890d::t_19be09d8c2dd3c 555,557
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ce3099967241868bf745e4528dff3a60b7e6620a",
+  "prompts": {},
+  "sessions": {
+    "s_9d1b258b13890d": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_2af49bff-c8ba-4475-948a-9135fdf9dfab",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
