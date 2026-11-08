@@ -11,7 +11,7 @@ import (
 // ClientIP resolves the address from the forwarded headers gin is configured
 // to trust, so its value is client-choosable behind a pass-through proxy.
 //
-// golem:want flow source=proxy-derived sink=logging
+// golem:want flow source=proxy-derived sink=logging sourceFn=~gin.(*Context).ClientIP
 func ginClientIP(c *gin.Context) {
 	log.Printf("client %s", c.ClientIP())
 }
@@ -19,7 +19,7 @@ func ginClientIP(c *gin.Context) {
 // GetHeader reads a request header; naming a forwarded one by literal makes
 // the read proxy-derived.
 //
-// golem:want flow source=proxy-derived sink=logging
+// golem:want flow source=proxy-derived sink=logging sourceFn=~gin.(*Context).GetHeader
 func ginGetForwarded(c *gin.Context) {
 	log.Printf("xff %s", c.GetHeader("X-Forwarded-For"))
 }
@@ -28,7 +28,7 @@ func ginGetForwarded(c *gin.Context) {
 // X-Forwarded-For/X-Real-IP, so its value is client-choosable behind a
 // pass-through proxy.
 //
-// golem:want flow source=proxy-derived sink=logging
+// golem:want flow source=proxy-derived sink=logging sourceFn=~echo/v4.(Context).RealIP
 func echoRealIP(c echo.Context) {
 	log.Printf("client %s", c.RealIP())
 }
@@ -36,7 +36,7 @@ func echoRealIP(c echo.Context) {
 // Scheme resolves the protocol from X-Forwarded-Proto when the connection is
 // not TLS.
 //
-// golem:want flow source=proxy-derived sink=logging
+// golem:want flow source=proxy-derived sink=logging sourceFn=~echo/v4.(Context).Scheme
 func echoScheme(c echo.Context) {
 	log.Printf("scheme %s", c.Scheme())
 }
@@ -45,7 +45,7 @@ func echoScheme(c echo.Context) {
 // proxy is trusted, so its value is client-choosable behind a pass-through
 // proxy.
 //
-// golem:want flow source=proxy-derived sink=logging
+// golem:want flow source=proxy-derived sink=logging sourceFn=~fiber/v2.(*Ctx).IP
 func fiberIP(c *fiber.Ctx) error {
 	log.Printf("client %s", c.IP())
 	return nil
@@ -53,7 +53,7 @@ func fiberIP(c *fiber.Ctx) error {
 
 // IPs returns every address in X-Forwarded-For.
 //
-// golem:want flow source=proxy-derived sink=logging
+// golem:want flow source=proxy-derived sink=logging sourceFn=~fiber/v2.(*Ctx).IPs
 func fiberIPs(c *fiber.Ctx) error {
 	log.Printf("chain %v", c.IPs())
 	return nil
