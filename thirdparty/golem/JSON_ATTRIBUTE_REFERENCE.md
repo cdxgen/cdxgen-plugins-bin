@@ -336,7 +336,9 @@ one of four taint kinds next to `user-input`:
 The accessors tagged are `(*http.Request).RemoteAddr` and `(*http.Request).Host`
 (rewritten by middleware such as chi `middleware.RealIP` and gorilla
 `handlers.ProxyHeaders`), gin `(*Context).ClientIP`, echo `Context.RealIP` and
-`Context.Scheme`, fiber `(*Ctx).IP` and `(*Ctx).IPs`, and a
+`Context.Scheme`, fiber `(*Ctx).IP`, `IPs`, `Hostname` and `Protocol` (fiber
+trusts every peer's X-Forwarded-Host and -Proto unless
+`EnableTrustedProxyCheck` is set), and a
 `(*net/http.Header).Get` (or gin `(*Context).GetHeader`) call whose argument
 literal is one of `forwarded`, `x-forwarded-for`, `x-forwarded-host`,
 `x-forwarded-proto`, `x-forwarded-port`, `x-real-ip` or `client-ip`. The
@@ -349,10 +351,12 @@ forwarded-header handling on. Its properties carry `framework` and, where a
 literal names it, `headers` (`forwarded`, `x-forwarded` or `all`). The rules
 key on the framework's own resolved symbol: chi `middleware.RealIP`, gorilla
 `handlers.ProxyHeaders`, gin `SetTrustedProxies`, the `ForwardedByClientIP` and
-`RemoteIPHeaders` engine fields, echo's `IPExtractor` with its two extractors,
-and fiber's `ProxyHeader` and `EnableTrustedProxyCheck` config fields. An
-explicitly empty value (`SetTrustedProxies(nil)`, `ForwardedByClientIP: false`,
-an empty `ProxyHeader`) turns the signal off.
+`RemoteIPHeaders` engine fields (set in a literal or by assignment), echo's
+`ExtractIPFromXFFHeader` and `ExtractIPFromRealIPHeader` extractors, and fiber's
+`ProxyHeader` config field. An explicitly empty value (`SetTrustedProxies(nil)`,
+`ForwardedByClientIP = false`, an empty `ProxyHeader`) turns the signal off.
+fiber's `EnableTrustedProxyCheck` is not a signal: it narrows which peers fiber
+trusts rather than turning header handling on.
 
 Neither category means a deployment is vulnerable. Static analysis can see
 where the application reads proxy-derived values and where it turns on

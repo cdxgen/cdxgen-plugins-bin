@@ -247,8 +247,9 @@ func TestReplacementPathClassification(t *testing.T) {
 // TestTrustedProxyConfigSignals pins the trusted-proxy-config signal: every
 // framework switch that turns on forwarded-header handling reports one signal
 // with the framework (and the header family, where a literal names it), and
-// the twins — an empty trusted list, a literal false, an empty header name,
-// and the same names on application types — stay quiet. The signal records
+// the twins (an empty trusted list, a literal false, an empty header name,
+// fiber's EnableTrustedProxyCheck, which narrows trust, and the same names on
+// application types) stay quiet. The signal records
 // that the application resolves the client IP, host or scheme from headers a
 // client could have sent; whether a proxy actually passes them through is a
 // deployment fact no source scan can see.
@@ -277,7 +278,6 @@ func TestTrustedProxyConfigSignals(t *testing.T) {
 		{"github.com/labstack/echo/v4.ExtractIPFromXFFHeader", "x-forwarded"},
 		{"github.com/labstack/echo/v4.ExtractIPFromRealIPHeader", "x-forwarded"},
 		{"github.com/gofiber/fiber/v2.ProxyHeader", "x-forwarded"},
-		{"github.com/gofiber/fiber/v2.EnableTrustedProxyCheck", ""},
 	} {
 		headers, ok := found[want.symbol]
 		if !ok {

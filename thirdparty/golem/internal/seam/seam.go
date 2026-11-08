@@ -447,7 +447,7 @@ func (e *Engine) resolveStaticCallTaint(caller *ssa.Function, callee *ssa.Functi
 			result = result.Merge(argLabels).Merge(recvLabels)
 		}
 		label := e.newSourceLabel(caller, entry, callPos)
-		// The literal the call names — the header it reads — reaches the
+		// The literal the call names (the header it reads) reaches the
 		// report as a property of the source node, where a reader can see
 		// which of the forwarded headers the flow started from.
 		if literal != "" && label.SourceNode != nil {

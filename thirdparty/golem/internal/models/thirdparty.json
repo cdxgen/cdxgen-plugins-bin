@@ -338,6 +338,38 @@
   "description": "IPs returns every address in X-Forwarded-For, so behind a pass-through proxy the client chooses them"
  },
  {
+  "id": "fiber-ctx-hostname.source",
+  "kind": "source",
+  "module": "github.com/gofiber/fiber/v2",
+  "package": "github.com/gofiber/fiber/v2",
+  "receiver": "*Ctx",
+  "function": "Hostname",
+  "category": "proxy-derived",
+  "taintKinds": [
+   "user-input",
+   "host"
+  ],
+  "severity": "medium",
+  "confidence": "high",
+  "description": "Hostname returns X-Forwarded-Host whenever the peer is trusted, and fiber trusts every peer unless EnableTrustedProxyCheck is set, so behind a pass-through proxy the client chooses it"
+ },
+ {
+  "id": "fiber-ctx-protocol.source",
+  "kind": "source",
+  "module": "github.com/gofiber/fiber/v2",
+  "package": "github.com/gofiber/fiber/v2",
+  "receiver": "*Ctx",
+  "function": "Protocol",
+  "category": "proxy-derived",
+  "taintKinds": [
+   "user-input",
+   "scheme"
+  ],
+  "severity": "medium",
+  "confidence": "high",
+  "description": "Protocol returns X-Forwarded-Proto (or a related header) whenever the peer is trusted, and fiber trusts every peer unless EnableTrustedProxyCheck is set, so behind a pass-through proxy the client chooses it"
+ },
+ {
   "id": "gin-context-bind.source",
   "kind": "source",
   "module": "github.com/gin-gonic/gin",

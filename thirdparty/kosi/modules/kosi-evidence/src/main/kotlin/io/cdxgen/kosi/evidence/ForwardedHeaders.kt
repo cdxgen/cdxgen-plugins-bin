@@ -2,7 +2,6 @@ package io.cdxgen.kosi.evidence
 
 import io.cdxgen.kosi.kir.KirCall
 import io.cdxgen.kosi.kir.KirConstant
-import io.cdxgen.kosi.kir.KirFieldGet
 import io.cdxgen.kosi.kir.KirLoad
 import io.cdxgen.kosi.kir.KirModule
 import io.cdxgen.kosi.kir.KirNew
@@ -33,6 +32,9 @@ object ForwardedHeaders {
     private const val JETTY_CUSTOMIZER = "org.eclipse.jetty.server.ForwardedRequestCustomizer"
     private const val KTOR_FORWARDED = "io.ktor.server.plugins.forwardedheaders.ForwardedHeaders"
     private const val KTOR_X_FORWARDED = "io.ktor.server.plugins.forwardedheaders.XForwardedHeaders"
+    private const val KTOR_INSTALL = "io.ktor.server.application.install"
+    private const val KTOR_FORWARDED_CONFIG = "io.ktor.server.plugins.forwardedheaders.ForwardedHeadersConfig"
+    private const val KTOR_X_FORWARDED_CONFIG = "io.ktor.server.plugins.forwardedheaders.XForwardedHeadersConfig"
 
     fun collect(root: Path, module: KirModule, attribution: NativeInterop.Attribution): List<SecuritySignal> {
         val signals = mutableListOf<SecuritySignal>()
@@ -43,7 +45,6 @@ object ForwardedHeaders {
             val consts = HashMap<String, String>()
             val calls = mutableListOf<KirCall>()
             val news = mutableListOf<KirNew>()
-            val fieldGets = mutableListOf<KirFieldGet>()
             for (block in body.blocks) {
                 for (ins in block.instructions) {
                     when (ins) {
@@ -52,7 +53,6 @@ object ForwardedHeaders {
                         }
                         is KirCall -> calls.add(ins)
                         is KirNew -> news.add(ins)
-                        is KirFieldGet -> fieldGets.add(ins)
                         else -> Unit
                     }
                 }
@@ -70,16 +70,18 @@ object ForwardedHeaders {
                         purl = attribution.purlByModulePath[modulePath].takeUnless { it.isNullOrEmpty() } ?: function.purl,
                         filePath = filePath,
                         position = Position(filePath, line.coerceAtLeast(1), 1),
-                        symbol = fqn,
+                        // The function that flips the switch, as NativeInterop
+                        // records it, so a corpus annotation can demand the
+                        // signal on one function and its absence on a twin.
+                        symbol = function.canonicalName,
                     ),
                 )
             }
 
-            val symbols = buildSet {
-                addAll(calls.map { it.callee.fqn })
-                addAll(news.map { it.type })
-                addAll(fieldGets.map { it.path.toString() })
-            }
+            // The line of the first construction of a framework type, whether
+            // the lowering records it as a constructor call or a `new`.
+            fun constructedAt(type: String): Int? =
+                calls.firstOrNull { it.callee.fqn == type }?.line ?: news.firstOrNull { it.type == type }?.line
             calls.firstOrNull { it.callee.fqn == SPRING_FILTER }?.let { filterCall ->
                 // Remove-only mode strips the forwarded headers instead of
                 // deriving anything from them, so it is the off position.
@@ -91,22 +93,19 @@ object ForwardedHeaders {
                     emit(SPRING_FILTER, "spring", "all", filterCall.line)
                 }
             }
-            if (symbols.any { it == TOMCAT_VALVE }) {
-                emit(TOMCAT_VALVE, "tomcat", "x-forwarded", function.line)
-            }
-            if (symbols.any { it == JETTY_CUSTOMIZER }) {
-                emit(JETTY_CUSTOMIZER, "jetty", "forwarded", function.line)
-            }
-            // Ktor's plugin objects reach the KIR as the object reference the
-            // install call receives, so any resolved mention counts.
-            // The object reference can lower as the class FQN, a getter
-            // call, or the JVM INSTANCE field, so any mention of the plugin
-            // object's own path counts.
-            if (symbols.any { it.contains(KTOR_FORWARDED) }) {
-                emit(KTOR_FORWARDED, "ktor", "forwarded", function.line)
-            }
-            if (symbols.any { it.contains(KTOR_X_FORWARDED) }) {
-                emit(KTOR_X_FORWARDED, "ktor", "x-forwarded", function.line)
+            constructedAt(TOMCAT_VALVE)?.let { emit(TOMCAT_VALVE, "tomcat", "x-forwarded", it) }
+            constructedAt(JETTY_CUSTOMIZER)?.let { emit(JETTY_CUSTOMIZER, "jetty", "forwarded", it) }
+            // Ktor 2 and 3 declare both plugins as top-level ApplicationPlugin
+            // values, and Application.install is generic in the plugin's
+            // config type, so the resolved type argument of the install call
+            // names which plugin it installs.
+            for (call in calls.filter { it.callee.fqn == KTOR_INSTALL }) {
+                when {
+                    call.typeArguments.any { it == KTOR_FORWARDED_CONFIG } ->
+                        emit(KTOR_FORWARDED, "ktor", "forwarded", call.line)
+                    call.typeArguments.any { it == KTOR_X_FORWARDED_CONFIG } ->
+                        emit(KTOR_X_FORWARDED, "ktor", "x-forwarded", call.line)
+                }
             }
         }
         signals.addAll(forwardHeadersStrategyConfig(root))
@@ -126,6 +125,7 @@ object ForwardedHeaders {
         val signals = mutableListOf<SecuritySignal>()
         val files = Files.walk(root).use { stream ->
             stream.filter { p -> Files.isRegularFile(p) }
+                .filter { p -> !skippedConfigDir(root.relativize(p)) }
                 .filter { p ->
                     val name = p.fileName.toString()
                     name.startsWith("application") && (name.endsWith(".properties") || name.endsWith(".yml") || name.endsWith(".yaml"))
@@ -145,18 +145,34 @@ object ForwardedHeaders {
                         forwardHeadersStrategySignal(match.groupValues[1], rel, index + 1)?.let(signals::add)
                     }
                 } else {
-                    if (trimmed == "server:" || trimmed.startsWith("server:")) inServerBlock = true
-                    if (inServerBlock) {
-                        val match = Regex("^forward-headers-strategy:\\s*(\\w+)\\s*$").find(trimmed)
-                        if (match != null) {
-                            forwardHeadersStrategySignal(match.groupValues[1], rel, index + 1)?.let(signals::add)
-                            inServerBlock = false
-                        }
+                    if (trimmed.isEmpty() || trimmed.startsWith("#")) continue
+                    // A top-level key opens or closes the `server:` block;
+                    // only a key nested under it is the server property.
+                    if (!line[0].isWhitespace()) inServerBlock = trimmed == "server:"
+                    val flat = Regex("^server\\.forward-headers-strategy:\\s*(\\w+)\\s*$").find(trimmed)
+                    val nested = if (inServerBlock && line[0].isWhitespace()) {
+                        Regex("^forward-headers-strategy:\\s*(\\w+)\\s*$").find(trimmed)
+                    } else {
+                        null
+                    }
+                    (flat ?: nested)?.let { match ->
+                        forwardHeadersStrategySignal(match.groupValues[1], rel, index + 1)?.let(signals::add)
                     }
                 }
             }
         }
         return signals
+    }
+
+    /**
+     * Test resources, build outputs and dependency trees are not the
+     * application's served configuration (ConfigResolver skips test
+     * resources for the same reason).
+     */
+    private fun skippedConfigDir(relative: Path): Boolean {
+        val parts = relative.map { it.toString() }
+        return parts.any { it == "build" || it == "target" || it == "node_modules" || it.startsWith(".") } ||
+            parts.windowed(2).any { it == listOf("src", "test") }
     }
 
     private fun forwardHeadersStrategyConfigValue(value: String): Pair<String, String>? = when (value) {
@@ -176,7 +192,9 @@ object ForwardedHeaders {
             purl = "",
             filePath = rel,
             position = Position(rel, line, 1),
-            symbol = "server.forward-headers-strategy",
+            // The file that sets the property stands in for a function, so a
+            // corpus annotation can tell two config files apart.
+            symbol = "$rel#server.forward-headers-strategy",
         )
     }
 }

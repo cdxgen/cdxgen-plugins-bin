@@ -659,6 +659,8 @@ func builtinDataFlowPatterns(packs []string) *model.DataFlowPatternSet {
 			addSource("function", name, "proxy-derived", "user-input", "client-ip")
 		}
 		addSource("function", "github.com/labstack/echo/v4.Context.Scheme", "proxy-derived", "user-input", "scheme")
+		addSource("function", "github.com/gofiber/fiber/v2.(*Ctx).Hostname", "proxy-derived", "user-input", "host")
+		addSource("function", "github.com/gofiber/fiber/v2.(*Ctx).Protocol", "proxy-derived", "user-input", "scheme")
 		for _, name := range []string{"Header.Get", "Header).Get", "github.com/gin-gonic/gin.(*Context).GetHeader"} {
 			p := dfPattern("source", "function", name, "proxy-derived", "user-input", "forwarded-header")
 			p.ArgumentLiterals = forwardedHeaderLiterals
@@ -1402,29 +1404,29 @@ func (b *dataFlowBuilder) analyzeFunction(fn *ssa.Function) {
 				b.processAsyncCall(fn, state, x.Common(), x.Pos(), "defer")
 			case *ssa.Go:
 				b.processAsyncCall(fn, state, x.Common(), x.Pos(), "go")
-		default:
-			if v, ok := instr.(ssa.Value); ok {
-				// A field-shaped source describes the read itself — the
-				// RemoteAddr or Host forwarded-header middleware rewrites —
-				// so its trace REPLACES whatever the field would inherit from
-				// its base: the flow reports proxy-derived, not the request's
-				// http-input, and never both. A write to the field still wins
-				// over the model, because it stores its trace in memory under
-				// the field's key and taintOf reads memory before values.
-				fieldSourced := false
-				for _, source := range b.matchFieldSource(v) {
-					fieldSourced = true
-					n := b.addNode("source", source.name, source.symbol, source.typ, fn, v.Pos(), true, false, source.pattern.Category, source.pattern.TaintKinds, source.fieldPath, source.pattern.Confidence, map[string]string{"pattern": source.pattern.Pattern})
-					state.values[v] = combineTraces(state.values[v], dataFlowTrace{nodeIDs: []string{n.ID}, sourceID: n.ID, sourceCategory: n.Category, sourcePURL: n.PURL, sourcePatterns: []model.DataFlowPattern{source.pattern}, taintKinds: taintsForPattern(source.pattern), confidence: source.pattern.Confidence, fieldPaths: uniqueStrings([]string{source.fieldPath}), generated: true})
-				}
-				if fieldSourced {
-					continue
-				}
-				if tr, ok := b.valueTaint(state, v); ok {
-					state.values[v] = combineTraces(state.values[v], tr)
+			default:
+				if v, ok := instr.(ssa.Value); ok {
+					// A field-shaped source describes the read itself (the
+					// RemoteAddr or Host forwarded-header middleware rewrites),
+					// so its trace REPLACES whatever the field would inherit from
+					// its base: the flow reports proxy-derived, not the request's
+					// http-input, and never both. A write to the field still wins
+					// over the model, because it stores its trace in memory under
+					// the field's key and taintOf reads memory before values.
+					fieldSourced := false
+					for _, source := range b.matchFieldSource(v) {
+						fieldSourced = true
+						n := b.addNode("source", source.name, source.symbol, source.typ, fn, v.Pos(), true, false, source.pattern.Category, source.pattern.TaintKinds, source.fieldPath, source.pattern.Confidence, map[string]string{"pattern": source.pattern.Pattern})
+						state.values[v] = combineTraces(state.values[v], dataFlowTrace{nodeIDs: []string{n.ID}, sourceID: n.ID, sourceCategory: n.Category, sourcePURL: n.PURL, sourcePatterns: []model.DataFlowPattern{source.pattern}, taintKinds: taintsForPattern(source.pattern), confidence: source.pattern.Confidence, fieldPaths: uniqueStrings([]string{source.fieldPath}), generated: true})
+					}
+					if fieldSourced {
+						continue
+					}
+					if tr, ok := b.valueTaint(state, v); ok {
+						state.values[v] = combineTraces(state.values[v], tr)
+					}
 				}
 			}
-		}
 		}
 	}
 }

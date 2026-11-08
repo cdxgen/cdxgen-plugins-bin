@@ -3681,10 +3681,6 @@
     },
     {
       "category": "untrusted-input",
-      "pattern": "jakarta.servlet.http.HttpServletRequest.getRequestURL"
-    },
-    {
-      "category": "untrusted-input",
       "pattern": "jakarta.ws.rs.core.UriInfo.getPathParameters"
     },
     {
@@ -3750,10 +3746,6 @@
     {
       "category": "untrusted-input",
       "pattern": "javax.servlet.http.HttpServletRequest.getRequestURI"
-    },
-    {
-      "category": "untrusted-input",
-      "pattern": "javax.servlet.http.HttpServletRequest.getRequestURL"
     },
     {
       "category": "untrusted-input",

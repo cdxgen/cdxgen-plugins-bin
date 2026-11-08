@@ -37,16 +37,20 @@ category marks the accessors that return values middleware rewrites from the
 `Forwarded` and `X-Forwarded-*` headers: the servlet
 `getRemoteAddr`/`getRemoteHost`/`getServerName`/`getServerPort`/`getScheme`/
 `isSecure`/`getRequestURL` (Tomcat `RemoteIpValve`, Spring
-`ForwardedHeaderFilter`), Spring's `ServletUriComponentsBuilder.fromCurrent*`,
+`ForwardedHeaderFilter`; `getRequestURL` was `untrusted-input` before and is
+now reported once, as `proxy-derived`), Spring's `ServletUriComponentsBuilder.fromCurrent*`,
 and Vert.x `HttpServerRequest.remoteAddress`/`authority`/`host`. Ktor's
 `RequestConnectionPoint` accessors are deliberately absent: `origin` and
 `local` share one type FQN, so callee matching cannot separate the
 plugin-adjusted view from the socket view without tagging both. The
 `trusted-proxy-config` signal marks the switches: Spring's filter (unless
 `setRemoveOnly(true)`), Tomcat's valve, Jetty's `ForwardedRequestCustomizer`,
-Ktor's `ForwardedHeaders`/`XForwardedHeaders` plugins, and
+Ktor's `ForwardedHeaders`/`XForwardedHeaders` plugins (an `install` call whose
+resolved config type is the plugin's), and
 `server.forward-headers-strategy` (`native` or `framework`, not `none`) in
-the application config. Neither category means a deployment is vulnerable:
+the application config (test resources and build output are skipped). A
+literal read such as `getHeader("X-Forwarded-For")` stays `untrusted-input`:
+the pack matches callee names and has no argument-literal channel. Neither category means a deployment is vulnerable:
 the values are spoofable only behind a proxy that passes the headers through,
 which no source scan can see.
 

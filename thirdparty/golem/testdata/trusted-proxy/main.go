@@ -34,23 +34,28 @@ func ginTrusted(r *gin.Engine) {
 }
 
 func ginTrustedNil(r *gin.Engine) {
-	// twin: an explicitly empty list turns the feature off, no signal
-	_ = r.SetTrustedProxies(nil)
+	// twin: an explicitly empty list turns the feature off, no signal, also
+	// when the call sits in an if statement's init
+	if err := r.SetTrustedProxies(nil); err != nil {
+		panic(err)
+	}
+	_ = r.SetTrustedProxies([]string{})
 }
 
-func ginForwardedByClientIP() *gin.Engine {
-	// signal: trusted-proxy-config, framework=gin (Engine.ForwardedByClientIP)
-	return &gin.Engine{ForwardedByClientIP: true}
+func ginForwardedByClientIP(r *gin.Engine) {
+	// signal: trusted-proxy-config, framework=gin (Engine.ForwardedByClientIP),
+	// assigned the way gin applications set Engine fields
+	r.ForwardedByClientIP = true
 }
 
-func ginForwardedByClientIPFalse() *gin.Engine {
+func ginForwardedByClientIPFalse(r *gin.Engine) {
 	// twin: a literal false turns the behaviour off, no signal
-	return &gin.Engine{ForwardedByClientIP: false}
+	r.ForwardedByClientIP = false
 }
 
-func ginRemoteIPHeaders() *gin.Engine {
+func ginRemoteIPHeaders(r *gin.Engine) {
 	// signal: trusted-proxy-config, framework=gin, headers=x-forwarded
-	return &gin.Engine{RemoteIPHeaders: []string{"X-Forwarded-For"}}
+	r.RemoteIPHeaders = []string{"X-Forwarded-For"}
 }
 
 func echoIPExtractor() *echo.Echo {
@@ -70,7 +75,8 @@ func fiberProxyHeader() *fiber.App {
 }
 
 func fiberTrustedProxyCheck() *fiber.App {
-	// signal: trusted-proxy-config, framework=fiber
+	// twin: the check narrows which peers fiber trusts, it never turns
+	// forwarded-header handling on, so no signal
 	return fiber.New(fiber.Config{EnableTrustedProxyCheck: true})
 }
 

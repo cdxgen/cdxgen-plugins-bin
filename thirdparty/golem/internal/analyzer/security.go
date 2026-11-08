@@ -196,21 +196,30 @@ var trustedProxySelectors = map[string]struct {
 // how its value turns forwarded-header handling on. The key is the field's
 // declaring package path plus the field name, resolved through TypesInfo, so a
 // same-named field on an application struct never matches.
+// trustedProxyFields maps a struct field of a framework's own config type to
+// how its value turns forwarded-header handling on. The key is the field's
+// declaring package path plus the field name, resolved through TypesInfo, so a
+// same-named field on an application struct never matches. A field counts
+// whether it is set in a composite literal (fiber.Config{ProxyHeader: ...}) or
+// assigned (r.ForwardedByClientIP = true), which is how gin's Engine fields
+// are set in practice.
+//
+// fiber's EnableTrustedProxyCheck is left out on purpose: with it off (the
+// default) fiber trusts every peer's X-Forwarded-Host and X-Forwarded-Proto,
+// and turning it on narrows that trust to Config.TrustedProxies
+// (ctx.go IsProxyTrusted), so it never turns forwarded-header handling on.
 var trustedProxyFields = map[string]trustedProxyFieldRule{
-	"github.com/gin-gonic/gin.ForwardedByClientIP":       {framework: "gin", kind: ruleBoolOn},
-	"github.com/gin-gonic/gin.RemoteIPHeaders":           {framework: "gin", kind: ruleHeaderList},
-	"github.com/labstack/echo/v4.IPExtractor":            {framework: "echo", kind: ruleSelector},
-	"github.com/gofiber/fiber/v2.ProxyHeader":            {framework: "fiber", kind: ruleHeaderLiteral},
-	"github.com/gofiber/fiber/v2.EnableTrustedProxyCheck": {framework: "fiber", kind: ruleBoolOn},
+	"github.com/gin-gonic/gin.ForwardedByClientIP": {framework: "gin", kind: ruleBoolOn},
+	"github.com/gin-gonic/gin.RemoteIPHeaders":     {framework: "gin", kind: ruleHeaderList},
+	"github.com/gofiber/fiber/v2.ProxyHeader":      {framework: "fiber", kind: ruleHeaderLiteral},
 }
 
 type trustedProxyRuleKind int
 
 const (
-	ruleBoolOn trustedProxyRuleKind = iota // fires only on a literal true
-	ruleHeaderList                         // []string literal of header names
-	ruleHeaderLiteral                      // single string literal naming the header
-	ruleSelector                           // a framework selector value (IPExtractor)
+	ruleBoolOn        trustedProxyRuleKind = iota // fires unless the value is a literal false
+	ruleHeaderList                                // []string literal of header names
+	ruleHeaderLiteral                             // single string literal naming the header
 )
 
 type trustedProxyFieldRule struct {
@@ -218,13 +227,14 @@ type trustedProxyFieldRule struct {
 	kind      trustedProxyRuleKind
 }
 
+const ginSetTrustedProxies = "github.com/gin-gonic/gin.SetTrustedProxies"
+
 // trustedProxySignalsForFile reports where the code turns on forwarded-header
 // handling. What static analysis can see is the switch, not the proxy: the
 // signal records that the application resolves the client IP, host or scheme
 // from headers a client could have sent, and whether a deployment is actually
 // exposed depends on the proxy in front, which no source scan can see.
 func (a *Analyzer) trustedProxySignalsForFile(pkg *packages.Package, file *ast.File) []model.SecuritySignal {
-	parents := parentNodes(file)
 	var signals []model.SecuritySignal
 	emit := func(node ast.Node, symbol string, framework, headers string) {
 		props := map[string]string{"framework": framework}
@@ -236,73 +246,73 @@ func (a *Analyzer) trustedProxySignalsForFile(pkg *packages.Package, file *ast.F
 			"Ensure the proxy in front strips or overwrites Forwarded and X-Forwarded-* headers the client sends.",
 			node, props))
 	}
+	resolve := func(id *ast.Ident) string {
+		obj := pkg.TypesInfo.Uses[id]
+		if obj == nil || obj.Pkg() == nil {
+			return ""
+		}
+		return obj.Pkg().Path() + "." + obj.Name()
+	}
+	field := func(node ast.Node, key *ast.Ident, value ast.Expr) {
+		symbol := resolve(key)
+		rule, ok := trustedProxyFields[symbol]
+		if !ok {
+			return
+		}
+		switch rule.kind {
+		case ruleBoolOn:
+			// A literal false turns the behaviour off; anything else may
+			// turn it on, and a variable is reported rather than guessed at.
+			if lit, ok := value.(*ast.Ident); ok && lit.Name == "false" {
+				return
+			}
+			emit(node, symbol, rule.framework, "")
+		case ruleHeaderLiteral:
+			lit, ok := value.(*ast.BasicLit)
+			if !ok {
+				return
+			}
+			if name, _ := strconv.Unquote(lit.Value); name != "" {
+				emit(node, symbol, rule.framework, forwardedHeaderFamily(name))
+			}
+		case ruleHeaderList:
+			emit(node, symbol, rule.framework, headerFamilyUnion(value))
+		}
+	}
 	ast.Inspect(file, func(n ast.Node) bool {
 		switch x := n.(type) {
+		case *ast.CallExpr:
+			// SetTrustedProxies(nil) or an empty list turns trust off, so
+			// the call is judged with its argument rather than as a bare
+			// selector. A non-literal argument may be anything, and the
+			// signal errs on reporting it.
+			sel, ok := x.Fun.(*ast.SelectorExpr)
+			if !ok || resolve(sel.Sel) != ginSetTrustedProxies {
+				return true
+			}
+			if !ginTrustsNothing(x) {
+				emit(sel, ginSetTrustedProxies, "gin", "")
+			}
+			return true
 		case *ast.SelectorExpr:
-			obj := pkg.TypesInfo.Uses[x.Sel]
-			if obj == nil || obj.Pkg() == nil {
+			symbol := resolve(x.Sel)
+			if symbol == ginSetTrustedProxies {
 				return true
 			}
-			symbol := obj.Pkg().Path() + "." + obj.Name()
-			meta, ok := trustedProxySelectors[symbol]
-			if !ok {
-				return true
+			if meta, ok := trustedProxySelectors[symbol]; ok {
+				emit(x, symbol, meta.framework, meta.headers)
 			}
-			// SetTrustedProxies(nil) turns the feature off rather than on, so
-			// an explicitly empty list emits nothing. A non-literal argument
-			// may be anything, and the signal errs on reporting it.
-			if symbol == "github.com/gin-gonic/gin.SetTrustedProxies" && ginTrustsNothing(x, parents) {
-				return true
-			}
-			emit(x, symbol, meta.framework, meta.headers)
 		case *ast.KeyValueExpr:
-			ident, ok := x.Key.(*ast.Ident)
-			if !ok {
+			if key, ok := x.Key.(*ast.Ident); ok {
+				field(x, key, x.Value)
+			}
+		case *ast.AssignStmt:
+			if len(x.Lhs) != len(x.Rhs) {
 				return true
 			}
-			obj := pkg.TypesInfo.Uses[ident]
-			if obj == nil || obj.Pkg() == nil {
-				return true
-			}
-			rule, ok := trustedProxyFields[obj.Pkg().Path()+"."+obj.Name()]
-			if !ok {
-				return true
-			}
-			symbol := obj.Pkg().Path() + "." + obj.Name()
-			switch rule.kind {
-			case ruleBoolOn:
-				// A literal false turns the behaviour off; anything else may
-				// turn it on, and a false-by-default field written with a
-				// variable is reported rather than guessed at.
-				if lit, ok := x.Value.(*ast.Ident); ok && lit.Name == "false" {
-					return true
-				}
-				emit(x, symbol, rule.framework, "")
-			case ruleHeaderLiteral:
-				lit, ok := x.Value.(*ast.BasicLit)
-				if !ok {
-					return true
-				}
-				name, _ := strconv.Unquote(lit.Value)
-				if name == "" {
-					return true
-				}
-				emit(x, symbol, rule.framework, forwardedHeaderFamily(name))
-			case ruleHeaderList:
-				headers := headerFamilyUnion(x.Value)
-				emit(x, symbol, rule.framework, headers)
-			case ruleSelector:
-				sel, ok := x.Value.(*ast.SelectorExpr)
-				if !ok {
-					return true
-				}
-				val := pkg.TypesInfo.Uses[sel.Sel]
-				if val == nil || val.Pkg() == nil {
-					return true
-				}
-				valSymbol := val.Pkg().Path() + "." + val.Name()
-				if meta, ok := trustedProxySelectors[valSymbol]; ok {
-					emit(x, symbol, rule.framework, meta.headers)
+			for i, lhs := range x.Lhs {
+				if sel, ok := lhs.(*ast.SelectorExpr); ok {
+					field(x, sel.Sel, x.Rhs[i])
 				}
 			}
 		}
@@ -314,9 +324,8 @@ func (a *Analyzer) trustedProxySignalsForFile(pkg *packages.Package, file *ast.F
 // ginTrustsNothing reports whether a SetTrustedProxies call is passed an
 // explicitly empty trusted list: nil or an empty composite literal. Such a
 // call disables forwarded-header trust rather than enabling it.
-func ginTrustsNothing(sel *ast.SelectorExpr, parents map[ast.Node]ast.Node) bool {
-	call, ok := parents[sel].(*ast.CallExpr)
-	if !ok || call.Fun != sel || len(call.Args) != 1 {
+func ginTrustsNothing(call *ast.CallExpr) bool {
+	if len(call.Args) != 1 {
 		return false
 	}
 	switch arg := call.Args[0].(type) {
@@ -326,66 +335,6 @@ func ginTrustsNothing(sel *ast.SelectorExpr, parents map[ast.Node]ast.Node) bool
 		return len(arg.Elts) == 0
 	}
 	return false
-}
-
-// parentNodes maps every node in the file to its direct parent, so a selector
-// can be read together with the call or composite literal it sits in.
-func parentNodes(file *ast.File) map[ast.Node]ast.Node {
-	parents := make(map[ast.Node]ast.Node, len(file.Decls)*8)
-	var walk func(n ast.Node)
-	walk = func(n ast.Node) {
-		children := childNodes(n)
-		for _, c := range children {
-			parents[c] = n
-			walk(c)
-		}
-	}
-	walk(file)
-	return parents
-}
-
-// childNodes lists a node's direct children, the subset of shapes the
-// trusted-proxy walker needs to climb.
-func childNodes(n ast.Node) []ast.Node {
-	var out []ast.Node
-	switch x := n.(type) {
-	case *ast.File:
-		for _, d := range x.Decls {
-			out = append(out, d)
-		}
-	case *ast.GenDecl:
-		for _, s := range x.Specs {
-			out = append(out, s)
-		}
-	case *ast.FuncDecl:
-		if x.Body != nil {
-			out = append(out, x.Body)
-		}
-	case *ast.BlockStmt:
-		for _, s := range x.List {
-			out = append(out, s)
-		}
-	case *ast.ExprStmt:
-		out = append(out, x.X)
-	case *ast.AssignStmt:
-		for _, e := range x.Rhs {
-			out = append(out, e)
-		}
-	case *ast.CallExpr:
-		out = append(out, x.Fun)
-		for _, e := range x.Args {
-			out = append(out, e)
-		}
-	case *ast.SelectorExpr:
-		out = append(out, x.X)
-	case *ast.KeyValueExpr:
-		out = append(out, x.Key, x.Value)
-	case *ast.CompositeLit:
-		for _, e := range x.Elts {
-			out = append(out, e)
-		}
-	}
-	return out
 }
 
 // forwardedHeaderFamily maps one header name to the family the signal's

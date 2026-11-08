@@ -36,15 +36,23 @@
 // The config half: each framework's own symbol turns the signal on, the
 // remove-only filter and the none strategy stay quiet.
 //
-// kosi:want signal code=trusted-proxy-config fn=~ForwardedHeaderFilter mode=resolved
+// kosi:want signal code=trusted-proxy-config fn=~springFilterRegistration mode=resolved
 // kosi:want-not signal code=trusted-proxy-config fn=~removeOnlyRegistration
-// kosi:want signal code=trusted-proxy-config fn=~RemoteIpValve mode=resolved
-// kosi:want signal code=trusted-proxy-config fn=~ForwardedRequestCustomizer mode=resolved
-// kosi:want signal code=trusted-proxy-config fn=~forwardedheaders.ForwardedHeaders mode=resolved
-// kosi:want signal code=trusted-proxy-config fn=~forwardedheaders.XForwardedHeaders mode=resolved
-// kosi:want signal code=trusted-proxy-config fn=server.forward-headers-strategy mode=resolved
+// kosi:want signal code=trusted-proxy-config fn=~tomcatValveConfig mode=resolved
+// kosi:want signal code=trusted-proxy-config fn=~jettyCustomizerConfig mode=resolved
+// kosi:want signal code=trusted-proxy-config fn=~ktorInstallForwarded mode=resolved
+// kosi:want signal code=trusted-proxy-config fn=~ktorInstallXForwarded mode=resolved
+// kosi:want-not signal code=trusted-proxy-config fn=~ktorInstallOther
+// kosi:want signal code=trusted-proxy-config fn=~application.properties#server.forward-headers-strategy mode=resolved
+// kosi:want signal code=trusted-proxy-config fn=~application-edge.yml#server.forward-headers-strategy mode=resolved
+// kosi:want-not signal code=trusted-proxy-config fn=~application-dev.yml
+// kosi:want-not signal code=trusted-proxy-config fn=~application-other.yml
 package fixtures.forwarded
 
+import io.ktor.server.application.Application
+import io.ktor.server.application.install
+import io.ktor.server.plugins.forwardedheaders.ForwardedHeaders
+import io.ktor.server.plugins.forwardedheaders.XForwardedHeaders
 import io.vertx.core.http.HttpServerRequest
 import io.vertx.core.net.SocketAddress
 import jakarta.servlet.http.HttpServletRequest
@@ -54,16 +62,16 @@ import org.eclipse.jetty.server.ForwardedRequestCustomizer
 import org.springframework.web.filter.ForwardedHeaderFilter
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder
 
-fun remoteAddrEcho(req: HttpServletRequest): URI = URI.create(req.remoteAddr)
-fun remoteHostEcho(req: HttpServletRequest): URI = URI.create(req.remoteHost)
-fun serverNameEcho(req: HttpServletRequest): URI = URI.create(req.serverName)
-fun requestUrlEcho(req: HttpServletRequest): URI = URI.create(req.requestURL.toString())
-fun schemeEcho(req: HttpServletRequest): URI = URI.create(req.scheme)
+fun remoteAddrEcho(req: HttpServletRequest): URI = URI.create(req.getRemoteAddr())
+fun remoteHostEcho(req: HttpServletRequest): URI = URI.create(req.getRemoteHost())
+fun serverNameEcho(req: HttpServletRequest): URI = URI.create(req.getServerName())
+fun requestUrlEcho(req: HttpServletRequest): URI = URI.create(req.getRequestURL().toString())
+fun schemeEcho(req: HttpServletRequest): URI = URI.create(req.getScheme())
 fun uriBuilderEcho(): URI = URI.create(ServletUriComponentsBuilder.fromCurrentRequest().toUriString())
 fun vertxRemoteAddressEcho(req: HttpServerRequest): URI = URI.create(req.remoteAddress().toString())
 fun vertxAuthorityEcho(req: HttpServerRequest): URI = URI.create(req.authority())
 
-fun serverPortEcho(req: HttpServletRequest): URI = URI.create(req.serverPort.toString())
+fun serverPortEcho(req: HttpServletRequest): URI = URI.create(req.getServerPort().toString())
 fun secureEcho(req: HttpServletRequest): URI = URI.create(req.isSecure().toString())
 fun uriBuilderContextPathEcho(): URI = URI.create(ServletUriComponentsBuilder.fromCurrentContextPath().toUriString())
 fun uriBuilderRequestUriEcho(): URI = URI.create(ServletUriComponentsBuilder.fromCurrentRequestUri().toUriString())
@@ -103,10 +111,21 @@ fun jettyCustomizerConfig() {
     val customizer = ForwardedRequestCustomizer()
 }
 
-fun ktorInstallForwarded() {
-    io.ktor.server.application.install(io.ktor.server.plugins.forwardedheaders.ForwardedHeaders)
+fun Application.ktorInstallForwarded() {
+    install(ForwardedHeaders)
 }
 
-fun ktorInstallXForwarded() {
-    io.ktor.server.application.install(io.ktor.server.plugins.forwardedheaders.XForwardedHeaders)
+fun Application.ktorInstallXForwarded() {
+    install(XForwardedHeaders) {
+        // configuration would follow
+    }
+}
+
+/** An unrelated plugin installed the same way: no signal. */
+class OtherConfig
+
+val OtherPlugin: io.ktor.server.application.ApplicationPlugin<OtherConfig> = io.ktor.server.application.ApplicationPlugin()
+
+fun Application.ktorInstallOther() {
+    install(OtherPlugin)
 }

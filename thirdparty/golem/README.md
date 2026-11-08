@@ -131,7 +131,7 @@ problem visible in code, in both taint engines:
   return proxy-resolved values: `(*http.Request).RemoteAddr` and `.Host` (both
   rewritten by middleware such as chi `middleware.RealIP` and gorilla
   `handlers.ProxyHeaders`), gin `(*Context).ClientIP`, echo `Context.RealIP`
-  and `Context.Scheme`, fiber `(*Ctx).IP` and `(*Ctx).IPs`, and a literal
+  and `Context.Scheme`, fiber `(*Ctx).IP`, `IPs`, `Hostname` and `Protocol`, and a literal
   `Header.Get`/gin `GetHeader` read of a forwarded header, whose lower-cased
   name rides on the source node's `properties.header`. The socket view
   (`(*http.Request).TLS`, gin `(*Context).RemoteIP`) is deliberately not

@@ -4,4 +4,5 @@ import jakarta.servlet.ServletRequest
 
 interface HttpServletRequest : ServletRequest {
     fun getRequestURL(): StringBuffer
+    fun getHeader(name: String): String?
 }

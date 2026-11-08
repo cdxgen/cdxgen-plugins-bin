@@ -732,20 +732,22 @@ call (the binding site), and `.def` files under the conventional cinterop
 source-set directories (`nativeInterop/cinterop`, `cinterop`). A function
 merely NAMED like a native one is a corpus negative, not a finding.
 
-## trusted-proxy-config — the forwarded-header switch
+## trusted-proxy-config: the forwarded-header switch
 
 The `trusted-proxy-config` signal code marks where the code turns on handling
 of the client-supplied `Forwarded` and `X-Forwarded-*` headers. The
 `message` names the framework; a deployment is exposed only when the proxy in
 front passes those headers through, which no source scan can see. The rules
 key on the framework's own resolved symbol, and an explicitly off value
-emits nothing:
+emits nothing. The signal's `symbol` is the function that flips the switch,
+or `<config file>#server.forward-headers-strategy` for the property:
 
 - Spring `ForwardedHeaderFilter` (both header families), unless it is in
   remove-only mode (`setRemoveOnly(true)`, which strips the headers).
 - Tomcat `RemoteIpValve` (X-Forwarded-*).
 - Jetty `ForwardedRequestCustomizer` (the RFC 7239 `Forwarded` header).
-- Ktor's `ForwardedHeaders` and `XForwardedHeaders` plugins.
+- Ktor's `ForwardedHeaders` and `XForwardedHeaders` plugins, by the resolved
+  config type of the `install` call.
 - `server.forward-headers-strategy` in the application config files:
   `native` (the container's X-Forwarded-* handling) or `framework`
   (Spring's filter, both families); `none` emits nothing.

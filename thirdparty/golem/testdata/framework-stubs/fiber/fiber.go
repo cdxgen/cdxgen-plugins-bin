@@ -1,7 +1,7 @@
 // A hermetic stub of github.com/gofiber/fiber/v2 covering the Ctx accessors
 // and Config fields golem's forwarded-header rules recognise. Fixtures depend
 // on it through a filesystem `replace`, so the module path stays
-// github.com/gofiber/fiber/v2 — the versioned module path real fiber projects
+// github.com/gofiber/fiber/v2, the versioned module path real fiber projects
 // import.
 package fiber
 
@@ -24,6 +24,14 @@ func (c *Ctx) IP() string { return "" }
 
 // IPs returns every address in X-Forwarded-For, matching the real accessor.
 func (c *Ctx) IPs() []string { return nil }
+
+// Hostname returns X-Forwarded-Host when the peer is trusted, matching the
+// real accessor.
+func (c *Ctx) Hostname() string { return "" }
+
+// Protocol returns X-Forwarded-Proto when the peer is trusted, matching the
+// real accessor.
+func (c *Ctx) Protocol() string { return "" }
 
 type HandlerFunc func(c *Ctx) error
 

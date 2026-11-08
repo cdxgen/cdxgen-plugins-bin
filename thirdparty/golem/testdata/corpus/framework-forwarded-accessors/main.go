@@ -3,8 +3,8 @@ package frameworkforwardedaccessors
 import (
 	"log"
 
-	fiber "github.com/gofiber/fiber/v2"
 	"github.com/gin-gonic/gin"
+	fiber "github.com/gofiber/fiber/v2"
 	"github.com/labstack/echo/v4"
 )
 
@@ -56,5 +56,22 @@ func fiberIP(c *fiber.Ctx) error {
 // golem:want flow source=proxy-derived sink=logging sourceFn=~fiber/v2.(*Ctx).IPs
 func fiberIPs(c *fiber.Ctx) error {
 	log.Printf("chain %v", c.IPs())
+	return nil
+}
+
+// Hostname returns X-Forwarded-Host, which fiber trusts from every peer unless
+// EnableTrustedProxyCheck is set.
+//
+// golem:want flow source=proxy-derived sink=logging sourceFn=~fiber/v2.(*Ctx).Hostname
+func fiberHostname(c *fiber.Ctx) error {
+	log.Printf("host %s", c.Hostname())
+	return nil
+}
+
+// Protocol returns X-Forwarded-Proto under the same trust rule.
+//
+// golem:want flow source=proxy-derived sink=logging sourceFn=~fiber/v2.(*Ctx).Protocol
+func fiberProtocol(c *fiber.Ctx) error {
+	log.Printf("scheme %s", c.Protocol())
 	return nil
 }

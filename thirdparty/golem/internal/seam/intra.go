@@ -912,8 +912,8 @@ func (s *intra) evaluate(state taintState, v ssa.Value, visited map[ssa.Value]bo
 		if labels, ok := state.memory[s.pathKey(x)]; ok {
 			return labels
 		}
-		// A field-shaped source model describes this read itself — the
-		// RemoteAddr and Host a forwarded-header middleware rewrites — so the
+		// A field-shaped source model describes this read itself (the
+		// RemoteAddr and Host a forwarded-header middleware rewrites), so the
 		// read is a source in its own right and REPLACES the labels it would
 		// otherwise inherit from the base: the flow reports proxy-derived,
 		// not the request's http-input, and never both.

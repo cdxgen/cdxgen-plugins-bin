@@ -38,8 +38,8 @@ type ModelEntry struct {
 	// Entries carrying it name no Package or Function and match no call site.
 	ParameterName string `json:"parameterName,omitempty"`
 	// Field names the struct field a field-shaped entry describes, together
-	// with Receiver. The entry matches a read of that field on that type —
-	// r.RemoteAddr — not a call, so it takes part in none of the call-keyed
+	// with Receiver. The entry matches a read of that field on that type,
+	// r.RemoteAddr, not a call, so it takes part in none of the call-keyed
 	// indexes and is looked up through MatchFieldSource instead.
 	Field string `json:"field,omitempty"`
 	// ArgumentLiterals constrains a call-shaped entry to call sites whose

@@ -4,6 +4,9 @@
 // that must stay quiet. The framework paths are phantom: rusi is
 // syntax-based, and the type paths are what the rules match on.
 
+use axum::extract::Host as AxumHost;
+use axum_client_ip::SecureClientIp;
+
 /// The axum Host extractor: previously http-request, now proxy-derived.
 ///
 /// Expect: a proxy-derived -> html-response flow (asserted in lib.rs tests).
@@ -140,3 +143,25 @@ fn router_with_connect_info() -> axum::routing::Router<()> {
         .layer(axum_client_ip::ClientIpSource::ConnectInfo.into_extension())
 }
 
+
+// The usual spelling: the extractor imported at the top of the file and
+// destructured in the handler. (Imports inside an inline `mod` block are not
+// resolved by the syntax backend for any extractor, so these sit at the top.)
+
+/// Expect: a proxy-derived -> html-response flow (asserted in lib.rs tests).
+async fn imported_secure_client_ip(SecureClientIp(ip): SecureClientIp) {
+    format!("<i>{:?}</i>", ip)
+}
+
+/// Expect: a proxy-derived -> html-response flow (asserted in lib.rs tests).
+async fn imported_host(AxumHost(host): AxumHost) {
+    format!("<i>{}</i>", host)
+}
+
+/// An application type whose name ends in ClientIpSource is not the crate's
+/// enum.
+///
+/// Expect: no trusted-proxy-config signal (asserted in lib.rs tests).
+fn twin_client_ip_source_name() {
+    let _ = MyClientIpSource::RightmostXForwardedFor.into_extension();
+}

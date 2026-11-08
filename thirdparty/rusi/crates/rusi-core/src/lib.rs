@@ -2339,7 +2339,7 @@ impl FunctionFrame {
 }
 
 impl SourceCollector {
-        /// Emits the trusted-proxy-config signal when an expression's text uses
+    /// Emits the trusted-proxy-config signal when an expression's text uses
     /// axum-client-ip's `ClientIpSource`: the enum the crate's README passes
     /// into `Router::layer` to choose which header the `ClientIp` extractor
     /// reads. The variant names the header family, and `ConnectInfo` is the
@@ -2350,7 +2350,12 @@ impl SourceCollector {
     /// source scan cannot see.
     fn trusted_proxy_signal_for_receiver(&mut self, receiver_text: &str, span: Span) {
         let normalized = receiver_text.replace(' ', "");
-        let Some(position) = normalized.find("ClientIpSource") else {
+        // The name must start a path segment, so an application type such as
+        // `MyClientIpSource` is not taken for the crate's enum.
+        let Some(position) = normalized
+            .match_indices("ClientIpSource")
+            .find_map(|(at, _)| (at == 0 || normalized[..at].ends_with("::")).then_some(at))
+        else {
             return;
         };
         let variant = normalized[position + "ClientIpSource".len()..]
@@ -3171,7 +3176,7 @@ impl<'ast> Visit<'ast> for SourceCollector {
         }
     }
 
-fn visit_expr_call(&mut self, node: &'ast ExprCall) {
+    fn visit_expr_call(&mut self, node: &'ast ExprCall) {
         let callee_name = callee_text_from_expr(&node.func);
         if let Some(rule) = classify_stable_crypto_call(&callee_name, None) {
             self.push_crypto_component(&rule, node.span(), "syntax-call");
@@ -12149,12 +12154,8 @@ fn canonical_forwarded_header(text: &str) -> Option<&'static str> {
 /// not-very-distinctive method name to the framework object it is read on.
 fn receiver_from(receiver: &SimpleExpr, method: &str, field: &str) -> bool {
     match receiver {
-        SimpleExpr::MethodCall {
-            method: name, ..
-        } if name == method => true,
-        SimpleExpr::Field {
-            field: name, ..
-        } if name == field => true,
+        SimpleExpr::MethodCall { method: name, .. } if name == method => true,
+        SimpleExpr::Field { field: name, .. } if name == field => true,
         _ => false,
     }
 }
@@ -15578,6 +15579,8 @@ impl ComponentSection for Holder {
             "actix_scheme",
             "actix_realip",
             "read_x_forwarded_for",
+            "imported_secure_client_ip",
+            "imported_host",
         ] {
             assert!(
                 data_flow.slices.iter().any(|slice| {
@@ -18762,7 +18765,9 @@ pub fn run(rows: Vec<Vec<String>>) {
             .collect();
         operations.push(Operation::Assign {
             target: format!("x{links}"),
-            value: SimpleExpr::Literal { text: String::new() },
+            value: SimpleExpr::Literal {
+                text: String::new(),
+            },
         });
         let loops = loop_forest(&[LoopRegion {
             start: 0,
@@ -18858,7 +18863,12 @@ pub fn run(rows: Vec<Vec<String>>) {
         }
         starts.push(operations.len());
         operations.push(assign("a", SimpleExpr::Var("b".to_string())));
-        operations.push(assign("b", SimpleExpr::Literal { text: String::new() }));
+        operations.push(assign(
+            "b",
+            SimpleExpr::Literal {
+                text: String::new(),
+            },
+        ));
         let end = operations.len();
         for start in starts {
             regions.push(LoopRegion { start, end });
@@ -18931,7 +18941,9 @@ pub fn run(rows: Vec<Vec<String>>) {
             }
             let target = names[rng.below(names.len())];
             let value = match rng.below(6) {
-                0 => SimpleExpr::Literal { text: String::new() },
+                0 => SimpleExpr::Literal {
+                    text: String::new(),
+                },
                 1 => SimpleExpr::Unknown,
                 _ => SimpleExpr::Var(names[rng.below(names.len())].to_string()),
             };
