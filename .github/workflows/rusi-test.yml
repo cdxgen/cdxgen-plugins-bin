@@ -7,9 +7,7 @@ on:
       - "thirdparty/rusi/**"
       - ".github/workflows/rusi-test.yml"
   pull_request:
-    paths:
-      - "thirdparty/rusi/**"
-      - ".github/workflows/rusi-test.yml"
+  merge_group:
   workflow_dispatch:
 
 concurrency:
@@ -27,6 +25,42 @@ defaults:
     working-directory: thirdparty/rusi
 
 jobs:
+  # The workflow runs on every pull request and merge-queue group so that its
+  # required check always reports. This job decides which tests the change
+  # needs: a job whose paths did not change is skipped, and the summary job at
+  # the end counts a skip as a pass. Pushes and manual runs test everything.
+  changes:
+    name: changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      rusi: ${{ steps.diff.outputs.rusi }}
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          MG_BASE: ${{ github.event.merge_group.base_sha }}
+          MG_HEAD: ${{ github.event.merge_group.head_sha }}
+        run: |
+          # A pull request is checked out as its merge commit, whose first
+          # parent is the base branch tip.
+          all=""
+          case "$EVENT" in
+            pull_request) files="$(git diff --name-only HEAD^1 HEAD)" ;;
+            merge_group) files="$(git diff --name-only "$MG_BASE" "$MG_HEAD")" ;;
+            *) files=""; all=1 ;;
+          esac
+          changed() { [ -n "$all" ] || printf '%s\n' "$files" | grep -qE "$1"; }
+          if changed '^(thirdparty/rusi/|\.github/workflows/rusi-test\.yml$)'; then echo rusi=true; else echo rusi=false; fi >> "$GITHUB_OUTPUT"
+
   # Default test suite on stable. The rustc-wrapper crate is excluded from the
   # workspace default-members, so the whole default set builds and tests on
   # stable like any other project. Compiler-backend integration tests are
@@ -39,6 +73,8 @@ jobs:
   # found by a Windows VM run).
   test:
     name: cargo test (stable, ${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.rusi == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -93,6 +129,8 @@ jobs:
   # continuations are bash syntax.
   test-nightly:
     name: cargo +${{ matrix.toolchain }} test -- --ignored (compiler backend, ${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.rusi == 'true'
     runs-on: ${{ matrix.os }}
     continue-on-error: ${{ matrix.canary }}
     strategy:
@@ -146,3 +184,27 @@ jobs:
       - name: cargo test -- --ignored --test-threads=1
         shell: bash
         run: cargo "+$TOOLCHAIN" test -- --ignored --test-threads=1
+
+  # The required status check for this workflow. It passes when every test job
+  # above passed or was skipped because its paths did not change; a canary
+  # toolchain row that may fail does not fail its job (continue-on-error).
+  required:
+    name: rusi tests
+    if: always()
+    needs: [changes, test, test-nightly]
+    runs-on: ubuntu-latest
+    permissions: {}
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - name: Check the test jobs
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          for result in $RESULTS; do
+            case "$result" in
+              success|skipped) ;;
+              *) echo "a test job ended with: $result"; exit 1 ;;
+            esac
+          done

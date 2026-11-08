@@ -440,6 +440,7 @@ impl EmbeddedCollector {
             let declaration = self.push_decl(tcx, item.owner_id.def_id, kind, None)?;
             self.push_security_signal(SecuritySignal {
                 cfg_gate: None,
+                properties: IndexMap::new(),
                 id: stable_id("signal", &[&declaration.id, "native-interop"]),
                 category: "native-interop".to_string(),
                 severity: "medium".to_string(),
@@ -967,6 +968,7 @@ impl EmbeddedCollector {
         if kind == "unsafe-function" || kind == "unsafe-method" {
             self.push_security_signal(SecuritySignal {
                 cfg_gate: None,
+                properties: IndexMap::new(),
                 id: stable_id("signal", &[&declaration.id, "unsafe-fn"]),
                 category: "unsafe-code".to_string(),
                 severity: "medium".to_string(),
@@ -1286,6 +1288,7 @@ impl<'tcx> BodyVisitor<'tcx, '_> {
         } = self.site(span);
         let signal = SecuritySignal {
             cfg_gate: None,
+            properties: IndexMap::new(),
             id: stable_id("signal", &[&file_path, category, &key]),
             category: category.to_string(),
             severity: "medium".to_string(),

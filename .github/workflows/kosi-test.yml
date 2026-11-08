@@ -10,9 +10,7 @@ on:
       - "thirdparty/kosi/**"
       - ".github/workflows/kosi-test.yml"
   pull_request:
-    paths:
-      - "thirdparty/kosi/**"
-      - ".github/workflows/kosi-test.yml"
+  merge_group:
   workflow_dispatch:
 
 concurrency:
@@ -26,11 +24,49 @@ defaults:
     working-directory: thirdparty/kosi
 
 jobs:
+  # The workflow runs on every pull request and merge-queue group so that its
+  # required check always reports. This job decides which tests the change
+  # needs: a job whose paths did not change is skipped, and the summary job at
+  # the end counts a skip as a pass. Pushes and manual runs test everything.
+  changes:
+    name: changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      kosi: ${{ steps.diff.outputs.kosi }}
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          MG_BASE: ${{ github.event.merge_group.base_sha }}
+          MG_HEAD: ${{ github.event.merge_group.head_sha }}
+        run: |
+          # A pull request is checked out as its merge commit, whose first
+          # parent is the base branch tip.
+          all=""
+          case "$EVENT" in
+            pull_request) files="$(git diff --name-only HEAD^1 HEAD)" ;;
+            merge_group) files="$(git diff --name-only "$MG_BASE" "$MG_HEAD")" ;;
+            *) files=""; all=1 ;;
+          esac
+          changed() { [ -n "$all" ] || printf '%s\n' "$files" | grep -qE "$1"; }
+          if changed '^(thirdparty/kosi/|\.github/workflows/kosi-test\.yml$)'; then echo kosi=true; else echo kosi=false; fi >> "$GITHUB_OUTPUT"
+
   # Unit tests + the fixture-tier corpus ratchet (both modes) + digest goldens.
   # Every tier task named in the docs is exercised here; a renamed or missing
   # tier task fails this job.
   test:
     name: gradle build + corpusQuick + golden
+    needs: changes
+    if: needs.changes.outputs.kosi == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -246,3 +282,27 @@ jobs:
         # See the darwin job. A metadata or substrate gap is not confined to
         # one OS, so the comparison runs on both images that are built.
         run: make native-agreement
+
+  # The required status check for this workflow. It passes when every test job
+  # above passed or was skipped because its paths did not change; a canary
+  # toolchain row that may fail does not fail its job (continue-on-error).
+  required:
+    name: kosi tests
+    if: always()
+    needs: [changes, test]
+    runs-on: ubuntu-latest
+    permissions: {}
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - name: Check the test jobs
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          for result in $RESULTS; do
+            case "$result" in
+              success|skipped) ;;
+              *) echo "a test job ended with: $result"; exit 1 ;;
+            esac
+          done
