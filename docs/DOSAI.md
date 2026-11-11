@@ -26,6 +26,8 @@ dosai dataflows --path ./src --o dataflows.json
 
 linux-amd64, linux-arm, linux-arm64, linuxmusl-amd64, linuxmusl-arm64, darwin-amd64, darwin-arm64, windows-amd64, and windows-arm64.
 
+The packaged binaries are dosai's framework-dependent single-file builds, so they need a .NET runtime on the host. dosai 5.0.0, the version this release ships, targets .NET 11 and needs the .NET 11 runtime; the 4.1.0 binaries that earlier releases shipped ran on .NET 10. dosai 5 also reads C# 15 source, including union declarations, and resolves conditional compilation, global usings and package URLs per project. dosai's own releases also publish self-contained `-full` builds that need no runtime, for hosts where installing one is not an option.
+
 ## Relationship to cdxgen
 
 cdxgen already parses .NET project files and lock files on its own. dosai is called when deeper evidence is needed: resolving what an assembly actually contains, or connecting source-level declarations to the components in the BOM. If the binary is missing, cdxgen falls back to manifest-only .NET analysis and the scan still succeeds.

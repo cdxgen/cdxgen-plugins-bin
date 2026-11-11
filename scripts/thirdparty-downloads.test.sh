@@ -12,12 +12,12 @@ asset_sha256=""
 resolve_asset dosai-linux-amd64
 [[ "$asset_filename" == "Dosai-linux-amd64" ]]
 [[ "$asset_url" == "https://github.com/owasp-dep-scan/dosai/releases/download/v${DOSAI_VERSION}/Dosai-linux-amd64" ]]
-[[ "$asset_sha256" == "466060fc222ce0050e853da9e4d5e602a82e5fdab4e6f27f6c7d3494145740fa" ]]
+[[ "$asset_sha256" == "c8e4d9e9d36dd3af99541a6a6fefe0c038d1298c6d7356ab61be5a89746fdd64" ]]
 
 resolve_asset dosai-windows-amd64
 [[ "$asset_filename" == "Dosai.exe" ]]
 [[ "$asset_url" == "https://github.com/owasp-dep-scan/dosai/releases/download/v${DOSAI_VERSION}/Dosai.exe" ]]
-[[ "$asset_sha256" == "c804961ed46675a43718553bee5cbf1b74dbe90c318658b6df75f6aedc6aa36c" ]]
+[[ "$asset_sha256" == "874f1be9ff820bcdbb95170293e775dd008d40921aed43df932f64b733f596a9" ]]
 
 # Every pinned dosai platform resolves, and a hash that no longer matches
 # the pinned release is caught before it ships: the assertions below each
@@ -25,31 +25,31 @@ resolve_asset dosai-windows-amd64
 # future bump that forgets to re-derive one platform fails right here.
 resolve_asset dosai-linux-arm
 [[ "$asset_filename" == "Dosai-linux-arm" ]]
-[[ "$asset_sha256" == "d2e4aa7814301a6e9ccba5e77197f3b2def3f970f119d39a5020f08de10df5e5" ]]
+[[ "$asset_sha256" == "be215cb6241e4a0adc6173d0632fdc0b465b98c9c7b469a15a788244e1c32218" ]]
 
 resolve_asset dosai-linux-arm64
 [[ "$asset_filename" == "Dosai-linux-arm64" ]]
-[[ "$asset_sha256" == "a40f45b5400e96d431042be015d340e5293688c43c17518247fd3ed6a36d60be" ]]
+[[ "$asset_sha256" == "490fe83c3c1fe27093ebefc0aab9c7c61e24e337a020d7b38303acdfb41a5558" ]]
 
 resolve_asset dosai-linuxmusl-amd64
 [[ "$asset_filename" == "Dosai-linux-musl-x64" ]]
-[[ "$asset_sha256" == "8eaee321818822ee24f2efa9ee4e08bf57dad5554169788c50fa5ed3a9354ce6" ]]
+[[ "$asset_sha256" == "8af8469513c968a60f38374ec1216d777b61baf622371e8d77827d1102787b60" ]]
 
 resolve_asset dosai-linuxmusl-arm64
 [[ "$asset_filename" == "Dosai-linux-musl-arm64" ]]
-[[ "$asset_sha256" == "1220c14cefa61cd00b04c8d9a2370a059dea6947388f85a98d1cb92ed95616c5" ]]
+[[ "$asset_sha256" == "6c308088e5f0a02adb1bf275746e93ffd5f6f97745e6071e03ab06ade3f02ff8" ]]
 
 resolve_asset dosai-darwin-amd64
 [[ "$asset_filename" == "Dosai-osx-x64" ]]
-[[ "$asset_sha256" == "aca98b6c4fb7a64adc8414e1a7dadefdcaf38ffaf7313d5a30f9e8983f4ce3b6" ]]
+[[ "$asset_sha256" == "ea17658372e6d5897959793bad845d9549f3575f0f7231e5a847c38a7ca198dd" ]]
 
 resolve_asset dosai-darwin-arm64
 [[ "$asset_filename" == "Dosai-osx-arm64" ]]
-[[ "$asset_sha256" == "74a218d259e2d2a9956f0fa569cef06d07f6a4c5c50ad13ebd6b03fad37dcf12" ]]
+[[ "$asset_sha256" == "98987024f37fd5e21ce7fe70c8441be3dd56eaf9fe7b1df31ad822387e4db548" ]]
 
 resolve_asset dosai-windows-arm64
 [[ "$asset_filename" == "Dosai-windows-arm64.exe" ]]
-[[ "$asset_sha256" == "29ef0541210a99e91571085bf258e7f7f113cba6268d0b79c7fb07e69a4961cd" ]]
+[[ "$asset_sha256" == "051bed7838c4f54c704909bd8eb51efba89d2bc712c58f213052bd72f820613b" ]]
 
 resolve_asset upx-linux-amd64
 [[ "$asset_filename" == "upx-${UPX_VERSION}-amd64_linux.tar.xz" ]]

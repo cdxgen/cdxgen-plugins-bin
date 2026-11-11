@@ -7,12 +7,12 @@ New-Item -ItemType Directory -Path plugins\golem -Force
 $upxVersion = "5.2.1"
 $upxArchive = "upx-$upxVersion-win64.zip"
 $upxArchiveSha256 = "eabc6792a347d45e945be7748423e7868fd01b0d2bcaa2f4b1031fd71ff69bda"
-$osqueryVersion = "5.24.0"
+$osqueryVersion = "5.24.1"
 $osqueryArchive = "osquery-$osqueryVersion.windows_x86_64.zip"
-$osqueryArchiveSha256 = "2a55cf9d27765f0c7ce9e3484bdf1aee560df65442f39189d7201107f21544a5"
-$dosaiVersion = "4.1.0"
+$osqueryArchiveSha256 = "a71d6d3f57b9fb051988c341fd5186c548fcf83bc94f73cc2cc0a83d702391e9"
+$dosaiVersion = "5.0.0"
 $dosaiArchive = "Dosai.exe"
-$dosaiArchiveSha256 = "c804961ed46675a43718553bee5cbf1b74dbe90c318658b6df75f6aedc6aa36c"
+$dosaiArchiveSha256 = "874f1be9ff820bcdbb95170293e775dd008d40921aed43df932f64b733f596a9"
 # The version the Go tools stamp via -X main.version; the Makefiles read the
 # same file, so a Windows binary and a Make-built binary of one commit always
 # agree.
