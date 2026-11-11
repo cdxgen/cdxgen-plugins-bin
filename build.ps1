@@ -39,7 +39,8 @@ Invoke-WebRequest -Uri "https://github.com/osquery/osquery/releases/download/$os
 Assert-Sha256 -Path $osqueryArchive -ExpectedHash $osqueryArchiveSha256
 Expand-Archive -Path $osqueryArchive -DestinationPath . -Force
 copy "osquery-$osqueryVersion.windows_x86_64\Program Files\osquery\osqueryi.exe" plugins\osquery\osqueryi-windows-amd64.exe
-& ".\upx-$upxVersion-win64\upx.exe" -9 --lzma plugins\osquery\osqueryi-windows-amd64.exe
+# osqueryi.exe is built with Control Flow Guard since osquery 5.24.1. UPX
+# refuses such files, and --force would strip the guard, so it ships unpacked.
 plugins\osquery\osqueryi-windows-amd64.exe --help
 
 Invoke-WebRequest -Uri "https://github.com/owasp-dep-scan/dosai/releases/download/v$dosaiVersion/$dosaiArchive" -UseBasicParsing -OutFile plugins/dosai/dosai-windows-amd64.exe
