@@ -1,0 +1,33 @@
+README.md
+  s_fbf294528fc626::t_267c232eb261a8 87-88
+build.ps1
+  s_fbf294528fc626::t_6f56b7af9ddf7d 10,12-13,15
+docs/DOSAI.md
+  s_fbf294528fc626::t_36d10d9c62b8c5 29-30
+scripts/dotnet-bundle-sbom.test.js
+  s_fbf294528fc626::t_0b508123d248df 26,40,137-139
+scripts/generate-metadata.js
+  s_fbf294528fc626::t_eec3296a341245 10-11,30,505
+scripts/thirdparty-downloads.sh
+  s_fbf294528fc626::t_d0f0b184370601 4,6,56,61,66,71,76,81,86,91,96,101,106,111,116,121
+scripts/thirdparty-downloads.test.sh
+  s_fbf294528fc626::t_2b8248723a0bcf 15,20,28,32,36,40,44,48,52
+thirdparty/sourcekitten/build.sh
+  s_fbf294528fc626::t_aa0b3224897b82 7,9-13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f1dda5a03b3263bf97396ef7741cae679b416cda",
+  "prompts": {},
+  "sessions": {
+    "s_fbf294528fc626": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "898da1c7-6c18-4985-b8b1-cf21b057aab2",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
