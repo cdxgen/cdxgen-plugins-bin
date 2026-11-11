@@ -1,0 +1,39 @@
+.github/workflows/test.yml
+  s_fbf294528fc626::t_ef40f635b21738 229,326,380,451,458,671
+.github/workflows/trivy-cdxgen-sbom-e2e.yml
+  s_f10eefff00361f::t_bbd68e324e4b99 38
+.github/workflows/native-builds.yml
+  s_fbf294528fc626::t_6d4005be8ded7d 66,144,195,247
+.github/workflows/golem-e2e.yml
+  s_fbf294528fc626::t_56b92b483b59d6 77
+.github/workflows/kosi-test.yml
+  s_fbf294528fc626::t_a3bace9fbec9f5 78,126
+.github/workflows/release.yml
+  s_fbf294528fc626::t_87934578d1a69d 242
+.github/workflows/kosi-eap.yml
+  s_fbf294528fc626::t_4a20ed478ebc39 36
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d91a7ef209622879e6050ed2d152f51e1c2b49cf",
+  "prompts": {},
+  "sessions": {
+    "s_f10eefff00361f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2900ce21-cc07-43d7-9602-deaffad1f75a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    },
+    "s_fbf294528fc626": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "898da1c7-6c18-4985-b8b1-cf21b057aab2",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
