@@ -9,7 +9,8 @@ rm -rf plugins/trustinspector plugins/golem plugins/rusi plugins/cdxui plugins/c
 mkdir -p plugins/osquery plugins/dosai plugins/trustinspector plugins/golem plugins/rusi plugins/cdxui plugins/cdxrs plugins/kosi
 
 bash ../../scripts/thirdparty-downloads.sh install-osquery windows-amd64 plugins/osquery/osqueryi-windows-amd64.exe
-upx -9 --lzma plugins/osquery/osqueryi-windows-amd64.exe
+# osqueryi.exe is built with Control Flow Guard since osquery 5.24.1. UPX
+# refuses such files, and --force would strip the guard, so it ships unpacked.
 sha256sum plugins/osquery/osqueryi-windows-amd64.exe > plugins/osquery/osqueryi-windows-amd64.exe.sha256
 
 bash ../../scripts/thirdparty-downloads.sh install-dosai windows-amd64 plugins/dosai/dosai-windows-amd64.exe
