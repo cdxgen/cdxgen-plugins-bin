@@ -1,0 +1,59 @@
+package-lock.json
+  s_fbf294528fc626::t_450ba1694ab6f8 3,9
+package.json
+  s_fbf294528fc626::t_da699c1598aa75 3
+packages/darwin-amd64/package.json
+  s_fbf294528fc626::t_525ec030b5eabf 3
+packages/darwin-arm64/package.json
+  s_fbf294528fc626::t_5690ea4f62b57b 3
+packages/linux-amd64/package.json
+  s_fbf294528fc626::t_8420789535857f 3
+packages/linux-arm/package.json
+  s_fbf294528fc626::t_111869fbe0dde8 3
+packages/linux-arm64/package.json
+  s_fbf294528fc626::t_d943eb63ddc123 3
+packages/linux-riscv64/package.json
+  s_fbf294528fc626::t_934291ede19a83 3
+packages/linuxmusl-amd64/package.json
+  s_fbf294528fc626::t_dc6e8e348db44d 3
+packages/linuxmusl-arm64/package.json
+  s_fbf294528fc626::t_1e130a2da5cdbd 3
+packages/ppc64/package.json
+  s_fbf294528fc626::t_fcf14d3a25db6d 3
+packages/windows-amd64/package.json
+  s_fbf294528fc626::t_26ea421e93ebe3 3
+packages/windows-arm64/package.json
+  s_fbf294528fc626::t_6dcb9916ca6d2f 3
+scripts/generate-metadata.test.js
+  s_fbf294528fc626::t_9635e42a666b79 147,217,253
+thirdparty/cdxrs/Cargo.lock
+  s_fbf294528fc626::t_eb07695f8ea0c7 227
+thirdparty/cdxrs/Cargo.toml
+  s_fbf294528fc626::t_13308504c13dba 3
+thirdparty/cdxui/Cargo.lock
+  s_fbf294528fc626::t_a7bc1588b5deb1 181
+thirdparty/cdxui/Cargo.toml
+  s_fbf294528fc626::t_0f2d4d92c2ac7f 3
+thirdparty/kosi/JSON_ATTRIBUTE_REFERENCE.md
+  s_fbf294528fc626::t_214bf8b37a6835 48
+thirdparty/rusi/Cargo.lock
+  s_fbf294528fc626::t_4a13464713cc3b 295,309,324,341,352
+thirdparty/rusi/Cargo.toml
+  s_fbf294528fc626::t_799aa06b4e88ef 25
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "fe17cf713138281ab8eb0395c48afbc0bca2a868",
+  "prompts": {},
+  "sessions": {
+    "s_fbf294528fc626": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "898da1c7-6c18-4985-b8b1-cf21b057aab2",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
