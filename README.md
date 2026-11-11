@@ -84,6 +84,8 @@ The [Dotnet Source and Assembly Inspector](https://github.com/owasp-dep-scan/dos
 
 **Supported platforms:** linux-amd64, linux-arm, linux-arm64, linuxmusl-amd64, linuxmusl-arm64, darwin-amd64, darwin-arm64, windows-amd64, windows-arm64
 
+The packaged dosai 5.0.0 binaries are framework-dependent and need the .NET 11 runtime on the host ([docs/DOSAI.md](docs/DOSAI.md)).
+
 ### trustinspector-cdxgen
 
 A custom cdxgen-maintained helper that performs trust-oriented OS and root filesystem inspection. It emits stable, merge-friendly JSON rather than full CycloneDX documents, designed for integration with cdxgen's SBOM enrichment pipeline.

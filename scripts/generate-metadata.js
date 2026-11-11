@@ -7,8 +7,8 @@ import { depsJsonToBom, readBundledDepsJson } from "./dotnet-bundle-sbom.js";
 const pluginsPackageJson = JSON.parse(
   fs.readFileSync(new URL("../package.json", import.meta.url), "utf-8"),
 );
-const osqueryVersion = "5.24.0";
-const sourcekittenVersion = "0.38.0";
+const osqueryVersion = "5.24.1";
+const sourcekittenVersion = "0.39.0";
 // trivy-cdxgen reports the Trivy release it wraps, as pinned in its go.mod,
 // with a -cdx suffix; thirdparty/trivy/Makefile and build.ps1 stamp the same
 // string into the binary.
@@ -27,7 +27,7 @@ const trivyVersion = trivyVersionFromGoMod(
     "utf-8",
   ),
 );
-const dosaiVersion = "v4.1.0";
+const dosaiVersion = "v5.0.0";
 const trustInspectorVersion = pluginsPackageJson.version;
 const golemVersion = pluginsPackageJson.version;
 const rusiVersion = pluginsPackageJson.version;
@@ -502,7 +502,7 @@ async function main() {
     },
   };
   // Fix the sourcekitten ref
-  // pkg:swift/SourceKitten@unspecified => pkg:github/jpsim/sourcekitten@0.38.0
+  // pkg:swift/SourceKitten@unspecified => pkg:github/jpsim/sourcekitten@0.39.0
   for (const d of allDependencies) {
     if (d.ref === "pkg:swift/SourceKitten@unspecified") {
       d.ref = `pkg:github/jpsim/sourcekitten@${sourcekittenVersion}`;

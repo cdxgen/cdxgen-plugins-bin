@@ -23,7 +23,7 @@ const depsJson = {
   runtimeTarget: { name: ".NETCoreApp,Version=v10.0/linux-x64" },
   targets: {
     ".NETCoreApp,Version=v10.0/linux-x64": {
-      "Dosai-linux-x64/4.1.0": {
+      "Dosai-linux-x64/5.0.0": {
         dependencies: {
           "FSharp.Compiler.Service": "43.12.400",
           "runtimepack.Microsoft.NETCore.App.Runtime.linux-x64": "10.0.11",
@@ -37,7 +37,7 @@ const depsJson = {
     },
   },
   libraries: {
-    "Dosai-linux-x64/4.1.0": { type: "project", serviceable: false },
+    "Dosai-linux-x64/5.0.0": { type: "project", serviceable: false },
     "FSharp.Compiler.Service/43.12.400": { type: "package", sha512 },
     "FSharp.Core/10.1.400": { type: "package", sha512 },
     "runtimepack.Microsoft.NETCore.App.Runtime.linux-x64/10.0.11": {
@@ -134,9 +134,9 @@ test("depsJsonToBom lists the packages with their hashes and edges", () => {
   const root = {
     type: "application",
     name: "dosai",
-    version: "4.1.0",
-    purl: "pkg:github/owasp-dep-scan/dosai@4.1.0",
-    "bom-ref": "pkg:github/owasp-dep-scan/dosai@4.1.0",
+    version: "5.0.0",
+    purl: "pkg:github/owasp-dep-scan/dosai@5.0.0",
+    "bom-ref": "pkg:github/owasp-dep-scan/dosai@5.0.0",
   };
   const bom = depsJsonToBom(depsJson, root);
   assert.equal(bom.metadata.component, root);

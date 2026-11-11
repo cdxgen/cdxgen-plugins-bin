@@ -4,13 +4,13 @@ set -e
 pushd .
 cd thirdparty/sourcekitten
 rm -rf SourceKitten
-wget https://github.com/jpsim/SourceKitten/releases/download/0.38.0/SourceKitten-0.38.0.tar.gz
+wget https://github.com/jpsim/SourceKitten/releases/download/0.39.0/SourceKitten-0.39.0.tar.gz
 # The tarball builds arbitrary Swift on the host, so its bytes are pinned:
-# sha256 of the 0.38.0 release archive, verified before anything extracts.
-echo "7eaf0b7acaa2ae4bebf49c686641f9e50b0044c1a91d3c75121ecf698d7fbb91  SourceKitten-0.38.0.tar.gz" | shasum -a 256 -c -
-tar -xf SourceKitten-0.38.0.tar.gz
-rm SourceKitten-0.38.0.tar.gz
-mv SourceKitten-0.38.0 SourceKitten
+# sha256 of the 0.39.0 release archive, verified before anything extracts.
+echo "b586d6f951d9436a3c1445fb0fe12a4d95439c046540e737d79205a498f41d9e  SourceKitten-0.39.0.tar.gz" | shasum -a 256 -c -
+tar -xf SourceKitten-0.39.0.tar.gz
+rm SourceKitten-0.39.0.tar.gz
+mv SourceKitten-0.39.0 SourceKitten
 cd SourceKitten
 swift build -c release
 chmod +x .build/release/sourcekitten
