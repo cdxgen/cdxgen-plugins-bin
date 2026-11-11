@@ -63,7 +63,7 @@ jobs:
         # shellcheck source=/dev/null
         . ~/.swiftly/env.sh
         hash -r
-    - uses: oras-project/setup-oras@005458ad77f1c8facd38a094e4af2e69e5607ff4  # v2.0.2
+    - uses: oras-project/setup-oras@5e2f2482b30b0cb3e14e67f89a80c88c659a7c63  # v2.0.3
     - run: oras version
     - name: Build
       run: |
@@ -141,7 +141,7 @@ jobs:
       # amd64 only: musl-arm64 kosi is a declared gap (plugin-platform-support.sh).
       if: matrix.os == 'ubuntu-24.04'
     - name: Set up JDK 21
-      uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad  # v6.1.0
+      uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78  # v6.2.0
       with:
         distribution: temurin
         java-version: 21
@@ -192,7 +192,7 @@ jobs:
           ./kosi-portable.jar.sha256:text/plain
       if: matrix.os == 'ubuntu-24.04' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     - name: Set up JDK 21
-      uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad  # v6.1.0
+      uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78  # v6.2.0
       with:
         distribution: temurin
         java-version: 21
@@ -244,7 +244,7 @@ jobs:
           ./sourcekitten.sha256:text/plain
       if: matrix.os == 'macos-15-intel'
     - name: Set up JDK 21
-      uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad  # v6.1.0
+      uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78  # v6.2.0
       with:
         distribution: temurin
         java-version: 21

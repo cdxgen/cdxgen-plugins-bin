@@ -239,7 +239,7 @@ jobs:
       uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1  # v4.4.0
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
-    - uses: oras-project/setup-oras@005458ad77f1c8facd38a094e4af2e69e5607ff4  # v2.0.2
+    - uses: oras-project/setup-oras@5e2f2482b30b0cb3e14e67f89a80c88c659a7c63  # v2.0.3
     - run: oras version
     - name: Authenticate to GHCR
       run: echo "$GITHUB_TOKEN" | oras login ghcr.io -u "$GITHUB_USERNAME" --password-stdin
