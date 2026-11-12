@@ -1,0 +1,25 @@
+thirdparty/rusi/README.md
+  s_b3efd576e79651::t_471c4ea58251da 113
+.github/workflows/rusi-test.yml
+  s_b3efd576e79651::t_ca4673e1bd88d8 123-126
+  s_b3efd576e79651::t_501acd01952ea2 157-159
+  s_b3efd576e79651::t_051a8c6697fdbc 156
+docs/RUSI.md
+  s_b3efd576e79651::t_5532b7309a8381 52
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8b6047cb3e06862ceff918600caf532669285921",
+  "prompts": {},
+  "sessions": {
+    "s_b3efd576e79651": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_4c39a24c-d08b-4780-81f2-6bdb2b6a51ea",
+        "model": "unknown"
+      },
+      "human_author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
