@@ -137,6 +137,11 @@ $(build_dir)/$(appname)-linuxmusl-arm64: | $(build_dir)
 $(build_dir)/$(appname)-windows-amd64.exe: | $(build_dir)
 	$(call zigbuild_binary,x86_64-pc-windows-gnu,$(appname)-windows-amd64,windows-amd64,.exe)
 
+# The *-windows-gnullvm targets ask for libunwind through clang's
+# --unwindlib=libunwind driver flag, which zig cc ignores, so the unwinder
+# symbols go missing at link time. Naming the library makes zig link its
+# bundled libunwind; toolchains whose std already names it are unaffected.
+$(build_dir)/$(appname)-windows-arm64.exe: export CARGO_TARGET_AARCH64_PC_WINDOWS_GNULLVM_RUSTFLAGS = -C link-arg=-lunwind
 $(build_dir)/$(appname)-windows-arm64.exe: | $(build_dir)
 	$(call zigbuild_binary,aarch64-pc-windows-gnullvm,$(appname)-windows-arm64,windows-arm64,.exe)
 
