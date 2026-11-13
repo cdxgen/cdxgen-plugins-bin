@@ -226,6 +226,13 @@ data class AnalyzeOptions(
      * user) can measure exactly one mechanism.
      */
     val classpathStrategy: ClasspathStrategy = ClasspathStrategy.AUTO,
+    /**
+     * (`--classpath-root`): absolute directories the discovery strategies
+     * may also attach jars from, beside the analysed root, the Gradle and
+     * Maven caches, the Android SDK and `JAVA_HOME`. Null when none was
+     * given, so the report records it only when set.
+     */
+    val classpathRoots: List<String>? = null,
     val jdkHome: String? = null,
     val pretty: Boolean = false,
     val format: String = "json",
@@ -243,6 +250,11 @@ data class AnalyzeOptions(
         w.endArray()
         w.bool("endpointSources", endpointSources)
         w.str("classpathFile", classpathFile)
+        if (classpathRoots != null) {
+            w.beginArray("classpathRoots")
+            for (value in classpathRoots.sorted()) w.str(value)
+            w.endArray()
+        }
         w.str("classpathStrategy", classpathStrategy.id)
         w.str("dataflow", dataflow.id)
         w.num("dataflowMaxFunctionInstructions", dataflowMaxFunctionInstructions)

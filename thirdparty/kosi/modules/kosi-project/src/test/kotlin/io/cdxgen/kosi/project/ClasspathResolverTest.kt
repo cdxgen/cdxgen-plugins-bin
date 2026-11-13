@@ -479,6 +479,175 @@ class ClasspathResolverTest {
     }
 
     /**
+     * The files discovery reads belong to the analysed project, so a jar they
+     * name outside the root and the user's caches is never attached, whether
+     * it is named by an absolute path, a `..` path or a symbolic link. Such an
+     * entry is recorded exactly like one that does not exist, so `missing`
+     * does not reveal which outside paths are present.
+     */
+    @Test
+    fun discoveredEntriesOutsideTheRootAreNotAttached() {
+        val outside = Files.createTempDirectory("kosi-cp-host")
+        writePlainJar(outside.resolve("host-1.0.jar"))
+        val root = Files.createTempDirectory("kosi-cp-confined")
+        Files.createDirectories(root.resolve("libs"))
+        writePlainJar(root.resolve("libs/inside-1.0.jar"))
+        Files.createSymbolicLink(root.resolve("linked.jar"), outside.resolve("host-1.0.jar"))
+        val dotDot = root.relativize(outside.resolve("host-1.0.jar"))
+        root.resolve("classpath.txt").writeText(
+            listOf(
+                "libs/inside-1.0.jar",
+                outside.resolve("host-1.0.jar").toString(),
+                outside.resolve("absent.jar").toString(),
+                dotDot.toString(),
+                "linked.jar",
+                "io.example:bound:1.0=${outside.resolve("host-1.0.jar")}",
+            ).joinToString("\n", postfix = "\n"),
+        )
+
+        val result = ClasspathResolver.resolve(root, emptyList(), null, listOf(root))
+        assertEquals("file", result.strategy)
+        assertEquals(listOf("inside-1.0.jar"), result.jars.map { it.jar.fileName.toString() })
+        assertEquals(
+            listOf("absent.jar", "host-1.0.jar", "io.example:bound:1.0=host-1.0.jar", "linked.jar"),
+            result.missing,
+        )
+
+        val eclipse = Files.createTempDirectory("kosi-cp-confined-eclipse")
+        eclipse.resolve(".classpath").writeText(
+            """<classpath><classpathentry kind="lib" path="${outside.resolve("host-1.0.jar")}"/></classpath>""",
+        )
+        val eclipseResult = ClasspathResolver.resolve(eclipse, emptyList(), null, listOf(eclipse))
+        assertTrue(eclipseResult.jars.isEmpty(), "an Eclipse lib entry outside the root attached: ${eclipseResult.jars}")
+
+        val jarDir = Files.createTempDirectory("kosi-cp-confined-libs")
+        Files.createDirectories(jarDir.resolve("libs"))
+        Files.createSymbolicLink(jarDir.resolve("libs/host-1.0.jar"), outside.resolve("host-1.0.jar"))
+        val jarDirResult = ClasspathResolver.resolve(
+            jarDir, emptyList(), null, listOf(jarDir),
+            strategy = io.cdxgen.kosi.schema.ClasspathStrategy.JARS,
+        )
+        assertTrue(jarDirResult.jars.isEmpty(), "a libs/ link to a jar outside the root attached: ${jarDirResult.jars}")
+    }
+
+    private fun environmentOf(vararg pairs: Pair<String, String>): ClasspathResolver.Environment {
+        val values = mapOf(*pairs)
+        return ClasspathResolver.Environment { values[it] }
+    }
+
+    /**
+     * A custom `GRADLE_USER_HOME` is a Gradle cache like `~/.gradle`: the
+     * cache strategy finds a coordinate there, and a discovered path into it
+     * attaches. Without the variable the same jar is outside every allowed
+     * directory and is reported missing.
+     */
+    @Test
+    fun aCustomGradleUserHomeCacheIsSearchedAndAllowed() {
+        val gradleHome = Files.createTempDirectory("kosi-cp-gradle-home")
+        val cached = gradleHome.resolve("caches/modules-2/files-2.1/io.example/cached/1.0/abcd/cached-1.0.jar")
+        Files.createDirectories(cached.parent)
+        writePlainJar(cached)
+
+        val cacheRoot = Files.createTempDirectory("kosi-cp-gradle-home-cache")
+        cacheRoot.resolve("build.gradle.kts").writeText(
+            """dependencies { implementation("io.example:cached:1.0") }""",
+        )
+        val env = environmentOf("GRADLE_USER_HOME" to gradleHome.toString())
+        val found = ClasspathResolver.resolve(cacheRoot, emptyList(), null, listOf(cacheRoot), environment = env)
+        assertEquals("cache", found.strategy)
+        assertEquals(listOf("cached-1.0.jar"), found.jars.map { it.jar.fileName.toString() })
+        val notFound = ClasspathResolver.resolve(
+            cacheRoot, emptyList(), null, listOf(cacheRoot), environment = environmentOf(),
+        )
+        assertTrue(notFound.jars.isEmpty(), "found without GRADLE_USER_HOME: ${notFound.jars}")
+        assertEquals(listOf("io.example:cached:1.0"), notFound.missing)
+
+        val fileRoot = Files.createTempDirectory("kosi-cp-gradle-home-file")
+        fileRoot.resolve("classpath.txt").writeText(cached.toString() + "\n")
+        val listed = ClasspathResolver.resolve(fileRoot, emptyList(), null, listOf(fileRoot), environment = env)
+        assertEquals(listOf("cached-1.0.jar"), listed.jars.map { it.jar.fileName.toString() })
+        val refused = ClasspathResolver.resolve(
+            fileRoot, emptyList(), null, listOf(fileRoot), environment = environmentOf(),
+        )
+        assertTrue(refused.jars.isEmpty(), "attached without GRADLE_USER_HOME: ${refused.jars}")
+    }
+
+    /**
+     * SDK jars and operator-named directories attach when a discovered file
+     * lists them: the Android SDK's `platforms` and `build-tools`,
+     * `JAVA_HOME`, `--classpath-root` and `KOSI_CLASSPATH_ROOTS`. A jar
+     * elsewhere in the SDK, or anywhere else, stays missing, and a
+     * filesystem root named as a root admits nothing.
+     */
+    @Test
+    fun sdkJavaHomeAndOperatorRootsAreAllowed() {
+        val sdk = Files.createTempDirectory("kosi-cp-sdk")
+        val platformJar = sdk.resolve("platforms/android-34/android.jar")
+        val toolsJar = sdk.resolve("build-tools/34.0.0/core-lambda-stubs.jar")
+        val sdkOther = sdk.resolve("extras/other-1.0.jar")
+        val legacySdk = Files.createTempDirectory("kosi-cp-sdk-root")
+        val legacyJar = legacySdk.resolve("platforms/android-21/android-21.jar")
+        val javaHome = Files.createTempDirectory("kosi-cp-java-home")
+        val jdkJar = javaHome.resolve("lib/jrt-fs.jar")
+        val flagRoot = Files.createTempDirectory("kosi-cp-flag-root")
+        val flagJar = flagRoot.resolve("flag-1.0.jar")
+        val envRoot = Files.createTempDirectory("kosi-cp-env-root")
+        val envJar = envRoot.resolve("env-1.0.jar")
+        val outside = Files.createTempDirectory("kosi-cp-not-a-root")
+        val outsideJar = outside.resolve("outside-1.0.jar")
+        for (jar in listOf(platformJar, toolsJar, sdkOther, legacyJar, jdkJar, flagJar, envJar, outsideJar)) {
+            Files.createDirectories(jar.parent)
+            writePlainJar(jar)
+        }
+        val root = Files.createTempDirectory("kosi-cp-sdk-project")
+        root.resolve("classpath.txt").writeText(
+            listOf(platformJar, toolsJar, sdkOther, legacyJar, jdkJar, flagJar, envJar, outsideJar)
+                .joinToString("\n", postfix = "\n"),
+        )
+        val separator = java.io.File.pathSeparator
+        val env = environmentOf(
+            "ANDROID_HOME" to sdk.toString(),
+            "ANDROID_SDK_ROOT" to legacySdk.toString(),
+            "JAVA_HOME" to javaHome.toString(),
+            "KOSI_CLASSPATH_ROOTS" to listOf(envRoot.toString(), "relative/dir", "").joinToString(separator),
+        )
+
+        val result = ClasspathResolver.resolve(
+            root, emptyList(), null, listOf(root),
+            extraRoots = listOf(flagRoot),
+            environment = env,
+        )
+        assertEquals("file", result.strategy)
+        assertEquals(
+            listOf("android-21.jar", "android.jar", "core-lambda-stubs.jar", "env-1.0.jar", "flag-1.0.jar", "jrt-fs.jar"),
+            result.jars.map { it.jar.fileName.toString() }.sorted(),
+        )
+        assertEquals(listOf("other-1.0.jar", "outside-1.0.jar"), result.missing)
+
+        val filesystemRoot = outside.root
+        val widened = ClasspathResolver.resolve(
+            root, emptyList(), null, listOf(root),
+            extraRoots = listOf(filesystemRoot),
+            environment = environmentOf("KOSI_CLASSPATH_ROOTS" to filesystemRoot.toString()),
+        )
+        assertTrue(widened.jars.isEmpty(), "a filesystem root admitted jars: ${widened.jars}")
+    }
+
+    /** The operator's own flags are taken as given, wherever they point. */
+    @Test
+    fun explicitClasspathFileEntriesOutsideTheRootStillAttach() {
+        val outside = Files.createTempDirectory("kosi-cp-shared")
+        writePlainJar(outside.resolve("shared-1.0.jar"))
+        val root = Files.createTempDirectory("kosi-cp-explicit-file")
+        val file = root.resolve("classpath.txt")
+        file.writeText(outside.resolve("shared-1.0.jar").toString() + "\n")
+
+        val result = ClasspathResolver.resolve(root, emptyList(), file, listOf(root))
+        assertEquals("explicit", result.strategy)
+        assertEquals(listOf("shared-1.0.jar"), result.jars.map { it.jar.fileName.toString() })
+    }
+
+    /**
      * A `libs/` directory at the root or a module attaches as the JARS
      * strategy — the Android convention for plain vendored jars.
      */

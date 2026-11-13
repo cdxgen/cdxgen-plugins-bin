@@ -87,7 +87,7 @@ object Main {
         "dataflow-max-trace-nodes", "dataflow-max-trace-edges", "access-path-depth",
         "callgraph-timeout", "max-paths-per-symbol", "unknown-call", "language-version",
         "api-version", "jvm-target", "opt-in", "multiplatform-target", "format",
-        "classpath", "classpath-file", "classpath-strategy", "jdk-home", "reachable-symbols", "sarif-out",
+        "classpath", "classpath-file", "classpath-strategy", "classpath-root", "jdk-home", "reachable-symbols", "sarif-out",
         "max-analysis-seconds", "max-rss-mb", "deps-max-classes", "max-summary-sink-effects",
     )
     private val ANALYZE_BOOLEAN_FLAGS = setOf(
@@ -276,6 +276,11 @@ object Main {
                             "(auto, explicit, file, jars, cache, none)",
                     )
             } ?: defaults.classpathStrategy,
+            classpathRoots = parsed.values("classpath-root").onEach {
+                if (!java.nio.file.Path.of(it).isAbsolute) {
+                    throw UsageException("--classpath-root must be an absolute directory: $it")
+                }
+            }.takeIf { it.isNotEmpty() },
             jdkHome = parsed.value("jdk-home"),
             progressive = parsed.bool("progressive", defaults.progressive),
             optIn = parsed.values("opt-in"),
@@ -752,6 +757,10 @@ object Main {
                                               in the analysed tree), jars (libs/ directories), cache
                                               (offline scan of ~/.gradle and ~/.m2), none; the winner is
                                               published in stats.classpath on every run
+              --classpath-root <dir>          repeatable: absolute directory the file, jars and cache
+                                              strategies may also attach jars from (KOSI_CLASSPATH_ROOTS
+                                              adds more); GRADLE_USER_HOME, ANDROID_HOME,
+                                              ANDROID_SDK_ROOT and JAVA_HOME are always allowed
               --jdk-home <path>               JDK module for the resolved backend (default: running JVM)
               --backend <syntax|resolved|compile>
                                               analysis tier; `compile` is a DECLARED GAP: it runs the

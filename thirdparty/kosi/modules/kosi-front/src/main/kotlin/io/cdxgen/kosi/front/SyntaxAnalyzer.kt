@@ -403,7 +403,7 @@ class SyntaxAnalyzer(
                 ) {
                     qualifiedNameWithoutArgs(parent)
                 } else {
-                    normalizeName(callee.text)
+                    calleeName(normalizeName(callee.text))
                 }
                 usages.add(RawUsage(name, "call", pos(callee)))
             }
@@ -434,10 +434,10 @@ class SyntaxAnalyzer(
 
         override fun visitCallableReferenceExpression(expression: KtCallableReferenceExpression) {
             val name = expression.callableReference.getReferencedName()
-            val receiver = expression.receiverExpression?.text?.normalized()
+            val receiver = expression.receiverExpression?.text?.normalized()?.let(::nameSuffix)
             usages.add(
                 RawUsage(
-                    name = receiver?.let { "$it::$name" } ?: name,
+                    name = receiver?.takeIf { it.isNotEmpty() }?.let { "$it::$name" } ?: name,
                     usageKind = "reference",
                     position = pos(expression),
                 ),
@@ -620,9 +620,43 @@ class SyntaxAnalyzer(
          * unbounded recursive form would overflow on — `a.b.c.d...` nests
          * one level per selector), and the selector side recurses at most
          * one level (a call's callee, or a qualified selector).
+         *
+         * Only plain names are kept. A receiver that is a literal or any other
+         * expression (`"s3cret".toCharArray()`, `xs["k"]!!.trim()`,
+         * `("a" + b).trim()`) is source text the analysed code wrote, which can
+         * hold a password, a key or a URL with credentials, so the name keeps
+         * only the segments after it (`toCharArray`, `trim`).
          */
         fun qualifiedNameWithoutArgs(expression: com.intellij.psi.PsiElement): String =
-            renderQualified(expression)
+            calleeName(renderQualified(expression))
+
+        /**
+         * One dotted segment of a usage name: an identifier, optionally
+         * non-null asserted, or `::`-joined identifiers (`File::class`).
+         */
+        private val NAME_SEGMENT =
+            Regex("""[\p{L}_][\p{L}\p{N}_]*(?:!!)?(?:::[\p{L}_][\p{L}\p{N}_]*(?:!!)?)*""")
+
+        /** `this` or `super`, optionally labelled (`this@main`). */
+        private val SELF_SEGMENT = Regex("""(?:this|super)(?:@[\p{L}_][\p{L}\p{N}_]*)?""")
+
+        /**
+         * The trailing segments of [dotted] that are plain names: everything up
+         * to and including the last segment that is not one is removed. Empty
+         * when the last segment is not a name.
+         */
+        fun nameSuffix(dotted: String): String {
+            val segments = dotted.split('.')
+            val firstName = segments.indexOfLast { !NAME_SEGMENT.matches(it) && !SELF_SEGMENT.matches(it) } + 1
+            return segments.drop(firstName).joinToString(".")
+        }
+
+        /**
+         * [nameSuffix] for a call. A callee that is not a name at all (a
+         * lambda or a parenthesised expression called directly) is called
+         * through `invoke`, which is the name it gets.
+         */
+        fun calleeName(dotted: String): String = nameSuffix(dotted).ifEmpty { "invoke" }
 
         private fun renderQualified(element: com.intellij.psi.PsiElement): String {
             // Walk DOWN the receiver chain collecting selectors, then render

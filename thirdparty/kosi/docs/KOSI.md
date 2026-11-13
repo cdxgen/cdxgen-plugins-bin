@@ -71,7 +71,33 @@ names the winner on every run:
    (the warmed convention) or an Eclipse `.classpath`.
 3. `jars` — a `libs/` directory of vendored jars.
 4. `cache` — offline: coordinates parsed as text from build files, located
-   in `~/.gradle/caches/modules-2` and `~/.m2/repository`.
+   in `$GRADLE_USER_HOME/caches/modules-2` (when set),
+   `~/.gradle/caches/modules-2` and `~/.m2/repository`.
+
+Only the `explicit` flags are taken as given. The `file`, `jars` and `cache`
+strategies read paths that the analysed project wrote, so a jar they find is
+attached only when its real path, after symbolic links, lies inside one of
+these directories:
+
+- the analysed root;
+- `~/.gradle/caches/modules-2`, and `$GRADLE_USER_HOME/caches/modules-2`
+  when `GRADLE_USER_HOME` is set;
+- `~/.m2/repository`;
+- kosi's AAR extraction directory under the system temporary directory;
+- the `platforms` and `build-tools` directories of the Android SDK named by
+  `ANDROID_HOME` or `ANDROID_SDK_ROOT`, and the JDK named by `JAVA_HOME`;
+- any absolute directory passed with `--classpath-root` (repeatable) or
+  listed in `KOSI_CLASSPATH_ROOTS`, separated like `PATH`.
+
+All of them come from the operator's environment or flags, never from the
+analysed tree. A relative path, a directory that does not exist and a
+filesystem root such as `/` are ignored. Any other entry is reported as
+missing, the same as a path with nothing on disk. A jar elsewhere can be
+passed with `--classpath` or `--classpath-file`, or its directory named with
+`--classpath-root`, and an operator should point those flags only at a file or
+directory they wrote or checked, never at one the analysed project supplied.
+The report's `options.classpathRoots` records the `--classpath-root` values
+when any were given.
 
 `stats.classpath` publishes `{strategy, entries, missing, attempts[]}` —
 `attempts[]` records every strategy the chain tried and whether it fired,

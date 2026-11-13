@@ -1,6 +1,6 @@
 //! `cdxrs fetch` — batched, cached, concurrent registry GETs.
 //!
-//! Reads `{"requests":[{"id","url","accept"?,"authRealm"?}]}` on stdin and
+//! Reads `{"requests":[{"id","url","accept"?,"authRealm"?,"githubToken"?}]}` on stdin and
 //! writes `{"schemaVersion","results":[...],"stats":{...}}` on stdout. Per-host
 //! statistics go to stderr as NDJSON so `--debug` can surface them without
 //! disturbing the stdout contract.

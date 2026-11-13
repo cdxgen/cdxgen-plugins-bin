@@ -459,6 +459,7 @@ object Analyzer {
             explicitFile = classpathFile,
             moduleDirs = moduleDirs,
             strategy = options.classpathStrategy,
+            extraRoots = options.classpathRoots.orEmpty().map { Path.of(it) },
         )
         // The acquisition record — which strategy produced the
         // classpath, how many entries it attached, and what each tried

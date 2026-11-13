@@ -71,7 +71,9 @@ Flags: `backend`, `dataflow`, `callgraph`, `dependencyDetail`, `roots`,
 `dataflowSkipGenerated`, `dataflowPathWidening`, `callgraphTimeoutSeconds`, `maxPathsPerSymbol`,
 `includeStdlib`, `unknownCall`, `languageVersion`, `apiVersion`, `jvmTarget`,
 `progressive`, `optIn`, `multiplatformTarget`, `classpath` (repeatable jars),
-`classpathFile` (one jar path per line, `#` comments), `jdkHome`,
+`classpathFile` (one jar path per line, `#` comments), `classpathRoots`
+(the `--classpath-root` directories discovery may also attach jars from,
+present only when given), `jdkHome`,
 `pretty`, `format`, plus the flags: `deps` (`--deps`: the
 dependency-jar tier — implied by `--dataflow security-deps`),
 `depsMaxClasses` (the tier's class budget, 500), `maxAnalysisSeconds`
@@ -95,8 +97,9 @@ silent degrade.
 option verbatim — reproduction needs the real jar paths and JDK home. The
 DIGEST goldens are the consumer that cannot: `classpath` entries and
 `jdkHome` are absolute by construction when set, and an explicitly absolute
-`classpathFile` names one machine just as much. At the digest boundary
-(`Digests.compute`) each ABSOLUTE path value among those three members
+`classpathFile` names one machine just as much, as do the always-absolute
+`classpathRoots`. At the digest boundary
+(`Digests.compute`) each ABSOLUTE path value among those four members
 enters as the fixed marker `<absolute-path>`, so two environments running
 the same slot set with their own absolute pins digest equal, while setting
 such an option still differs from leaving it unset and a relative value
@@ -191,7 +194,7 @@ by equality across two versions of a file.
 | Attribute | Type | Purpose |
 | --- | --- | --- |
 | `id` | string | `use-000001...` |
-| `name` | string | dotted callee text with argument lists elided: `stmt.executeQuery`, `a.b.c`, `ProcessBuilder`; operator calls use the Kotlin operator function name (`plus`, `contains`, `compareTo`, ...); callable references render `Receiver::name` |
+| `name` | string | dotted callee text with argument lists elided: `stmt.executeQuery`, `a.b.c`, `ProcessBuilder`; operator calls use the Kotlin operator function name (`plus`, `contains`, `compareTo`, ...); callable references render `Receiver::name`. Only identifier segments (optionally `!!`-asserted, `::`-joined, or `this`/`super` with a label) are kept: a receiver that is a literal or another expression is dropped with everything before it, so `"…".toCharArray()` and `(a + b).trim()` render `toCharArray` and `trim`, a reference such as `"…"::length` renders `length`, and a lambda or parenthesised expression called directly renders `invoke`. Source text never reaches this field |
 | `simpleName` | string | last segment |
 | `usageKind` | string | `call`, `operator`, `reference` |
 | `modulePath`, `purl`, `filePath`, `position` | | occurrence |

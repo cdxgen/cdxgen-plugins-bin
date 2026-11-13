@@ -32,6 +32,9 @@ Same discipline as rusi's, applied to a Kotlin front end.
 3. **Secrets are never copied.** Material records carry names/positions only
    (`crypto.materials`), never values; env-derived URLs resolve to a
    `resolution: env` marker, not the value.
+   Usage names are built from identifier segments only, so a literal written
+   as the receiver of a call (`"…".toCharArray()`) never reaches
+   `usages[].name`.
 4. **No build execution on untrusted input by default.** `corpus.toml` fetch
    jobs are operator-invoked, pin exact SHAs, and cache under
    `.corpus-cache/`; fixture analysis never touches the network.
@@ -57,6 +60,21 @@ Same discipline as rusi's, applied to a Kotlin front end.
    `CDXGEN_KOSI_DISABLE=1` by skipping kosi entirely (a valid BOM without
    any kosi artifact — asserted by `scripts/kosi-e2e.sh`), and never lets a
    kosi failure abort SBOM generation.
+9. **Discovered classpath entries stay inside known directories.** A
+   `classpath.txt`, an Eclipse `.classpath`, a `libs/` directory and the
+   build files of the analysed tree are written by the project, and with
+   `--deps` the classes of every attached jar are lowered into the report.
+   Discovery therefore attaches a jar only when its real path lies inside
+   the analysed root, the user's Gradle cache (`~/.gradle` or
+   `$GRADLE_USER_HOME`) or Maven cache, kosi's AAR extraction directory, the
+   `platforms` and `build-tools` directories of the Android SDK named by
+   `ANDROID_HOME` or `ANDROID_SDK_ROOT`, `JAVA_HOME`, or a directory the
+   operator names with `--classpath-root` or `KOSI_CLASSPATH_ROOTS`, and
+   reports anything else as missing, with the same record as a path that
+   does not exist. Every one of those directories comes from the operator's
+   environment or flags, never from the analysed tree, and a filesystem root
+   never counts as one. Only `--classpath` and `--classpath-file` reach other
+   paths.
 
 ## What kosi will never do
 

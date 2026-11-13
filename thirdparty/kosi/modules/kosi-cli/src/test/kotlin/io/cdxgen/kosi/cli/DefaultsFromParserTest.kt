@@ -67,6 +67,14 @@ class DefaultsFromParserTest {
     }
 
     @Test
+    fun aRelativeClasspathRootIsUsageError() {
+        assertEquals(
+            ExitCodes.USAGE,
+            Main.run(arrayOf("analyze", "--classpath-root", "relative/dir", "--dir", ".")),
+        )
+    }
+
+    @Test
     fun unknownBackendIsUsageError() {
         assertEquals(ExitCodes.USAGE, Main.run(arrayOf("analyze", "--backend", "mir", "--dir", ".")))
     }

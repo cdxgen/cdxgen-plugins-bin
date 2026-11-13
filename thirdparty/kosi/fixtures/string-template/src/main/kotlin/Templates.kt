@@ -11,7 +11,7 @@
 // The template in auditLine lowers to StringConcat over a tainted part, and
 // the concatenation result reaches the sink.
 // kosi:want declaration name=greeting kind=function
-// kosi:want usage name=~.format
+// kosi:want usage name=format
 // kosi:want usage name=println
 // kosi:want flow source=untrusted-input sink=log-injection fn=~auditLine known-fail=syntax:1
 package fixtures.templates

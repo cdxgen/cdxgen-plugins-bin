@@ -20,8 +20,36 @@ import kotlin.streams.toList
  * attempt is recorded with whether it fired; the winner — or `none` — is
  * published in `stats.classpath` so a classpath-less run and a run that
  * found nothing are distinguishable in the report (the zero).
+ *
+ * Only the explicit flags are the operator's choice. Every discovery strategy
+ * reads paths the analysed project wrote (a `classpath.txt` line, a `.classpath`
+ * entry, a `libs/` symbolic link, a module directory or coordinate from a build
+ * file), so a jar found by discovery is attached only when its real path lies
+ * inside one of the directories [discoveryRoots] names: the analysed root, the
+ * Gradle and Maven caches of the user running kosi (including a custom
+ * `GRADLE_USER_HOME`), kosi's own AAR extraction directory, the Android SDK's
+ * `platforms` and `build-tools`, `JAVA_HOME`, and any root the operator names
+ * with `--classpath-root` or `KOSI_CLASSPATH_ROOTS`. Any other entry is
+ * reported as missing, exactly like a path with nothing on disk, so the
+ * diagnostic does not tell the project whether a file exists outside those
+ * directories.
  */
 object ClasspathResolver {
+
+    /** Reads an environment variable; tests pass a map instead of the process environment. */
+    fun interface Environment {
+        operator fun invoke(name: String): String?
+    }
+
+    /** The process environment. */
+    val SYSTEM_ENVIRONMENT = Environment { System.getenv(it) }
+
+    /**
+     * Environment variable naming extra directories discovery may attach
+     * jars from, separated like `PATH` (`:` on Unix, `;` on Windows). The
+     * `--classpath-root` flag adds to it.
+     */
+    const val CLASSPATH_ROOTS_ENV = "KOSI_CLASSPATH_ROOTS"
 
     /** A `group:artifact:version` dependency coordinate parsed from build files. */
     data class Coordinate(val group: String, val artifact: String, val version: String?) {
@@ -45,14 +73,88 @@ object ClasspathResolver {
         val attempts: List<Attempt>,
     )
 
-    /** One strategy's isolated collection: jars + what it could not attach. */
-    private class AttemptRun {
+    /**
+     * One strategy's isolated collection: jars + what it could not attach.
+     * [allowedRoots] is null for the explicit flags; otherwise a jar is
+     * attached only when its real path lies under one of the roots.
+     */
+    private class AttemptRun(private val allowedRoots: List<Path>?, val environment: Environment) {
         val jars = linkedMapOf<String, ResolvedJar>()
         val missing = mutableSetOf<String>()
 
-        fun add(jar: Path, purl: String, coordinate: Coordinate?) {
+        /**
+         * Attaches [jar] when it is a regular file the run may read; otherwise
+         * records [missingLabel]. A jar outside [allowedRoots] and a jar that
+         * does not exist produce the same record.
+         */
+        fun add(jar: Path, purl: String, coordinate: Coordinate?, missingLabel: String = jar.fileName.toString()) {
+            if (!Files.isRegularFile(jar) || !permitted(jar)) {
+                missing.add(missingLabel)
+                return
+            }
             val key = jar.toAbsolutePath().normalize().toString()
             if (!jars.containsKey(key)) jars[key] = ResolvedJar(jar, purl, coordinate)
+        }
+
+        private fun permitted(jar: Path): Boolean {
+            val roots = allowedRoots ?: return true
+            val real = realPathOrNull(jar) ?: return false
+            return roots.any { real.startsWith(it) }
+        }
+    }
+
+    private fun realPathOrNull(path: Path): Path? =
+        try {
+            path.toRealPath()
+        } catch (_: Exception) {
+            null
+        }
+
+    /**
+     * The directories a discovered jar may live in, as real paths: the
+     * analysed root, the user's Gradle caches (`~/.gradle` and
+     * `$GRADLE_USER_HOME`) and Maven cache, the AAR extraction directory of
+     * [usableArtifact], the `platforms` and `build-tools` directories of the
+     * Android SDK named by `ANDROID_HOME` or `ANDROID_SDK_ROOT`, `JAVA_HOME`,
+     * and the operator's [extraRoots] and [CLASSPATH_ROOTS_ENV] entries. Every
+     * one of them comes from the operator's environment or flags, never from
+     * the analysed tree. A directory that does not exist, a relative path and
+     * a filesystem root are dropped.
+     */
+    fun discoveryRoots(root: Path, extraRoots: List<Path>, environment: Environment): List<Path> {
+        val candidates = mutableListOf(m2Repository(), aarExtractionRoot())
+        candidates.addAll(gradleCacheRoots(root, environment))
+        for (name in listOf("ANDROID_HOME", "ANDROID_SDK_ROOT")) {
+            val sdk = environmentPath(environment, name) ?: continue
+            candidates.add(sdk.resolve("platforms"))
+            candidates.add(sdk.resolve("build-tools"))
+        }
+        environmentPath(environment, "JAVA_HOME")?.let { candidates.add(it) }
+        environment(CLASSPATH_ROOTS_ENV)
+            ?.split(java.io.File.pathSeparatorChar)
+            ?.mapNotNull { entry -> absolutePathOrNull(entry) }
+            ?.let { candidates.addAll(it) }
+        candidates.addAll(extraRoots)
+        // A filesystem root would admit every path, so it never counts as one
+        // of these directories.
+        val trusted = candidates
+            .filter { it.isAbsolute }
+            .mapNotNull(::realPathOrNull)
+            .filter { Files.isDirectory(it) && it.parent != null }
+        return (listOfNotNull(realPathOrNull(root)) + trusted).distinct()
+    }
+
+    /** An absolute directory named by an environment variable, or null. */
+    private fun environmentPath(environment: Environment, name: String): Path? =
+        environment(name)?.let(::absolutePathOrNull)
+
+    private fun absolutePathOrNull(value: String): Path? {
+        val trimmed = value.trim()
+        if (trimmed.isEmpty()) return null
+        return try {
+            Path.of(trimmed).takeIf { it.isAbsolute }
+        } catch (_: Exception) {
+            null
         }
     }
 
@@ -62,6 +164,8 @@ object ClasspathResolver {
         explicitFile: Path?,
         moduleDirs: List<Path>,
         strategy: ClasspathStrategy = ClasspathStrategy.AUTO,
+        extraRoots: List<Path> = emptyList(),
+        environment: Environment = SYSTEM_ENVIRONMENT,
     ): Result {
         // The chain. Explicit flags are AUTHORITATIVE: when the caller named
         // jars, explicit is the only strategy that runs (flags say exactly
@@ -79,8 +183,9 @@ object ClasspathResolver {
         val attempts = mutableListOf<Attempt>()
         var winner: Pair<ClasspathStrategy, AttemptRun>? = null
         var lastRun: AttemptRun? = null
+        val confined by lazy { discoveryRoots(root, extraRoots, environment) }
         for (step in chain) {
-            val run = AttemptRun()
+            val run = AttemptRun(if (step == ClasspathStrategy.EXPLICIT) null else confined, environment)
             val note = when (step) {
                 ClasspathStrategy.EXPLICIT -> runExplicit(run, explicitJars, explicitFile, root, moduleDirs.toSet())
                 ClasspathStrategy.FILE -> runPresentFile(run, root, moduleDirs)
@@ -100,7 +205,7 @@ object ClasspathResolver {
         // list — the offline scan's unlocatable coordinates are the honest
         // `classpath-partial` diagnostic, and dropping them because zero jars
         // attached would report a clean classpath-less run (the shape).
-        val (winningStrategy, run) = winner ?: (ClasspathStrategy.NONE to (lastRun ?: AttemptRun()))
+        val (winningStrategy, run) = winner ?: (ClasspathStrategy.NONE to (lastRun ?: AttemptRun(null, environment)))
         return Result(
             jars = run.jars.values.sortedBy { it.purl },
             missing = run.missing.toList().sorted(),
@@ -123,11 +228,7 @@ object ClasspathResolver {
             return "no flags given"
         }
         for (p in explicitJars) {
-            if (Files.isRegularFile(p)) {
-                run.add(p, GradleDiscovery.purl(null, p.fileName.toString().removeSuffix(".jar"), null), null)
-            } else {
-                run.missing.add(p.toString())
-            }
+            run.add(p, GradleDiscovery.purl(null, p.fileName.toString().removeSuffix(".jar"), null), null, p.toString())
         }
         var lines = 0
         if (explicitFile != null && Files.isRegularFile(explicitFile)) {
@@ -158,11 +259,7 @@ object ClasspathResolver {
             val libs = eclipseLibEntries(eclipse)
             for (jar in libs) {
                 val resolved = if (jar.isAbsolute) jar else root.resolve(jar)
-                if (Files.isRegularFile(resolved)) {
-                    run.add(resolved, GradleDiscovery.purl(null, resolved.fileName.toString().removeSuffix(".jar"), null), null)
-                } else {
-                    run.missing.add(jar.toString())
-                }
+                run.add(resolved, GradleDiscovery.purl(null, resolved.fileName.toString().removeSuffix(".jar"), null), null, jar.toString())
             }
             notes.add(".classpath: ${libs.size} lib entries")
         }
@@ -213,25 +310,22 @@ object ClasspathResolver {
             }
         }
         for (p in jarLines) {
-            if (Files.isRegularFile(p)) {
-                run.add(p, GradleDiscovery.purl(null, p.fileName.toString().removeSuffix(".jar"), null), null)
-            } else {
-                run.missing.add(p.fileName.toString())
-            }
+            run.add(p, GradleDiscovery.purl(null, p.fileName.toString().removeSuffix(".jar"), null), null)
         }
         for ((coordinate, jar) in boundCoordinates) {
-            if (Files.isRegularFile(jar)) {
-                run.add(jar, GradleDiscovery.purl(coordinate.group, coordinate.artifact, coordinate.version), coordinate)
-            } else {
-                run.missing.add("${coordinate}=${jar.fileName}")
-            }
+            run.add(
+                jar,
+                GradleDiscovery.purl(coordinate.group, coordinate.artifact, coordinate.version),
+                coordinate,
+                "${coordinate}=${jar.fileName}",
+            )
         }
         for (coordinate in fileCoordinates.keys) {
-            val found = locate(coordinate, root, moduleDirs)
+            val found = locate(coordinate, root, moduleDirs, run.environment)
             if (found == null) {
                 run.missing.add(coordinate.toString())
             } else {
-                run.add(found, GradleDiscovery.purl(coordinate.group, coordinate.artifact, coordinate.version), coordinate)
+                run.add(found, GradleDiscovery.purl(coordinate.group, coordinate.artifact, coordinate.version), coordinate, coordinate.toString())
             }
         }
         return lines
@@ -310,11 +404,11 @@ object ClasspathResolver {
             nestedFiles.forEach { coordinates.addAll(scan(it)) }
         }
         for (coordinate in coordinates) {
-            val found = locate(coordinate, root, moduleSet)
+            val found = locate(coordinate, root, moduleSet, run.environment)
             if (found == null) {
                 run.missing.add(coordinate.toString())
             } else {
-                run.add(found, GradleDiscovery.purl(coordinate.group, coordinate.artifact, coordinate.version), coordinate)
+                run.add(found, GradleDiscovery.purl(coordinate.group, coordinate.artifact, coordinate.version), coordinate, coordinate.toString())
             }
         }
         // Project-local build outputs: jars this workspace itself produced.
@@ -551,14 +645,19 @@ object ClasspathResolver {
      * sibling chain only strips/extends the KNOWN variant suffixes, so a
      * different library in the same group is never picked up.
      */
-    fun locate(coordinate: Coordinate, root: Path, moduleDirs: Set<Path>): Path? {
+    fun locate(
+        coordinate: Coordinate,
+        root: Path,
+        moduleDirs: Set<Path>,
+        environment: Environment = SYSTEM_ENVIRONMENT,
+    ): Path? {
         val artifactNames = if (coordinate.artifact.endsWith("-jvm")) {
             listOf(coordinate.artifact)
         } else {
             listOf(coordinate.artifact, coordinate.artifact + "-jvm")
         }
         for (artifact in artifactNames) {
-            val found = locateArtifact(coordinate.copy(artifact = artifact), root, moduleDirs)
+            val found = locateArtifact(coordinate.copy(artifact = artifact), root, moduleDirs, environment)
             if (found != null) return found
         }
         // Same-base variant siblings, in preference order: the real JVM
@@ -571,7 +670,7 @@ object ClasspathResolver {
         for (suffix in VARIANT_SIBLING_SUFFIXES) {
             val sibling = base + suffix
             if (sibling == coordinate.artifact) continue
-            val found = locateArtifact(coordinate.copy(artifact = sibling), root, moduleDirs)
+            val found = locateArtifact(coordinate.copy(artifact = sibling), root, moduleDirs, environment)
             if (found != null) return found
         }
         return null
@@ -595,17 +694,22 @@ object ClasspathResolver {
     /** Sibling variant order: real JVM code first, API stubs before extraction. */
     private val VARIANT_SIBLING_SUFFIXES = listOf("-desktop", "-jvm", "", "-jvmstubs", "-android")
 
-    private fun locateArtifact(coordinate: Coordinate, root: Path, moduleDirs: Set<Path>): Path? {
+    private fun locateArtifact(
+        coordinate: Coordinate,
+        root: Path,
+        moduleDirs: Set<Path>,
+        environment: Environment,
+    ): Path? {
         val version = coordinate.version
         if (version != null) {
-            for (candidate in locatedByVersion(coordinate, version, root)) {
+            for (candidate in locatedByVersion(coordinate, version, root, environment)) {
                 if (!Files.isRegularFile(candidate)) continue
                 return usableArtifact(candidate)
             }
         } else {
             // Unknown version (build-script indirection): pick the highest
             // version the cache holds for group:artifact, deterministically.
-            for (dir in gradleCacheRoots(root)) {
+            for (dir in gradleCacheRoots(root, environment)) {
                 val artifactDir = dir.resolve(coordinate.group).resolve(coordinate.artifact)
                 if (!Files.isDirectory(artifactDir)) continue
                 val best = Files.list(artifactDir).use { it.toList() }
@@ -618,7 +722,7 @@ object ClasspathResolver {
                     }
                 }
             }
-            val m2Root = Path.of(System.getProperty("user.home"), ".m2", "repository")
+            val m2Root = m2Repository()
             val m2ArtifactDir = m2Root.resolve(coordinate.group.replace('.', '/')).resolve(coordinate.artifact)
             if (Files.isDirectory(m2ArtifactDir)) {
                 val best = Files.list(m2ArtifactDir).use { it.toList() }
@@ -646,13 +750,18 @@ object ClasspathResolver {
         return null
     }
 
-    private fun locatedByVersion(coordinate: Coordinate, version: String, root: Path): List<Path> {
+    private fun locatedByVersion(
+        coordinate: Coordinate,
+        version: String,
+        root: Path,
+        environment: Environment,
+    ): List<Path> {
         val out = mutableListOf<Path>()
-        for (cache in gradleCacheRoots(root)) {
+        for (cache in gradleCacheRoots(root, environment)) {
             val artifactDir = cache.resolve(coordinate.group).resolve(coordinate.artifact)
             out.addAll(gradleHashDirs(artifactDir.resolve(version), coordinate.artifact, version))
         }
-        val m2 = Path.of(System.getProperty("user.home"), ".m2", "repository")
+        val m2 = m2Repository()
             .resolve(coordinate.group.replace('.', '/'))
             .resolve(coordinate.artifact)
             .resolve(version)
@@ -672,7 +781,7 @@ object ClasspathResolver {
         // runs. `createTempDirectory` returns a fresh unique directory every
         // call, which re-extracted every AAR on every run (hundreds of them
         // on an Android repo, times every matrix slot) and leaked each one.
-        val dir = Path.of(System.getProperty("java.io.tmpdir"), "kosi-aar", stamp)
+        val dir = aarExtractionRoot().resolve(stamp)
         val target = dir.resolve("classes.jar")
         if (Files.isRegularFile(target)) return target
         return try {
@@ -782,13 +891,25 @@ object ClasspathResolver {
             .distinct()
     }
 
+    private fun m2Repository(): Path = Path.of(System.getProperty("user.home"), ".m2", "repository")
+
+    private fun aarExtractionRoot(): Path = Path.of(System.getProperty("java.io.tmpdir"), "kosi-aar")
+
     /** Kotlin multiplatform target suffixes a JVM consumer can load. */
     private val KMP_TARGET_SUFFIXES = listOf("jvm", "android", "androidRelease")
 
-    private fun gradleCacheRoots(root: Path): List<Path> {
+    /**
+     * Gradle module caches to search, in order: `$GRADLE_USER_HOME` when the
+     * operator set it, `~/.gradle`, and the project-local `.gradle`.
+     */
+    private fun gradleCacheRoots(root: Path, environment: Environment): List<Path> {
         val roots = mutableListOf<Path>()
+        environmentPath(environment, "GRADLE_USER_HOME")
+            ?.resolve("caches")?.resolve("modules-2")?.resolve("files-2.1")
+            ?.takeIf { Files.isDirectory(it) }
+            ?.let { roots.add(it) }
         val home = Path.of(System.getProperty("user.home"), ".gradle", "caches", "modules-2", "files-2.1")
-        if (Files.isDirectory(home)) roots.add(home)
+        if (Files.isDirectory(home) && home !in roots) roots.add(home)
         // A project-local .gradle cache (Gradle reuses the global one, but the
         // directory is part of the documented search order).
         val local = root.resolve(".gradle")

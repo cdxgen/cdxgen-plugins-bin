@@ -591,7 +591,7 @@ async fn transport_errors_do_not_echo_the_url() {
 }
 
 #[tokio::test]
-async fn github_token_is_sent_to_github_hosts_only() {
+async fn github_token_is_not_sent_to_other_hosts() {
     let server = MockServer::start().await;
     let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<Option<String>>::new()));
     let recorder = seen.clone();
@@ -609,7 +609,6 @@ async fn github_token_is_sent_to_github_hosts_only() {
         .mount(&server)
         .await;
 
-    // The mock server is not github.com, so the ambient token must not be sent.
     run_fetch_env(
         &batch(vec![request(
             "x",
@@ -622,6 +621,204 @@ async fn github_token_is_sent_to_github_hosts_only() {
 
     let observed = seen.lock().unwrap().clone();
     assert_eq!(observed, vec![None], "token sent to a non-github host");
+}
+
+/// The batch envelope carries URLs chosen by the scanned project (a lockfile's
+/// `resolved` URL, an `.npmrc` scope registry), so the host name alone must not
+/// attach the ambient `GITHUB_TOKEN`. The GitHub hosts are reached through a
+/// plain HTTP proxy that is the mock server, which records what each request
+/// carried.
+#[tokio::test]
+async fn ambient_github_token_is_not_sent_to_github_hosts() {
+    let server = MockServer::start().await;
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<Option<String>>::new()));
+    let recorder = seen.clone();
+    Mock::given(method("GET"))
+        .respond_with(move |req: &Request| {
+            recorder.lock().unwrap().push(
+                req.headers
+                    .get("authorization")
+                    .and_then(|v| v.to_str().ok())
+                    .map(|s| s.to_string()),
+            );
+            ResponseTemplate::new(404)
+        })
+        .mount(&server)
+        .await;
+
+    let run = run_fetch_env(
+        &batch(vec![
+            request("api", "http://api.github.com/repos/acme/private"),
+            request(
+                "web",
+                "http://github.com/acme/private/raw/main/package.json",
+            ),
+            request(
+                "sub",
+                "http://raw.github.com/acme/private/main/package.json",
+            ),
+        ]),
+        &["--no-cache"],
+        &[
+            ("HTTP_PROXY", &server.uri()),
+            ("GITHUB_TOKEN", "ambient-token-must-not-be-sent"),
+        ],
+    )
+    .expect_success();
+    assert!(
+        !run.stdout.contains("ambient-token-must-not-be-sent"),
+        "{}",
+        run.stdout
+    );
+
+    let observed = seen.lock().unwrap().clone();
+    assert_eq!(
+        observed.len(),
+        3,
+        "the proxy did not see every request; test proves nothing"
+    );
+    assert!(
+        observed.iter().all(Option::is_none),
+        "ambient token attached by host name: {observed:?}"
+    );
+}
+
+/// A per-request `githubToken` is sent only over https to github.com or
+/// api.github.com. Plain-http GitHub URLs (reached here through a recording
+/// proxy) and any other host get the request without it, and the token never
+/// appears in the output.
+#[tokio::test]
+async fn request_token_is_withheld_from_plain_http_and_other_hosts() {
+    const TOKEN: &str = "request-token-must-not-be-sent";
+    let server = MockServer::start().await;
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<Option<String>>::new()));
+    let recorder = seen.clone();
+    Mock::given(method("GET"))
+        .respond_with(move |req: &Request| {
+            recorder.lock().unwrap().push(
+                req.headers
+                    .get("authorization")
+                    .and_then(|v| v.to_str().ok())
+                    .map(|s| s.to_string()),
+            );
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({"ok": true}))
+        })
+        .mount(&server)
+        .await;
+
+    let with_token =
+        |id: &str, url: &str| serde_json::json!({ "id": id, "url": url, "githubToken": TOKEN });
+    let run = run_fetch_env(
+        &batch(vec![
+            with_token("api", "http://api.github.com/repos/acme/lib/license"),
+            with_token("web", "http://github.com/acme/lib"),
+            with_token("other", &format!("{}/repos/acme/lib/license", server.uri())),
+        ]),
+        &["--no-cache"],
+        &[("HTTP_PROXY", &server.uri())],
+    )
+    .expect_success();
+    assert!(!run.stdout.contains(TOKEN), "{}", run.stdout);
+    assert!(!run.stderr.contains(TOKEN), "{}", run.stderr);
+
+    let observed = seen.lock().unwrap().clone();
+    assert_eq!(
+        observed.len(),
+        3,
+        "the server did not see every request; test proves nothing"
+    );
+    assert!(
+        observed.iter().all(Option::is_none),
+        "request token sent where it is not allowed: {observed:?}"
+    );
+}
+
+/// A request with a token and one without, for the same URL, are fetched
+/// separately, so the anonymous caller never receives the authenticated body.
+#[tokio::test]
+async fn a_token_request_is_not_coalesced_with_an_anonymous_one() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/lib/license"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"ok": true})))
+        .expect(2)
+        .mount(&server)
+        .await;
+
+    let url = format!("{}/repos/acme/lib/license", server.uri());
+    let run = run_fetch(
+        &batch(vec![
+            request("anonymous", &url),
+            serde_json::json!({ "id": "token", "url": url, "githubToken": "t" }),
+        ]),
+        &[],
+    )
+    .expect_success();
+    assert_eq!(run.stats()["unique"], 2);
+    assert_eq!(run.result("anonymous")["ok"], true);
+    assert_eq!(run.result("token")["ok"], true);
+}
+
+/// A 403 that says the quota is used up is reported as such, with the wait
+/// the host asked for, so the caller can pause the host.
+#[tokio::test]
+async fn a_spent_quota_is_reported_with_the_requested_wait() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/lib/license"))
+        .respond_with(
+            ResponseTemplate::new(403)
+                .insert_header("x-ratelimit-remaining", "0")
+                .insert_header("retry-after", "42"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/forbidden"))
+        .respond_with(ResponseTemplate::new(403))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let run = run_fetch(
+        &batch(vec![
+            request("spent", &format!("{}/repos/acme/lib/license", server.uri())),
+            request("forbidden", &format!("{}/forbidden", server.uri())),
+        ]),
+        &[],
+    )
+    .expect_success();
+    let spent = run.result("spent");
+    assert_eq!(spent["ok"], false);
+    assert_eq!(spent["status"], 403);
+    assert_eq!(spent["quotaExhausted"], true);
+    assert_eq!(spent["retryAfterSecs"], 42);
+    let forbidden = run.result("forbidden");
+    assert_eq!(forbidden["status"], 403);
+    assert!(forbidden.get("quotaExhausted").is_none(), "{forbidden}");
+}
+
+/// `schema-version` names the capabilities cdxgen probes for before it hands
+/// cdxrs a request token.
+#[test]
+fn schema_version_lists_the_request_token_capability() {
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_cdxrs"))
+        .arg("schema-version")
+        .output()
+        .expect("cdxrs runs");
+    assert!(output.status.success());
+    let json: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("schema-version prints JSON");
+    assert!(
+        json["capabilities"]
+            .as_array()
+            .expect("capabilities is an array")
+            .iter()
+            .any(|c| c == "fetch-github-token"),
+        "{json}"
+    );
+    assert!(json["supportedSpecVersions"].is_array());
 }
 
 // -------------------------------------------------------------- concurrency

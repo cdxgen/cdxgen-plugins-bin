@@ -4,11 +4,16 @@
 //! configurable concurrency caps, per-host rate limiting, and retries with
 //! exponential backoff + jitter.
 //!
-//! Auth: `GITHUB_TOKEN` is sent as a Bearer token to github.com hosts, and a
-//! caller may pass an explicit per-request token. `.npmrc` `_authToken`,
-//! `NUGET_AUTH` and netrc are deliberately **not** read here — see
-//! `docs/fetch-auth.md`. Claiming support that does not exist is worse than
-//! not having it, so this module does not pretend.
+//! Auth: no credential is read from the environment. The batch envelope
+//! carries URLs that the scanned project can choose (a lockfile's `resolved`
+//! URL, an `.npmrc` scope registry), so a token chosen by host name would let
+//! that project pick which document is read with the operator's authority.
+//! Requests therefore go out anonymously unless the caller passes a token for
+//! that one request to [`FetchClient::get_json`] (the batch protocol's
+//! `githubToken` field), and even then the token is sent only when
+//! [`token_allowed_for`] accepts the URL: https, on the default port, to
+//! github.com or api.github.com, with no userinfo. `GITHUB_TOKEN`, `.npmrc`
+//! `_authToken`, `NUGET_AUTH` and netrc are all ignored.
 //!
 //! Credentials never reach a log line or the cache: every URL that leaves this
 //! module for display or storage goes through [`redact_url`], which strips
@@ -81,7 +86,6 @@ pub struct FetchClientConfig {
     /// Maximum decompressed body accepted from a single response.
     pub max_body_bytes: usize,
     pub user_agent: String,
-    pub github_token: Option<String>,
 }
 
 impl Default for FetchClientConfig {
@@ -95,7 +99,6 @@ impl Default for FetchClientConfig {
             request_deadline: Duration::from_secs(DEFAULT_REQUEST_DEADLINE_SECS),
             max_body_bytes: MAX_BODY_BYTES,
             user_agent: format!("cdxgen-cdxrs/{}", crate::CDXRS_VERSION),
-            github_token: env::var("GITHUB_TOKEN").ok().filter(|s| !s.is_empty()),
         }
     }
 }
@@ -113,6 +116,13 @@ pub enum FetchFailure {
     Malformed,
     /// Connection error, timeout, or the retry deadline elapsed.
     Transport(String),
+    /// A 403 or 429 that says the host's request quota is used up: no
+    /// requests remaining, or a `Retry-After`. `retry_after_secs` is how long
+    /// the host asked the caller to wait, when it said.
+    QuotaExhausted {
+        status: u16,
+        retry_after_secs: Option<u64>,
+    },
 }
 
 impl std::fmt::Display for FetchFailure {
@@ -123,6 +133,9 @@ impl std::fmt::Display for FetchFailure {
             Self::BodyTooLarge => write!(f, "response body exceeds the configured maximum"),
             Self::Malformed => write!(f, "malformed response body"),
             Self::Transport(msg) => write!(f, "transport error: {msg}"),
+            Self::QuotaExhausted { status, .. } => {
+                write!(f, "http status {status} (request quota used up)")
+            }
         }
     }
 }
@@ -156,6 +169,9 @@ pub struct FetchClient {
     host_sems: Arc<Mutex<HashMap<String, Arc<Semaphore>>>>,
     /// Per-host rate limiters, lazily created.
     host_rate_limiters: Arc<Mutex<HashMap<String, Arc<RateLimiter>>>>,
+    /// Hosts this run sends a per-request token to, which get the host's
+    /// authenticated budget. Set before any request to the host is made.
+    authenticated_hosts: std::sync::Mutex<std::collections::HashSet<String>>,
     /// Requests actually in flight, and the high-water mark. Counted after the
     /// permits are held, so it reports real HTTP concurrency rather than the
     /// number of tasks queued behind the semaphores.
@@ -210,6 +226,7 @@ impl FetchClient {
             global_sem,
             host_sems: Arc::new(Mutex::new(HashMap::new())),
             host_rate_limiters: Arc::new(Mutex::new(HashMap::new())),
+            authenticated_hosts: std::sync::Mutex::new(std::collections::HashSet::new()),
             in_flight: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             peak_in_flight: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         })
@@ -247,35 +264,7 @@ impl FetchClient {
 
         let _gauge = InFlightGuard::new(&self.in_flight, &self.peak_in_flight);
 
-        let mut headers = HeaderMap::new();
-        if let Some(acc) = accept
-            && let Ok(v) = HeaderValue::from_str(acc)
-        {
-            headers.insert(ACCEPT, v);
-        }
-        if let Some(etag) = &validators.etag
-            && let Ok(v) = HeaderValue::from_str(etag)
-        {
-            headers.insert(IF_NONE_MATCH, v);
-        }
-        if let Some(lm) = &validators.last_modified
-            && let Ok(v) = HeaderValue::from_str(lm)
-        {
-            headers.insert(reqwest::header::IF_MODIFIED_SINCE, v);
-        }
-        // Auth priority: explicit token, then GITHUB_TOKEN for github hosts.
-        let effective_token = auth_token.or_else(|| {
-            if host == "api.github.com" || host == "github.com" {
-                self.config.github_token.as_deref()
-            } else {
-                None
-            }
-        });
-        if let Some(token) = effective_token
-            && let Ok(v) = HeaderValue::from_str(&format!("Bearer {token}"))
-        {
-            headers.insert(AUTHORIZATION, v);
-        }
+        let headers = request_headers(url, accept, auth_token, validators);
 
         let deadline = Instant::now() + self.config.request_deadline;
         let mut attempt = 0u32;
@@ -323,6 +312,12 @@ impl FetchClient {
                     }
 
                     if !status.is_success() {
+                        if let Some(retry_after_secs) = quota_exhausted(&resp) {
+                            return Err(FetchFailure::QuotaExhausted {
+                                status: status.as_u16(),
+                                retry_after_secs,
+                            });
+                        }
                         return Err(FetchFailure::Status(status.as_u16()));
                     }
 
@@ -376,22 +371,32 @@ impl FetchClient {
         }
     }
 
-    /// Whether a credential will be sent to this host.
-    ///
-    /// Only token presence is considered, never its value. A host we hold no
-    /// token for keeps the anonymous budget even if some other host has one.
+    /// Give a host its authenticated budget for the rest of this client's
+    /// life, because the batch sends a per-request token to it. Only a URL
+    /// that [`token_allowed_for`] accepts marks its host; call it before the
+    /// first request to that host, since budgets are fixed on first use.
+    pub fn note_token_for(&self, url: &str) {
+        if !token_allowed_for(url) {
+            return;
+        }
+        if let Some(host) = extract_host(url)
+            && let Ok(mut hosts) = self.authenticated_hosts.lock()
+        {
+            hosts.insert(host.to_ascii_lowercase());
+        }
+    }
+
+    /// The budget a host gets: authenticated only when this run sends a
+    /// per-request token to it, anonymous otherwise.
     fn credentials_for(&self, host: &str) -> Credentials {
-        let github =
-            host == "api.github.com" || host == "github.com" || host.ends_with(".github.com");
-        if github && self.config.github_token.is_some() {
-            Credentials::Authenticated
-        } else {
-            Credentials::Anonymous
+        match self.authenticated_hosts.lock() {
+            Ok(hosts) if hosts.contains(&host.to_ascii_lowercase()) => Credentials::Authenticated,
+            _ => Credentials::Anonymous,
         }
     }
 
     /// Per-host permits: an explicit configured cap when there is one,
-    /// otherwise the host's own policy for the credentials we will send.
+    /// otherwise the host's policy for the credentials it will receive.
     async fn get_host_semaphore(&self, host: &str) -> Arc<Semaphore> {
         let configured = self.config.per_host_concurrency;
         let limit = if configured > 0 {
@@ -483,6 +488,87 @@ async fn read_body_capped(
             Err(e) => return Err(FetchFailure::Transport(describe_transport_error(&e))),
         }
     }
+}
+
+/// Hosts a per-request token may be sent to.
+const TOKEN_HOSTS: &[&str] = &["github.com", "api.github.com"];
+
+/// Whether a per-request token may be sent with a request for `url`: the URL
+/// must be https on the default port, name github.com or api.github.com
+/// exactly, and carry no userinfo. Anything else goes out without the token.
+pub fn token_allowed_for(url: &str) -> bool {
+    let Ok(parsed) = url::Url::parse(url) else {
+        return false;
+    };
+    if parsed.scheme() != "https"
+        || parsed.port().is_some_and(|port| port != 443)
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+    {
+        return false;
+    }
+    match parsed.host() {
+        Some(url::Host::Domain(host)) => {
+            let host = host.to_ascii_lowercase();
+            TOKEN_HOSTS.contains(&host.trim_end_matches('.'))
+        }
+        _ => false,
+    }
+}
+
+/// Headers for one request. The Authorization header is added only when
+/// `auth_token` is given and [`token_allowed_for`] accepts the URL, and it is
+/// marked sensitive so it never appears in a debug rendering.
+pub fn request_headers(
+    url: &str,
+    accept: Option<&str>,
+    auth_token: Option<&str>,
+    validators: &Validators,
+) -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    if let Some(acc) = accept
+        && let Ok(v) = HeaderValue::from_str(acc)
+    {
+        headers.insert(ACCEPT, v);
+    }
+    if let Some(etag) = &validators.etag
+        && let Ok(v) = HeaderValue::from_str(etag)
+    {
+        headers.insert(IF_NONE_MATCH, v);
+    }
+    if let Some(lm) = &validators.last_modified
+        && let Ok(v) = HeaderValue::from_str(lm)
+    {
+        headers.insert(reqwest::header::IF_MODIFIED_SINCE, v);
+    }
+    if let Some(token) = auth_token.filter(|t| !t.is_empty())
+        && token_allowed_for(url)
+        && let Ok(mut v) = HeaderValue::from_str(&format!("Bearer {token}"))
+    {
+        v.set_sensitive(true);
+        headers.insert(AUTHORIZATION, v);
+    }
+    headers
+}
+
+/// For a 403 or 429 that reports a used-up quota (`x-ratelimit-remaining: 0`
+/// or a `Retry-After`), the seconds the host asked to wait, if it said.
+/// `None` for any other response.
+fn quota_exhausted(resp: &Response) -> Option<Option<u64>> {
+    let status = resp.status();
+    if status != StatusCode::FORBIDDEN && status != StatusCode::TOO_MANY_REQUESTS {
+        return None;
+    }
+    let spent = header_string(
+        resp,
+        reqwest::header::HeaderName::from_static("x-ratelimit-remaining"),
+    )
+    .is_some_and(|v| v.trim() == "0");
+    let retry_after = resp.headers().contains_key(reqwest::header::RETRY_AFTER);
+    if !spent && !retry_after {
+        return None;
+    }
+    Some(parse_retry_after(resp).map(|d| d.as_secs()))
 }
 
 /// Strip anything credential-shaped from a URL before it is logged or stored.
@@ -645,6 +731,54 @@ mod client_tests {
     use super::*;
 
     #[test]
+    fn a_request_token_is_allowed_only_over_https_to_github() {
+        for url in [
+            "https://api.github.com/repos/acme/lib/license",
+            "https://github.com/acme/lib",
+            "https://API.GitHub.com:443/repos/acme/lib",
+        ] {
+            assert!(token_allowed_for(url), "{url}");
+        }
+        for url in [
+            "http://api.github.com/repos/acme/lib/license",
+            "https://api.github.com:8443/repos/acme/lib",
+            "https://user:pw@api.github.com/repos/acme/lib",
+            "https://raw.github.com/acme/lib/main/x",
+            "https://api.github.com.example.com/repos/acme/lib",
+            "https://registry.npmjs.org/left-pad",
+            "https://140.82.112.6/repos/acme/lib",
+            "not a url",
+        ] {
+            assert!(!token_allowed_for(url), "{url}");
+        }
+    }
+
+    #[test]
+    fn the_authorization_header_follows_the_url_rule() {
+        let none = Validators::default();
+        let headers = request_headers(
+            "https://api.github.com/repos/acme/lib/license",
+            Some("application/json"),
+            Some("t0ken"),
+            &none,
+        );
+        let auth = headers.get(AUTHORIZATION).expect("header is set");
+        assert_eq!(auth.to_str().unwrap(), "Bearer t0ken");
+        assert!(auth.is_sensitive());
+        assert!(!format!("{headers:?}").contains("t0ken"));
+
+        for (url, token) in [
+            ("http://api.github.com/repos/acme/lib", Some("t0ken")),
+            ("https://registry.npmjs.org/left-pad", Some("t0ken")),
+            ("https://api.github.com/repos/acme/lib", Some("")),
+            ("https://api.github.com/repos/acme/lib", None),
+        ] {
+            let headers = request_headers(url, None, token, &none);
+            assert!(headers.get(AUTHORIZATION).is_none(), "{url} {token:?}");
+        }
+    }
+
+    #[test]
     fn redacts_userinfo_and_query() {
         assert_eq!(
             redact_url("https://user:s3cr3t@registry.example.com/pkg?access_token=abc"),
@@ -674,40 +808,17 @@ mod client_tests {
     }
 
     #[tokio::test]
-    async fn github_token_raises_only_github_concurrency() {
-        let with_token = FetchClient::new(FetchClientConfig {
-            github_token: Some("token".to_string()),
-            ..Default::default()
-        })
-        .expect("client builds");
-        let without = FetchClient::new(FetchClientConfig {
-            github_token: None,
-            ..Default::default()
-        })
-        .expect("client builds");
-
+    async fn github_hosts_keep_the_anonymous_budget() {
+        let client = FetchClient::new(FetchClientConfig::default()).expect("client builds");
+        for host in ["api.github.com", "github.com"] {
+            assert_eq!(
+                client.get_host_semaphore(host).await.available_permits(),
+                4,
+                "{host}"
+            );
+        }
         assert_eq!(
-            with_token.credentials_for("api.github.com"),
-            Credentials::Authenticated
-        );
-        assert_eq!(
-            without.credentials_for("api.github.com"),
-            Credentials::Anonymous
-        );
-        // A token for GitHub must not raise anyone else's budget.
-        assert_eq!(
-            with_token.credentials_for("crates.io"),
-            Credentials::Anonymous
-        );
-
-        // And the permit count follows: 8 with a token, 4 without.
-        let authed = with_token.get_host_semaphore("api.github.com").await;
-        let anon = without.get_host_semaphore("api.github.com").await;
-        assert_eq!(authed.available_permits(), 8);
-        assert_eq!(anon.available_permits(), 4);
-        // Non-github hosts are unaffected either way.
-        assert_eq!(
-            with_token
+            client
                 .get_host_semaphore("registry.npmjs.org")
                 .await
                 .available_permits(),
@@ -716,10 +827,36 @@ mod client_tests {
     }
 
     #[tokio::test]
+    async fn a_host_gets_the_authenticated_budget_only_with_an_allowed_token() {
+        let client = FetchClient::new(FetchClientConfig::default()).expect("client builds");
+        // Neither of these may carry the token, so neither raises a budget.
+        client.note_token_for("http://github.com/acme/lib");
+        client.note_token_for("https://registry.npmjs.org/left-pad");
+        client.note_token_for("https://api.github.com/repos/acme/lib/license");
+        assert_eq!(
+            client
+                .get_host_semaphore("api.github.com")
+                .await
+                .available_permits(),
+            8
+        );
+        assert_eq!(
+            client
+                .get_host_semaphore("github.com")
+                .await
+                .available_permits(),
+            4
+        );
+        assert_eq!(
+            client.credentials_for("registry.npmjs.org"),
+            Credentials::Anonymous
+        );
+    }
+
+    #[tokio::test]
     async fn an_explicit_per_host_cap_overrides_the_policy() {
         let client = FetchClient::new(FetchClientConfig {
             per_host_concurrency: 2,
-            github_token: Some("token".to_string()),
             ..Default::default()
         })
         .expect("client builds");

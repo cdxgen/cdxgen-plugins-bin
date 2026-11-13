@@ -28,8 +28,8 @@ use tokio::time::sleep;
 /// GitHub is the reason this exists: 60 requests an hour anonymously against
 /// 5000 with a token is not a difference of degree, and a licence sweep over a
 /// few hundred repositories is hopeless in the first case and comfortable in the
-/// second. Applying the anonymous budget to a token-bearing client throws away
-/// the whole point of having set `GITHUB_TOKEN`.
+/// second. The `fetch` subcommand reads no credential of its own, so a host
+/// keeps the anonymous budget unless the batch sends it a per-request token.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Credentials {
     /// No credential will be sent.

@@ -73,6 +73,19 @@ cache bounded by TTL and an LRU byte ceiling, rate-limit awareness, and
 credential redaction. Reads a batch request on stdin and writes responses to
 stdout.
 
+`fetch` reads no credential from its environment. It does not read
+`GITHUB_TOKEN`, `.npmrc` tokens, `NUGET_AUTH` or netrc, because the URLs in a
+batch can come from the project being scanned, and a token chosen by host name
+would let that project decide which document is read with the operator's
+authority. The caller decides per request instead: a request's `githubToken`
+field is sent as `Authorization: Bearer` with that request only, and only when
+its URL is https on the default port to `github.com` or `api.github.com`, and
+that host then gets its authenticated concurrency and rate budget. A 403
+or 429 that reports a spent quota sets `quotaExhausted` (and `retryAfterSecs`
+when the host gave a wait) on the result. `cdxrs schema-version` lists
+`fetch-github-token` under `capabilities` so a caller can tell this build from
+one that ignores the field.
+
 ## Spec version support
 
 1.6 and 1.7. Schemas are vendored under `schemas/` and guarded against drift by
