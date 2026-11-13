@@ -43,6 +43,50 @@ class SyntaxAnalyzerTest {
         )
     }
 
+    /**
+     * A receiver that is not a name is source text, and a literal there can be
+     * a hard-coded password, key or URL with credentials. Usage names keep only
+     * the name segments after it; named receivers are unchanged.
+     */
+    @Test
+    fun literalAndExpressionReceiversStayOutOfUsageNames() {
+        val result = analyze(
+            "package com.example\n\n" +
+                "const val KEYSTORE_PASSWORD = \"named-receiver\"\n\n" +
+                "fun f(xs: Map<String, String>, x: String, c: Boolean, keystore: java.security.KeyStore) {\n" +
+                "    \"kS-7f3a91c2-prod-keystore\".toCharArray()\n" +
+                "    \"https://ledger-bot:Xq2v9LmT4pRz@ledger.internal.example/api\".toHttpUrl()\n" +
+                "    \"\"\"raw-secret-1\"\"\".trim()\n" +
+                "    \"tmpl-secret-2\$x\".trim()\n" +
+                "    4111111111111111L.toString()\n" +
+                "    arrayOf(\"array-secret-3\")[0].trim()\n" +
+                "    xs[\"index-secret-4\"]!!.trim()\n" +
+                "    (\"paren-secret-5\" + x).trim()\n" +
+                "    (if (c) \"if-secret-6\" else x).lowercase()\n" +
+                "    \"let-secret-7\".let { it.length }\n" +
+                "    { \"lambda-secret-8\" }()\n" +
+                "    val ref = \"ref-secret-9\"::length\n" +
+                "    KEYSTORE_PASSWORD.toCharArray()\n" +
+                "    keystore.load(null, KEYSTORE_PASSWORD.toCharArray())\n" +
+                "    x!!.uppercase()\n" +
+                "    this@f.toString()\n" +
+                "}\n",
+        )
+        val names = result.usages.map { it.name }
+        for (secret in listOf(
+            "kS-7f3a91c2", "Xq2v9LmT4pRz", "raw-secret", "tmpl-secret", "4111111111111111", "array-secret",
+            "index-secret", "paren-secret", "if-secret", "let-secret", "lambda-secret", "ref-secret",
+        )) {
+            assertTrue(names.none { secret in it }, "$secret reached a usage name: $names")
+        }
+        for (expected in listOf(
+            "toCharArray", "toHttpUrl", "trim", "toString", "lowercase", "let", "invoke", "length",
+            "KEYSTORE_PASSWORD.toCharArray", "keystore.load", "x!!.uppercase",
+        )) {
+            assertTrue(expected in names, "$expected expected among $names")
+        }
+    }
+
     @Test
     fun parseErrorsAreDiagnosticsNotCrashes() {
         val result = analyze(

@@ -5,7 +5,7 @@
 //
 // Positive half: taint crosses `it` and the implicit receiver of scope
 // functions; at the syntax tier the usage evidence must at least name them.
-// kosi:want usage name=~.let
+// kosi:want usage name=let
 // kosi:want usage name=~.apply
 // kosi:want usage name=~.run
 // kosi:want declaration name=readConfig kind=function

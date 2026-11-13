@@ -32,6 +32,9 @@ Same discipline as rusi's, applied to a Kotlin front end.
 3. **Secrets are never copied.** Material records carry names/positions only
    (`crypto.materials`), never values; env-derived URLs resolve to a
    `resolution: env` marker, not the value.
+   Usage names are built from identifier segments only, so a literal written
+   as the receiver of a call (`"…".toCharArray()`) never reaches
+   `usages[].name`.
 4. **No build execution on untrusted input by default.** `corpus.toml` fetch
    jobs are operator-invoked, pin exact SHAs, and cache under
    `.corpus-cache/`; fixture analysis never touches the network.

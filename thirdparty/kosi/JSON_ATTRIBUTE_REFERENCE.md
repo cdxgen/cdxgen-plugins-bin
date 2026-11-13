@@ -191,7 +191,7 @@ by equality across two versions of a file.
 | Attribute | Type | Purpose |
 | --- | --- | --- |
 | `id` | string | `use-000001...` |
-| `name` | string | dotted callee text with argument lists elided: `stmt.executeQuery`, `a.b.c`, `ProcessBuilder`; operator calls use the Kotlin operator function name (`plus`, `contains`, `compareTo`, ...); callable references render `Receiver::name` |
+| `name` | string | dotted callee text with argument lists elided: `stmt.executeQuery`, `a.b.c`, `ProcessBuilder`; operator calls use the Kotlin operator function name (`plus`, `contains`, `compareTo`, ...); callable references render `Receiver::name`. Only identifier segments (optionally `!!`-asserted, `::`-joined, or `this`/`super` with a label) are kept: a receiver that is a literal or another expression is dropped with everything before it, so `"…".toCharArray()` and `(a + b).trim()` render `toCharArray` and `trim`, a reference such as `"…"::length` renders `length`, and a lambda or parenthesised expression called directly renders `invoke`. Source text never reaches this field |
 | `simpleName` | string | last segment |
 | `usageKind` | string | `call`, `operator`, `reference` |
 | `modulePath`, `purl`, `filePath`, `position` | | occurrence |
