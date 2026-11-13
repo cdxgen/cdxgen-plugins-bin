@@ -479,6 +479,72 @@ class ClasspathResolverTest {
     }
 
     /**
+     * The files discovery reads belong to the analysed project, so a jar they
+     * name outside the root and the user's caches is never attached, whether
+     * it is named by an absolute path, a `..` path or a symbolic link. Such an
+     * entry is recorded exactly like one that does not exist, so `missing`
+     * does not reveal which outside paths are present.
+     */
+    @Test
+    fun discoveredEntriesOutsideTheRootAreNotAttached() {
+        val outside = Files.createTempDirectory("kosi-cp-host")
+        writePlainJar(outside.resolve("host-1.0.jar"))
+        val root = Files.createTempDirectory("kosi-cp-confined")
+        Files.createDirectories(root.resolve("libs"))
+        writePlainJar(root.resolve("libs/inside-1.0.jar"))
+        Files.createSymbolicLink(root.resolve("linked.jar"), outside.resolve("host-1.0.jar"))
+        val dotDot = root.relativize(outside.resolve("host-1.0.jar"))
+        root.resolve("classpath.txt").writeText(
+            listOf(
+                "libs/inside-1.0.jar",
+                outside.resolve("host-1.0.jar").toString(),
+                outside.resolve("absent.jar").toString(),
+                dotDot.toString(),
+                "linked.jar",
+                "io.example:bound:1.0=${outside.resolve("host-1.0.jar")}",
+            ).joinToString("\n", postfix = "\n"),
+        )
+
+        val result = ClasspathResolver.resolve(root, emptyList(), null, listOf(root))
+        assertEquals("file", result.strategy)
+        assertEquals(listOf("inside-1.0.jar"), result.jars.map { it.jar.fileName.toString() })
+        assertEquals(
+            listOf("absent.jar", "host-1.0.jar", "io.example:bound:1.0=host-1.0.jar", "linked.jar"),
+            result.missing,
+        )
+
+        val eclipse = Files.createTempDirectory("kosi-cp-confined-eclipse")
+        eclipse.resolve(".classpath").writeText(
+            """<classpath><classpathentry kind="lib" path="${outside.resolve("host-1.0.jar")}"/></classpath>""",
+        )
+        val eclipseResult = ClasspathResolver.resolve(eclipse, emptyList(), null, listOf(eclipse))
+        assertTrue(eclipseResult.jars.isEmpty(), "an Eclipse lib entry outside the root attached: ${eclipseResult.jars}")
+
+        val jarDir = Files.createTempDirectory("kosi-cp-confined-libs")
+        Files.createDirectories(jarDir.resolve("libs"))
+        Files.createSymbolicLink(jarDir.resolve("libs/host-1.0.jar"), outside.resolve("host-1.0.jar"))
+        val jarDirResult = ClasspathResolver.resolve(
+            jarDir, emptyList(), null, listOf(jarDir),
+            strategy = io.cdxgen.kosi.schema.ClasspathStrategy.JARS,
+        )
+        assertTrue(jarDirResult.jars.isEmpty(), "a libs/ link to a jar outside the root attached: ${jarDirResult.jars}")
+    }
+
+    /** The operator's own flags are taken as given, wherever they point. */
+    @Test
+    fun explicitClasspathFileEntriesOutsideTheRootStillAttach() {
+        val outside = Files.createTempDirectory("kosi-cp-shared")
+        writePlainJar(outside.resolve("shared-1.0.jar"))
+        val root = Files.createTempDirectory("kosi-cp-explicit-file")
+        val file = root.resolve("classpath.txt")
+        file.writeText(outside.resolve("shared-1.0.jar").toString() + "\n")
+
+        val result = ClasspathResolver.resolve(root, emptyList(), file, listOf(root))
+        assertEquals("explicit", result.strategy)
+        assertEquals(listOf("shared-1.0.jar"), result.jars.map { it.jar.fileName.toString() })
+    }
+
+    /**
      * A `libs/` directory at the root or a module attaches as the JARS
      * strategy — the Android convention for plain vendored jars.
      */

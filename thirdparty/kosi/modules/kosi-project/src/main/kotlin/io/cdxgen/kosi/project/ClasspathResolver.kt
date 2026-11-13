@@ -20,6 +20,15 @@ import kotlin.streams.toList
  * attempt is recorded with whether it fired; the winner — or `none` — is
  * published in `stats.classpath` so a classpath-less run and a run that
  * found nothing are distinguishable in the report (the zero).
+ *
+ * Only the explicit flags are the operator's choice. Every discovery strategy
+ * reads paths the analysed project wrote (a `classpath.txt` line, a `.classpath`
+ * entry, a `libs/` symbolic link, a module directory or coordinate from a build
+ * file), so a jar found by discovery is attached only when its real path lies
+ * inside the analysed root, the Gradle or Maven cache of the user running kosi,
+ * or kosi's own AAR extraction directory. Any other entry is reported as
+ * missing, exactly like a path with nothing on disk, so the diagnostic does not
+ * tell the project whether a file exists outside those directories.
  */
 object ClasspathResolver {
 
@@ -45,16 +54,52 @@ object ClasspathResolver {
         val attempts: List<Attempt>,
     )
 
-    /** One strategy's isolated collection: jars + what it could not attach. */
-    private class AttemptRun {
+    /**
+     * One strategy's isolated collection: jars + what it could not attach.
+     * [allowedRoots] is null for the explicit flags; otherwise a jar is
+     * attached only when its real path lies under one of the roots.
+     */
+    private class AttemptRun(private val allowedRoots: List<Path>?) {
         val jars = linkedMapOf<String, ResolvedJar>()
         val missing = mutableSetOf<String>()
 
-        fun add(jar: Path, purl: String, coordinate: Coordinate?) {
+        /**
+         * Attaches [jar] when it is a regular file the run may read; otherwise
+         * records [missingLabel]. A jar outside [allowedRoots] and a jar that
+         * does not exist produce the same record.
+         */
+        fun add(jar: Path, purl: String, coordinate: Coordinate?, missingLabel: String = jar.fileName.toString()) {
+            if (!Files.isRegularFile(jar) || !permitted(jar)) {
+                missing.add(missingLabel)
+                return
+            }
             val key = jar.toAbsolutePath().normalize().toString()
             if (!jars.containsKey(key)) jars[key] = ResolvedJar(jar, purl, coordinate)
         }
+
+        private fun permitted(jar: Path): Boolean {
+            val roots = allowedRoots ?: return true
+            val real = realPathOrNull(jar) ?: return false
+            return roots.any { real.startsWith(it) }
+        }
     }
+
+    private fun realPathOrNull(path: Path): Path? =
+        try {
+            path.toRealPath()
+        } catch (_: Exception) {
+            null
+        }
+
+    /**
+     * The directories a discovered jar may live in, as real paths: the
+     * analysed root, the user's Gradle and Maven caches, and the AAR
+     * extraction directory of [usableArtifact].
+     */
+    private fun discoveryRoots(root: Path): List<Path> =
+        (listOf(root, m2Repository(), aarExtractionRoot()) + gradleCacheRoots(root))
+            .mapNotNull(::realPathOrNull)
+            .distinct()
 
     fun resolve(
         root: Path,
@@ -79,8 +124,9 @@ object ClasspathResolver {
         val attempts = mutableListOf<Attempt>()
         var winner: Pair<ClasspathStrategy, AttemptRun>? = null
         var lastRun: AttemptRun? = null
+        val confined by lazy { discoveryRoots(root) }
         for (step in chain) {
-            val run = AttemptRun()
+            val run = AttemptRun(if (step == ClasspathStrategy.EXPLICIT) null else confined)
             val note = when (step) {
                 ClasspathStrategy.EXPLICIT -> runExplicit(run, explicitJars, explicitFile, root, moduleDirs.toSet())
                 ClasspathStrategy.FILE -> runPresentFile(run, root, moduleDirs)
@@ -100,7 +146,7 @@ object ClasspathResolver {
         // list — the offline scan's unlocatable coordinates are the honest
         // `classpath-partial` diagnostic, and dropping them because zero jars
         // attached would report a clean classpath-less run (the shape).
-        val (winningStrategy, run) = winner ?: (ClasspathStrategy.NONE to (lastRun ?: AttemptRun()))
+        val (winningStrategy, run) = winner ?: (ClasspathStrategy.NONE to (lastRun ?: AttemptRun(null)))
         return Result(
             jars = run.jars.values.sortedBy { it.purl },
             missing = run.missing.toList().sorted(),
@@ -123,11 +169,7 @@ object ClasspathResolver {
             return "no flags given"
         }
         for (p in explicitJars) {
-            if (Files.isRegularFile(p)) {
-                run.add(p, GradleDiscovery.purl(null, p.fileName.toString().removeSuffix(".jar"), null), null)
-            } else {
-                run.missing.add(p.toString())
-            }
+            run.add(p, GradleDiscovery.purl(null, p.fileName.toString().removeSuffix(".jar"), null), null, p.toString())
         }
         var lines = 0
         if (explicitFile != null && Files.isRegularFile(explicitFile)) {
@@ -158,11 +200,7 @@ object ClasspathResolver {
             val libs = eclipseLibEntries(eclipse)
             for (jar in libs) {
                 val resolved = if (jar.isAbsolute) jar else root.resolve(jar)
-                if (Files.isRegularFile(resolved)) {
-                    run.add(resolved, GradleDiscovery.purl(null, resolved.fileName.toString().removeSuffix(".jar"), null), null)
-                } else {
-                    run.missing.add(jar.toString())
-                }
+                run.add(resolved, GradleDiscovery.purl(null, resolved.fileName.toString().removeSuffix(".jar"), null), null, jar.toString())
             }
             notes.add(".classpath: ${libs.size} lib entries")
         }
@@ -213,25 +251,22 @@ object ClasspathResolver {
             }
         }
         for (p in jarLines) {
-            if (Files.isRegularFile(p)) {
-                run.add(p, GradleDiscovery.purl(null, p.fileName.toString().removeSuffix(".jar"), null), null)
-            } else {
-                run.missing.add(p.fileName.toString())
-            }
+            run.add(p, GradleDiscovery.purl(null, p.fileName.toString().removeSuffix(".jar"), null), null)
         }
         for ((coordinate, jar) in boundCoordinates) {
-            if (Files.isRegularFile(jar)) {
-                run.add(jar, GradleDiscovery.purl(coordinate.group, coordinate.artifact, coordinate.version), coordinate)
-            } else {
-                run.missing.add("${coordinate}=${jar.fileName}")
-            }
+            run.add(
+                jar,
+                GradleDiscovery.purl(coordinate.group, coordinate.artifact, coordinate.version),
+                coordinate,
+                "${coordinate}=${jar.fileName}",
+            )
         }
         for (coordinate in fileCoordinates.keys) {
             val found = locate(coordinate, root, moduleDirs)
             if (found == null) {
                 run.missing.add(coordinate.toString())
             } else {
-                run.add(found, GradleDiscovery.purl(coordinate.group, coordinate.artifact, coordinate.version), coordinate)
+                run.add(found, GradleDiscovery.purl(coordinate.group, coordinate.artifact, coordinate.version), coordinate, coordinate.toString())
             }
         }
         return lines
@@ -314,7 +349,7 @@ object ClasspathResolver {
             if (found == null) {
                 run.missing.add(coordinate.toString())
             } else {
-                run.add(found, GradleDiscovery.purl(coordinate.group, coordinate.artifact, coordinate.version), coordinate)
+                run.add(found, GradleDiscovery.purl(coordinate.group, coordinate.artifact, coordinate.version), coordinate, coordinate.toString())
             }
         }
         // Project-local build outputs: jars this workspace itself produced.
@@ -618,7 +653,7 @@ object ClasspathResolver {
                     }
                 }
             }
-            val m2Root = Path.of(System.getProperty("user.home"), ".m2", "repository")
+            val m2Root = m2Repository()
             val m2ArtifactDir = m2Root.resolve(coordinate.group.replace('.', '/')).resolve(coordinate.artifact)
             if (Files.isDirectory(m2ArtifactDir)) {
                 val best = Files.list(m2ArtifactDir).use { it.toList() }
@@ -652,7 +687,7 @@ object ClasspathResolver {
             val artifactDir = cache.resolve(coordinate.group).resolve(coordinate.artifact)
             out.addAll(gradleHashDirs(artifactDir.resolve(version), coordinate.artifact, version))
         }
-        val m2 = Path.of(System.getProperty("user.home"), ".m2", "repository")
+        val m2 = m2Repository()
             .resolve(coordinate.group.replace('.', '/'))
             .resolve(coordinate.artifact)
             .resolve(version)
@@ -672,7 +707,7 @@ object ClasspathResolver {
         // runs. `createTempDirectory` returns a fresh unique directory every
         // call, which re-extracted every AAR on every run (hundreds of them
         // on an Android repo, times every matrix slot) and leaked each one.
-        val dir = Path.of(System.getProperty("java.io.tmpdir"), "kosi-aar", stamp)
+        val dir = aarExtractionRoot().resolve(stamp)
         val target = dir.resolve("classes.jar")
         if (Files.isRegularFile(target)) return target
         return try {
@@ -781,6 +816,10 @@ object ClasspathResolver {
             .sortedWith(compareBy({ !it.endsWith(".jar") }, { it }))
             .distinct()
     }
+
+    private fun m2Repository(): Path = Path.of(System.getProperty("user.home"), ".m2", "repository")
+
+    private fun aarExtractionRoot(): Path = Path.of(System.getProperty("java.io.tmpdir"), "kosi-aar")
 
     /** Kotlin multiplatform target suffixes a JVM consumer can load. */
     private val KMP_TARGET_SUFFIXES = listOf("jvm", "android", "androidRelease")

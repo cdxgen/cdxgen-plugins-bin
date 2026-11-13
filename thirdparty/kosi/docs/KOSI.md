@@ -73,6 +73,17 @@ names the winner on every run:
 4. `cache` — offline: coordinates parsed as text from build files, located
    in `~/.gradle/caches/modules-2` and `~/.m2/repository`.
 
+Only the `explicit` flags are taken as given. The `file`, `jars` and `cache`
+strategies read paths that the analysed project wrote, so a jar they find is
+attached only when its real path, after symbolic links, lies inside the
+analysed root, `~/.gradle/caches/modules-2`, `~/.m2/repository` or kosi's AAR
+extraction directory under the system temporary directory. Any other entry is
+reported as missing, the same as a path with nothing on disk. A classpath that
+legitimately lives elsewhere (a custom `GRADLE_USER_HOME`, an SDK jar) has to
+be passed with `--classpath` or `--classpath-file`, and an operator should
+point those flags only at a file they wrote or checked, never at one the
+analysed project supplied.
+
 `stats.classpath` publishes `{strategy, entries, missing, attempts[]}` —
 `attempts[]` records every strategy the chain tried and whether it fired,
 `strategy` is the winner or **`none`, stated explicitly**: a classpath-less

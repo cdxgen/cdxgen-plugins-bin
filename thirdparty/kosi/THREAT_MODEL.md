@@ -57,6 +57,15 @@ Same discipline as rusi's, applied to a Kotlin front end.
    `CDXGEN_KOSI_DISABLE=1` by skipping kosi entirely (a valid BOM without
    any kosi artifact — asserted by `scripts/kosi-e2e.sh`), and never lets a
    kosi failure abort SBOM generation.
+9. **Discovered classpath entries stay inside known directories.** A
+   `classpath.txt`, an Eclipse `.classpath`, a `libs/` directory and the
+   build files of the analysed tree are written by the project, and with
+   `--deps` the classes of every attached jar are lowered into the report.
+   Discovery therefore attaches a jar only when its real path lies inside
+   the analysed root, the user's Gradle or Maven cache, or kosi's AAR
+   extraction directory, and reports anything else as missing, with the same
+   record as a path that does not exist. Only `--classpath` and
+   `--classpath-file` reach other paths.
 
 ## What kosi will never do
 
