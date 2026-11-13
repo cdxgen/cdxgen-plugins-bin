@@ -117,9 +117,11 @@ jobs:
   #     installed, so the driver's `auto` toolchain is exercised picking a lone
   #     dated nightly by its full name.
   #   - beta: the next stable release's shape, named explicitly through
-  #     RUSI_TEST_TOOLCHAIN because `auto` never prefers a beta. This is the
-  #     leg that would have caught 1.100 reshaping `use` items and MIR
-  #     projections before it reached stable.
+  #     RUSI_TEST_TOOLCHAIN because `auto` never prefers a beta. This leg
+  #     catches a rustc_private reshape before it reaches stable.
+  #   - 1.100.0: the first stable release with the probed `use`-tree and MIR
+  #     projection forks. Pinned by version rather than `stable` so the leg
+  #     keeps testing that shape after stable moves on.
   #   - the rolling nightly: an early warning for forks still to come. Allowed
   #     to fail, and not linted, since nightly clippy moves on its own.
   #
@@ -148,6 +150,10 @@ jobs:
           - os: ubuntu-latest
             toolchain: beta
             test-toolchain: beta
+            canary: false
+          - os: ubuntu-latest
+            toolchain: 1.100.0
+            test-toolchain: 1.100.0
             canary: false
           - os: ubuntu-latest
             toolchain: nightly

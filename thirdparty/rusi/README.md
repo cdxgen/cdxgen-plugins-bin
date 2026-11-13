@@ -110,7 +110,7 @@ rustup component add rustc-dev rust-src --toolchain stable
 rustup toolchain install nightly --component rustc-dev --component rust-src
 ```
 
-Because the `rustc_private` APIs carry no stability guarantee, the wrapper compiles against one narrow window of compiler versions: currently 1.98 through the 1.100 beta and nightly 1.101. API differences inside that window are bridged by small shims at the top of `crates/rusi-rustc-wrapper/src/main.rs` wherever the change is in types. Changes to item names or variant arity cannot be bridged that way, so each hangs off its own cfg, which the wrapper's `build.rs` sets by compiling a small probe against the toolchain building it:
+Because the `rustc_private` APIs carry no stability guarantee, the wrapper compiles against one narrow window of compiler versions: currently 1.98 through stable 1.100 and the 1.101 nightlies. API differences inside that window are bridged by small shims at the top of `crates/rusi-rustc-wrapper/src/main.rs` wherever the change is in types. Changes to item names or variant arity cannot be bridged that way, so each hangs off its own cfg, which the wrapper's `build.rs` sets by compiling a small probe against the toolchain building it:
 
 | cfg                              | Change                                                                           | First nightly        |
 | -------------------------------- | -------------------------------------------------------------------------------- | -------------------- |
