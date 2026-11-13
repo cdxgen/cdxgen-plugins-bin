@@ -280,7 +280,7 @@ object Main {
                 if (!java.nio.file.Path.of(it).isAbsolute) {
                     throw UsageException("--classpath-root must be an absolute directory: $it")
                 }
-            },
+            }.takeIf { it.isNotEmpty() },
             jdkHome = parsed.value("jdk-home"),
             progressive = parsed.bool("progressive", defaults.progressive),
             optIn = parsed.values("opt-in"),

@@ -229,10 +229,10 @@ data class AnalyzeOptions(
     /**
      * (`--classpath-root`): absolute directories the discovery strategies
      * may also attach jars from, beside the analysed root, the Gradle and
-     * Maven caches, the Android SDK and `JAVA_HOME`. Recorded in the report
-     * only when set.
+     * Maven caches, the Android SDK and `JAVA_HOME`. Null when none was
+     * given, so the report records it only when set.
      */
-    val classpathRoots: List<String> = emptyList(),
+    val classpathRoots: List<String>? = null,
     val jdkHome: String? = null,
     val pretty: Boolean = false,
     val format: String = "json",
@@ -250,7 +250,7 @@ data class AnalyzeOptions(
         w.endArray()
         w.bool("endpointSources", endpointSources)
         w.str("classpathFile", classpathFile)
-        if (classpathRoots.isNotEmpty()) {
+        if (classpathRoots != null) {
             w.beginArray("classpathRoots")
             for (value in classpathRoots.sorted()) w.str(value)
             w.endArray()
