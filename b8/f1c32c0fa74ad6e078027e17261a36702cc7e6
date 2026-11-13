@@ -1,0 +1,39 @@
+thirdparty/kosi/JSON_ATTRIBUTE_REFERENCE.md
+  s_8376465eb88a0d::t_72249551ed73f1 74-76,100-102
+thirdparty/kosi/THREAT_MODEL.md
+  s_8376465eb88a0d::t_8c68ec3b492370 68-77
+thirdparty/kosi/docs/KOSI.md
+  s_8376465eb88a0d::t_bb2c59282c0187 74-75,79-100
+thirdparty/kosi/modules/kosi-bench/src/main/kotlin/io/cdxgen/kosi/bench/Digests.kt
+  s_8376465eb88a0d::t_2faae6dc69e9c5 98,132
+thirdparty/kosi/modules/kosi-cli/src/main/kotlin/io/cdxgen/kosi/cli/Main.kt
+  s_8376465eb88a0d::t_bd5654ed0f4368 90,279-283,760-763
+thirdparty/kosi/modules/kosi-cli/src/test/kotlin/io/cdxgen/kosi/cli/DefaultsFromParserTest.kt
+  s_8376465eb88a0d::t_2904c0cfc4a5b6 69-76
+thirdparty/kosi/modules/kosi-front/src/main/kotlin/io/cdxgen/kosi/front/Analyzer.kt
+  s_8376465eb88a0d::t_3829f201528c86 462
+thirdparty/kosi/modules/kosi-front/src/main/kotlin/io/cdxgen/kosi/front/KirDumper.kt
+  s_8376465eb88a0d::t_6789b9bd2f1056 45
+thirdparty/kosi/modules/kosi-project/src/main/kotlin/io/cdxgen/kosi/project/ClasspathResolver.kt
+  s_8376465eb88a0d::t_563ed60ac62e9c 28-35,39-53,81,115-122,124-141,143-159,167-168,186,188,208,324,407,648-653,660,673,697-702,705,712,753-758,760,901-905,907-910,912
+thirdparty/kosi/modules/kosi-project/src/test/kotlin/io/cdxgen/kosi/project/ClasspathResolverTest.kt
+  s_8376465eb88a0d::t_2cc88b1ed1e85e 533-635
+thirdparty/kosi/modules/kosi-schema/src/main/kotlin/io/cdxgen/kosi/schema/Options.kt
+  s_8376465eb88a0d::t_d216be1b4abf6b 229-235,253-257
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b8f1c32c0fa74ad6e078027e17261a36702cc7e6",
+  "prompts": {},
+  "sessions": {
+    "s_8376465eb88a0d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6b944f10-f38a-4491-8809-d36fec51aaa5",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

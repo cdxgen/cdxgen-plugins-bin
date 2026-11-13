@@ -1,0 +1,25 @@
+thirdparty/cdxrs/README.md
+  s_8376465eb88a0d::t_18dbf8816fda38 76-81
+thirdparty/cdxrs/src/fetch/client.rs
+  s_8376465eb88a0d::t_cfdafce3062b45 7-14,267-268,374-375,381,398,658-666,668
+thirdparty/cdxrs/src/fetch/rate.rs
+  s_8376465eb88a0d::t_77823011c87c2a 31-33
+thirdparty/cdxrs/tests/fetch.rs
+  s_8376465eb88a0d::t_05990f9f2102d5 594,626-685
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "488081b791c9856b51d7bec0bb656190edc0791a",
+  "prompts": {},
+  "sessions": {
+    "s_8376465eb88a0d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6b944f10-f38a-4491-8809-d36fec51aaa5",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

@@ -1,0 +1,189 @@
+thirdparty/kosi/modules/kosi-front/src/main/kotlin/io/cdxgen/kosi/front/SyntaxAnalyzer.kt
+  s_8376465eb88a0d::t_29416473666432 406
+  s_8376465eb88a0d::t_663ec6dcf6713e 623-628,631-659
+  s_8376465eb88a0d::t_3eade75f6ee392 437,440
+thirdparty/kosi/modules/kosi-front/src/test/kotlin/io/cdxgen/kosi/front/SyntaxAnalyzerTest.kt
+  s_8376465eb88a0d::t_d11c327b128101 46-89
+thirdparty/kosi/JSON_ATTRIBUTE_REFERENCE.md
+  s_8376465eb88a0d::t_8b447218ba27c1 194
+thirdparty/kosi/THREAT_MODEL.md
+  s_8376465eb88a0d::t_0f9c2c1cfbabf7 35-37
+thirdparty/kosi/fixtures/scope-functions/src/Sample.kt
+  s_8376465eb88a0d::t_bc659e5b81ff73 8
+thirdparty/kosi/fixtures/string-template/src/main/kotlin/Templates.kt
+  s_8376465eb88a0d::t_764cf35c517c81 14
+thirdparty/kosi/goldens/bare-accessor-source-deps.json
+  s_8376465eb88a0d::t_b3eb922fe33f08 1
+thirdparty/kosi/goldens/bare-accessor-source-endpoint.json
+  s_8376465eb88a0d::t_2ea0e652a1fcf2 1
+thirdparty/kosi/goldens/bare-accessor-source-exported.json
+  s_8376465eb88a0d::t_a9234cae8ed41a 1
+thirdparty/kosi/goldens/bare-accessor-source-resolved.json
+  s_8376465eb88a0d::t_7d11d78925a7d2 1
+thirdparty/kosi/goldens/bare-accessor-source-security.json
+  s_8376465eb88a0d::t_cfe97656a2c00b 1
+thirdparty/kosi/goldens/catch-handler-flow-deps.json
+  s_8376465eb88a0d::t_41a0b95a53cb23 1
+thirdparty/kosi/goldens/catch-handler-flow-endpoint.json
+  s_8376465eb88a0d::t_58a814a12513e8 1
+thirdparty/kosi/goldens/catch-handler-flow-exported.json
+  s_8376465eb88a0d::t_4474bbd6221c40 1
+thirdparty/kosi/goldens/catch-handler-flow-resolved.json
+  s_8376465eb88a0d::t_50f578353f525b 1
+thirdparty/kosi/goldens/catch-handler-flow-security.json
+  s_8376465eb88a0d::t_4bf9f6d6eda2f0 1
+thirdparty/kosi/goldens/command-exec-deps.json
+  s_26070a901bcf66::t_5734cebe9db66b 1
+thirdparty/kosi/goldens/command-exec-endpoint.json
+  s_26070a901bcf66::t_7d8ced83ff5d77 1
+thirdparty/kosi/goldens/command-exec-exported.json
+  s_26070a901bcf66::t_cf680c66e73785 1
+thirdparty/kosi/goldens/command-exec-resolved.json
+  s_26070a901bcf66::t_c8f43ae0d3f50d 1
+thirdparty/kosi/goldens/command-exec-security.json
+  s_26070a901bcf66::t_3e920395f18eb6 1
+thirdparty/kosi/goldens/deserialization-fields-deps.json
+  s_8376465eb88a0d::t_67fafb2a1f9c57 1
+thirdparty/kosi/goldens/deserialization-fields-endpoint.json
+  s_8376465eb88a0d::t_a2534f00fd18f7 1
+thirdparty/kosi/goldens/deserialization-fields-exported.json
+  s_8376465eb88a0d::t_17f4d4c067a6b3 1
+thirdparty/kosi/goldens/deserialization-fields-resolved.json
+  s_8376465eb88a0d::t_b707e41b88d9e4 1
+thirdparty/kosi/goldens/deserialization-fields-security.json
+  s_8376465eb88a0d::t_0b9809afc0c113 1
+thirdparty/kosi/goldens/expressions-and-literals-deps.json
+  s_8376465eb88a0d::t_659a45a44b8cd7 1
+thirdparty/kosi/goldens/expressions-and-literals-endpoint.json
+  s_8376465eb88a0d::t_8e551c81fd9a17 1
+thirdparty/kosi/goldens/expressions-and-literals-exported.json
+  s_8376465eb88a0d::t_b9907717130e4c 1
+thirdparty/kosi/goldens/expressions-and-literals-resolved.json
+  s_8376465eb88a0d::t_8253d5889e9551 1
+thirdparty/kosi/goldens/expressions-and-literals-security.json
+  s_8376465eb88a0d::t_d60cd8bdec3fbe 1
+thirdparty/kosi/goldens/framework-generations-deps.json
+  s_8376465eb88a0d::t_475cfec9b1ddbf 1
+thirdparty/kosi/goldens/framework-generations-endpoint.json
+  s_8376465eb88a0d::t_2905e3552a041c 1
+thirdparty/kosi/goldens/framework-generations-exported.json
+  s_8376465eb88a0d::t_a8578160d03d9c 1
+thirdparty/kosi/goldens/framework-generations-resolved.json
+  s_8376465eb88a0d::t_5afdd8f3be6396 1
+thirdparty/kosi/goldens/framework-generations-security.json
+  s_8376465eb88a0d::t_05d08b9ceb5d8d 1
+thirdparty/kosi/goldens/ktor-context-semantics-deps.json
+  s_8376465eb88a0d::t_e7f6eda7f501e3 1
+thirdparty/kosi/goldens/ktor-context-semantics-endpoint.json
+  s_8376465eb88a0d::t_ec989428652817 1
+thirdparty/kosi/goldens/ktor-context-semantics-exported.json
+  s_8376465eb88a0d::t_8c374e04ef4ee1 1
+thirdparty/kosi/goldens/ktor-context-semantics-resolved.json
+  s_8376465eb88a0d::t_df22abf065f797 1
+thirdparty/kosi/goldens/ktor-context-semantics-security.json
+  s_8376465eb88a0d::t_9259d0d86f47e3 1
+thirdparty/kosi/goldens/numeric-sanitizer-deps.json
+  s_26070a901bcf66::t_35f0682f4f7482 1
+thirdparty/kosi/goldens/numeric-sanitizer-endpoint.json
+  s_26070a901bcf66::t_4887197f02c6d9 1
+thirdparty/kosi/goldens/numeric-sanitizer-exported.json
+  s_26070a901bcf66::t_88a66d85eb624a 1
+thirdparty/kosi/goldens/numeric-sanitizer-resolved.json
+  s_26070a901bcf66::t_c9dde44012a4e7 1
+thirdparty/kosi/goldens/numeric-sanitizer-security.json
+  s_26070a901bcf66::t_814c796444fdd9 1
+thirdparty/kosi/goldens/process-builder-varargs-deps.json
+  s_8376465eb88a0d::t_c646bd5428d093 1
+thirdparty/kosi/goldens/process-builder-varargs-endpoint.json
+  s_8376465eb88a0d::t_674b17163d08d4 1
+thirdparty/kosi/goldens/process-builder-varargs-exported.json
+  s_8376465eb88a0d::t_9f333e3895d142 1
+thirdparty/kosi/goldens/process-builder-varargs-resolved.json
+  s_8376465eb88a0d::t_90890cdc08ae15 1
+thirdparty/kosi/goldens/process-builder-varargs-security.json
+  s_8376465eb88a0d::t_4a61a9adaea04e 1
+thirdparty/kosi/goldens/scalar-handler-params-deps.json
+  s_8376465eb88a0d::t_0f9b23fb7bfb98 1
+thirdparty/kosi/goldens/scalar-handler-params-endpoint.json
+  s_8376465eb88a0d::t_60300b94b14d70 1
+thirdparty/kosi/goldens/scalar-handler-params-exported.json
+  s_8376465eb88a0d::t_070b988aadc824 1
+thirdparty/kosi/goldens/scalar-handler-params-resolved.json
+  s_8376465eb88a0d::t_59ddde5a9fb358 1
+thirdparty/kosi/goldens/scalar-handler-params-security.json
+  s_8376465eb88a0d::t_d0f9b365679e79 1
+thirdparty/kosi/goldens/scope-functions-deps.json
+  s_26070a901bcf66::t_5cb848ab329ad2 1
+thirdparty/kosi/goldens/scope-functions-endpoint.json
+  s_26070a901bcf66::t_23f7f267dd0669 1
+thirdparty/kosi/goldens/scope-functions-exported.json
+  s_26070a901bcf66::t_af842c84acbfbb 1
+thirdparty/kosi/goldens/scope-functions-resolved.json
+  s_26070a901bcf66::t_7ee5d92d1eabb5 1
+thirdparty/kosi/goldens/scope-functions-security.json
+  s_26070a901bcf66::t_44ba5a561f22c3 1
+thirdparty/kosi/goldens/spelling-gallery-deps.json
+  s_8376465eb88a0d::t_1398db2a5b33b9 1
+thirdparty/kosi/goldens/spelling-gallery-endpoint.json
+  s_8376465eb88a0d::t_c8dc72e394dfae 1
+thirdparty/kosi/goldens/spelling-gallery-exported.json
+  s_8376465eb88a0d::t_49c00d8d231ada 1
+thirdparty/kosi/goldens/spelling-gallery-resolved.json
+  s_8376465eb88a0d::t_0ddfac95d32611 1
+thirdparty/kosi/goldens/spelling-gallery-security.json
+  s_8376465eb88a0d::t_b0f759b6fd59a3 1
+thirdparty/kosi/goldens/spring-webflux-app-deps.json
+  s_8376465eb88a0d::t_eec62d2bce5fa3 1
+thirdparty/kosi/goldens/spring-webflux-app-endpoint.json
+  s_8376465eb88a0d::t_a7f17869e181ca 1
+thirdparty/kosi/goldens/spring-webflux-app-exported.json
+  s_8376465eb88a0d::t_daba3b1bb6afc3 1
+thirdparty/kosi/goldens/spring-webflux-app-resolved.json
+  s_8376465eb88a0d::t_053920999ae8ab 1
+thirdparty/kosi/goldens/spring-webflux-app-security.json
+  s_8376465eb88a0d::t_f25d026c6a5981 1
+thirdparty/kosi/goldens/spring-webmvc-fn-deps.json
+  s_8376465eb88a0d::t_0edcfa8255d77a 1
+thirdparty/kosi/goldens/spring-webmvc-fn-endpoint.json
+  s_8376465eb88a0d::t_96dd4e3a84f5db 1
+thirdparty/kosi/goldens/spring-webmvc-fn-exported.json
+  s_8376465eb88a0d::t_96b04ed1d2ca14 1
+thirdparty/kosi/goldens/spring-webmvc-fn-resolved.json
+  s_8376465eb88a0d::t_3c136a8b77098b 1
+thirdparty/kosi/goldens/spring-webmvc-fn-security.json
+  s_8376465eb88a0d::t_5304ea94f64efd 1
+thirdparty/kosi/goldens/string-template-deps.json
+  s_8376465eb88a0d::t_844a885c66c114 1
+thirdparty/kosi/goldens/string-template-endpoint.json
+  s_8376465eb88a0d::t_aa6aba27225f89 1
+thirdparty/kosi/goldens/string-template-exported.json
+  s_8376465eb88a0d::t_bad07ae0daeffa 1
+thirdparty/kosi/goldens/string-template-resolved.json
+  s_8376465eb88a0d::t_c02ffd42093f0b 1
+thirdparty/kosi/goldens/string-template-security.json
+  s_8376465eb88a0d::t_d2181f1e7aab10 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c90a03a0c09f150206bf2faab561f68ca7991bab",
+  "prompts": {},
+  "sessions": {
+    "s_26070a901bcf66": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "dcc8b24e-b24f-4925-ae54-f1ce6221731f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    },
+    "s_8376465eb88a0d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6b944f10-f38a-4491-8809-d36fec51aaa5",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

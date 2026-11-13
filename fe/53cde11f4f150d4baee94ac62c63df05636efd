@@ -1,0 +1,25 @@
+thirdparty/kosi/modules/kosi-cli/src/main/kotlin/io/cdxgen/kosi/cli/Main.kt
+  s_8376465eb88a0d::t_26e5f935a33de2 283
+thirdparty/kosi/modules/kosi-front/src/main/kotlin/io/cdxgen/kosi/front/Analyzer.kt
+  s_8376465eb88a0d::t_cae28fccee4309 462
+thirdparty/kosi/modules/kosi-front/src/main/kotlin/io/cdxgen/kosi/front/KirDumper.kt
+  s_8376465eb88a0d::t_e6e210bc069396 45
+thirdparty/kosi/modules/kosi-schema/src/main/kotlin/io/cdxgen/kosi/schema/Options.kt
+  s_8376465eb88a0d::t_c1510e893a46c2 232-233,235,253
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "fe53cde11f4f150d4baee94ac62c63df05636efd",
+  "prompts": {},
+  "sessions": {
+    "s_8376465eb88a0d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6b944f10-f38a-4491-8809-d36fec51aaa5",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
