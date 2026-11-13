@@ -95,7 +95,7 @@ object Digests {
      * then digest equal, while SETTING such an option still differs from
      * leaving it unset. Relative values travel and stay digested as given.
      */
-    private val ENVIRONMENT_NAMING_OPTIONS = setOf("classpath", "classpathFile", "jdkHome")
+    private val ENVIRONMENT_NAMING_OPTIONS = setOf("classpath", "classpathFile", "classpathRoots", "jdkHome")
     private const val ABSOLUTE_PATH_MARKER = "<absolute-path>"
 
     /**
@@ -129,7 +129,7 @@ object Digests {
         val members = LinkedHashMap<String, JsonValue>()
         for ((key, value) in options.members) {
             val replacement = when {
-                key == "classpath" && value is JsonArr ->
+                (key == "classpath" || key == "classpathRoots") && value is JsonArr ->
                     JsonArr(value.items.map(::normalizePathValue).toMutableList())
                 key in ENVIRONMENT_NAMING_OPTIONS -> normalizePathValue(value)
                 else -> value

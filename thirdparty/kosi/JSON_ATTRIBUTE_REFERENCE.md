@@ -71,7 +71,9 @@ Flags: `backend`, `dataflow`, `callgraph`, `dependencyDetail`, `roots`,
 `dataflowSkipGenerated`, `dataflowPathWidening`, `callgraphTimeoutSeconds`, `maxPathsPerSymbol`,
 `includeStdlib`, `unknownCall`, `languageVersion`, `apiVersion`, `jvmTarget`,
 `progressive`, `optIn`, `multiplatformTarget`, `classpath` (repeatable jars),
-`classpathFile` (one jar path per line, `#` comments), `jdkHome`,
+`classpathFile` (one jar path per line, `#` comments), `classpathRoots`
+(the `--classpath-root` directories discovery may also attach jars from,
+present only when given), `jdkHome`,
 `pretty`, `format`, plus the flags: `deps` (`--deps`: the
 dependency-jar tier — implied by `--dataflow security-deps`),
 `depsMaxClasses` (the tier's class budget, 500), `maxAnalysisSeconds`
@@ -95,8 +97,9 @@ silent degrade.
 option verbatim — reproduction needs the real jar paths and JDK home. The
 DIGEST goldens are the consumer that cannot: `classpath` entries and
 `jdkHome` are absolute by construction when set, and an explicitly absolute
-`classpathFile` names one machine just as much. At the digest boundary
-(`Digests.compute`) each ABSOLUTE path value among those three members
+`classpathFile` names one machine just as much, as do the always-absolute
+`classpathRoots`. At the digest boundary
+(`Digests.compute`) each ABSOLUTE path value among those four members
 enters as the fixed marker `<absolute-path>`, so two environments running
 the same slot set with their own absolute pins digest equal, while setting
 such an option still differs from leaving it unset and a relative value

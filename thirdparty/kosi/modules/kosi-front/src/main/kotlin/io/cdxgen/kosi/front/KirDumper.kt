@@ -42,6 +42,7 @@ object KirDumper {
             explicitFile = options.classpathFile?.let { root.resolve(it) },
             moduleDirs = moduleDirs,
             strategy = options.classpathStrategy,
+            extraRoots = options.classpathRoots.map { Path.of(it) },
         )
         val jdkResolution = JdkModules.resolve(options.jdkHome?.let { Path.of(it) })
         val jdkHome = when (val resolution = jdkResolution) {
