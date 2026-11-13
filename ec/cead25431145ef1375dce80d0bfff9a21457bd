@@ -1,0 +1,36 @@
+thirdparty/cdxrs/tests/fetch.rs
+  s_8376465eb88a0d::t_da29e4d0e94e5f 686-739,743,745,748,754-755,765,768-769,773-774,776,778-779,785-786,797,800-801,808,810-811,815-816
+  s_8376465eb88a0d::t_79f48f6ae9288c 740-742,744,746-747,749-753,756-764,766-767,770-772,775,777,780-784,787-796,798-799,802-807,809,812-814,817-823
+docs/CDXRS.md
+  s_8376465eb88a0d::t_e6dba933e3b47d 32,63-64
+thirdparty/cdxrs/README.md
+  s_8376465eb88a0d::t_df3b87af5c8761 76-87
+thirdparty/cdxrs/src/cmd/fetch.rs
+  s_8376465eb88a0d::t_2ed58b0407e735 3
+thirdparty/cdxrs/src/fetch/batch.rs
+  s_8376465eb88a0d::t_46be18fdda4d11 43,46-52,55-76,98-104,176-179,181,183-188,191-192,194,197,202-206,210,212,217,223,235,260-274,305-306,338-341,349,382-387,444-450,462-483
+thirdparty/cdxrs/src/fetch/client.rs
+  s_8376465eb88a0d::t_b85042cd633ff4 11-16,119-125,136-138,172-174,229,267,315-320,374-397,399,405,422,493-573,733-780,829-855
+thirdparty/cdxrs/src/fetch/rate.rs
+  s_8376465eb88a0d::t_05c81e7f6cb82a 31-32
+thirdparty/cdxrs/src/lib.rs
+  s_8376465eb88a0d::t_be8d0d9de618ea 21-26
+thirdparty/cdxrs/src/main.rs
+  s_8376465eb88a0d::t_8422a57a6c16ad 10,44-50
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "eccead25431145ef1375dce80d0bfff9a21457bd",
+  "prompts": {},
+  "sessions": {
+    "s_8376465eb88a0d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6b944f10-f38a-4491-8809-d36fec51aaa5",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
