@@ -73,6 +73,12 @@ cache bounded by TTL and an LRU byte ceiling, rate-limit awareness, and
 credential redaction. Reads a batch request on stdin and writes responses to
 stdout.
 
+`fetch` sends no credential. It does not read `GITHUB_TOKEN`, `.npmrc` tokens,
+`NUGET_AUTH` or netrc, because the URLs in a batch can come from the project
+being scanned, and a token chosen by host name would let that project decide
+which document is read with the operator's authority. A lookup that needs a
+token belongs on the caller's own HTTP client.
+
 ## Spec version support
 
 1.6 and 1.7. Schemas are vendored under `schemas/` and guarded against drift by

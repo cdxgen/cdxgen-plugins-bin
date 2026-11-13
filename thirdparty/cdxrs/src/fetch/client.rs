@@ -4,11 +4,14 @@
 //! configurable concurrency caps, per-host rate limiting, and retries with
 //! exponential backoff + jitter.
 //!
-//! Auth: `GITHUB_TOKEN` is sent as a Bearer token to github.com hosts, and a
-//! caller may pass an explicit per-request token. `.npmrc` `_authToken`,
-//! `NUGET_AUTH` and netrc are deliberately **not** read here — see
-//! `docs/fetch-auth.md`. Claiming support that does not exist is worse than
-//! not having it, so this module does not pretend.
+//! Auth: no credential is read from the environment. The batch envelope
+//! carries URLs that the scanned project can choose (a lockfile's `resolved`
+//! URL, an `.npmrc` scope registry), so a token chosen by host name would let
+//! that project pick which document is read with the operator's authority.
+//! Requests therefore go out anonymously unless a library caller passes an
+//! explicit per-request token to [`FetchClient::get_json`]; the batch protocol
+//! has no field for one. `GITHUB_TOKEN`, `.npmrc` `_authToken`, `NUGET_AUTH`
+//! and netrc are all ignored.
 //!
 //! Credentials never reach a log line or the cache: every URL that leaves this
 //! module for display or storage goes through [`redact_url`], which strips
@@ -81,7 +84,6 @@ pub struct FetchClientConfig {
     /// Maximum decompressed body accepted from a single response.
     pub max_body_bytes: usize,
     pub user_agent: String,
-    pub github_token: Option<String>,
 }
 
 impl Default for FetchClientConfig {
@@ -95,7 +97,6 @@ impl Default for FetchClientConfig {
             request_deadline: Duration::from_secs(DEFAULT_REQUEST_DEADLINE_SECS),
             max_body_bytes: MAX_BODY_BYTES,
             user_agent: format!("cdxgen-cdxrs/{}", crate::CDXRS_VERSION),
-            github_token: env::var("GITHUB_TOKEN").ok().filter(|s| !s.is_empty()),
         }
     }
 }
@@ -263,15 +264,8 @@ impl FetchClient {
         {
             headers.insert(reqwest::header::IF_MODIFIED_SINCE, v);
         }
-        // Auth priority: explicit token, then GITHUB_TOKEN for github hosts.
-        let effective_token = auth_token.or_else(|| {
-            if host == "api.github.com" || host == "github.com" {
-                self.config.github_token.as_deref()
-            } else {
-                None
-            }
-        });
-        if let Some(token) = effective_token
+        // Only a token the caller passed for this request is sent.
+        if let Some(token) = auth_token
             && let Ok(v) = HeaderValue::from_str(&format!("Bearer {token}"))
         {
             headers.insert(AUTHORIZATION, v);
@@ -376,28 +370,15 @@ impl FetchClient {
         }
     }
 
-    /// Whether a credential will be sent to this host.
-    ///
-    /// Only token presence is considered, never its value. A host we hold no
-    /// token for keeps the anonymous budget even if some other host has one.
-    fn credentials_for(&self, host: &str) -> Credentials {
-        let github =
-            host == "api.github.com" || host == "github.com" || host.ends_with(".github.com");
-        if github && self.config.github_token.is_some() {
-            Credentials::Authenticated
-        } else {
-            Credentials::Anonymous
-        }
-    }
-
     /// Per-host permits: an explicit configured cap when there is one,
-    /// otherwise the host's own policy for the credentials we will send.
+    /// otherwise the host's anonymous policy. No credential is attached by
+    /// host, so every host keeps the budget it gives an anonymous client.
     async fn get_host_semaphore(&self, host: &str) -> Arc<Semaphore> {
         let configured = self.config.per_host_concurrency;
         let limit = if configured > 0 {
             configured
         } else {
-            super::rate::policy_for(host, self.credentials_for(host)).max_concurrency
+            super::rate::policy_for(host, Credentials::Anonymous).max_concurrency
         };
         let mut map = self.host_sems.lock().await;
         map.entry(host.to_string())
@@ -414,7 +395,7 @@ impl FetchClient {
     async fn get_host_rate_limiter(&self, host: &str) -> Arc<RateLimiter> {
         let mut map = self.host_rate_limiters.lock().await;
         map.entry(host.to_string())
-            .or_insert_with(|| Arc::new(RateLimiter::new(host, self.credentials_for(host))))
+            .or_insert_with(|| Arc::new(RateLimiter::new(host, Credentials::Anonymous)))
             .clone()
     }
 }
@@ -674,40 +655,17 @@ mod client_tests {
     }
 
     #[tokio::test]
-    async fn github_token_raises_only_github_concurrency() {
-        let with_token = FetchClient::new(FetchClientConfig {
-            github_token: Some("token".to_string()),
-            ..Default::default()
-        })
-        .expect("client builds");
-        let without = FetchClient::new(FetchClientConfig {
-            github_token: None,
-            ..Default::default()
-        })
-        .expect("client builds");
-
+    async fn github_hosts_keep_the_anonymous_budget() {
+        let client = FetchClient::new(FetchClientConfig::default()).expect("client builds");
+        for host in ["api.github.com", "github.com"] {
+            assert_eq!(
+                client.get_host_semaphore(host).await.available_permits(),
+                4,
+                "{host}"
+            );
+        }
         assert_eq!(
-            with_token.credentials_for("api.github.com"),
-            Credentials::Authenticated
-        );
-        assert_eq!(
-            without.credentials_for("api.github.com"),
-            Credentials::Anonymous
-        );
-        // A token for GitHub must not raise anyone else's budget.
-        assert_eq!(
-            with_token.credentials_for("crates.io"),
-            Credentials::Anonymous
-        );
-
-        // And the permit count follows: 8 with a token, 4 without.
-        let authed = with_token.get_host_semaphore("api.github.com").await;
-        let anon = without.get_host_semaphore("api.github.com").await;
-        assert_eq!(authed.available_permits(), 8);
-        assert_eq!(anon.available_permits(), 4);
-        // Non-github hosts are unaffected either way.
-        assert_eq!(
-            with_token
+            client
                 .get_host_semaphore("registry.npmjs.org")
                 .await
                 .available_permits(),
@@ -719,7 +677,6 @@ mod client_tests {
     async fn an_explicit_per_host_cap_overrides_the_policy() {
         let client = FetchClient::new(FetchClientConfig {
             per_host_concurrency: 2,
-            github_token: Some("token".to_string()),
             ..Default::default()
         })
         .expect("client builds");

@@ -591,7 +591,7 @@ async fn transport_errors_do_not_echo_the_url() {
 }
 
 #[tokio::test]
-async fn github_token_is_sent_to_github_hosts_only() {
+async fn github_token_is_not_sent_to_other_hosts() {
     let server = MockServer::start().await;
     let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<Option<String>>::new()));
     let recorder = seen.clone();
@@ -609,7 +609,6 @@ async fn github_token_is_sent_to_github_hosts_only() {
         .mount(&server)
         .await;
 
-    // The mock server is not github.com, so the ambient token must not be sent.
     run_fetch_env(
         &batch(vec![request(
             "x",
@@ -622,6 +621,66 @@ async fn github_token_is_sent_to_github_hosts_only() {
 
     let observed = seen.lock().unwrap().clone();
     assert_eq!(observed, vec![None], "token sent to a non-github host");
+}
+
+/// The batch envelope carries URLs chosen by the scanned project (a lockfile's
+/// `resolved` URL, an `.npmrc` scope registry), so the host name alone must not
+/// attach the ambient `GITHUB_TOKEN`. The GitHub hosts are reached through a
+/// plain HTTP proxy that is the mock server, which records what each request
+/// carried.
+#[tokio::test]
+async fn ambient_github_token_is_not_sent_to_github_hosts() {
+    let server = MockServer::start().await;
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<Option<String>>::new()));
+    let recorder = seen.clone();
+    Mock::given(method("GET"))
+        .respond_with(move |req: &Request| {
+            recorder.lock().unwrap().push(
+                req.headers
+                    .get("authorization")
+                    .and_then(|v| v.to_str().ok())
+                    .map(|s| s.to_string()),
+            );
+            ResponseTemplate::new(404)
+        })
+        .mount(&server)
+        .await;
+
+    let run = run_fetch_env(
+        &batch(vec![
+            request("api", "http://api.github.com/repos/acme/private"),
+            request(
+                "web",
+                "http://github.com/acme/private/raw/main/package.json",
+            ),
+            request(
+                "sub",
+                "http://raw.github.com/acme/private/main/package.json",
+            ),
+        ]),
+        &["--no-cache"],
+        &[
+            ("HTTP_PROXY", &server.uri()),
+            ("GITHUB_TOKEN", "ambient-token-must-not-be-sent"),
+        ],
+    )
+    .expect_success();
+    assert!(
+        !run.stdout.contains("ambient-token-must-not-be-sent"),
+        "{}",
+        run.stdout
+    );
+
+    let observed = seen.lock().unwrap().clone();
+    assert_eq!(
+        observed.len(),
+        3,
+        "the proxy did not see every request; test proves nothing"
+    );
+    assert!(
+        observed.iter().all(Option::is_none),
+        "ambient token attached by host name: {observed:?}"
+    );
 }
 
 // -------------------------------------------------------------- concurrency
