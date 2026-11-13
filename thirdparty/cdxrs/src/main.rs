@@ -7,7 +7,7 @@ use clap::Parser;
 use cdxrs::cli::{Cli, Command};
 use cdxrs::error::CdxrsError;
 use cdxrs::error::exit_code;
-use cdxrs::{CDXRS_VERSION, SUPPORTED_SPEC_VERSIONS, log};
+use cdxrs::{CAPABILITIES, CDXRS_VERSION, SUPPORTED_SPEC_VERSIONS, log};
 
 fn main() {
     let cli = Cli::parse();
@@ -41,7 +41,13 @@ fn main() {
                 .iter()
                 .map(|v| format!("\"{v}\""))
                 .collect();
-            println!("{{\"supportedSpecVersions\":[{}]}}", versions.join(","));
+            let capabilities: Vec<String> =
+                CAPABILITIES.iter().map(|c| format!("\"{c}\"")).collect();
+            println!(
+                "{{\"supportedSpecVersions\":[{}],\"capabilities\":[{}]}}",
+                versions.join(","),
+                capabilities.join(",")
+            );
             Ok(())
         }
         None => {

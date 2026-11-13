@@ -29,7 +29,7 @@ cdxrs [OPTIONS] [COMMAND]
       --max-input-bytes <BYTES> Maximum input size (default: 2 GB)
 ```
 
-cdxgen routes only `validate` and `fetch`. The other two exist for direct use and for the bridge's version probe.
+cdxgen routes only `validate` and `fetch`. The other two exist for direct use and for the bridge's probes: `--version` for the major version, and `schema-version`, whose `capabilities` list names optional behaviour such as `fetch-github-token`.
 
 ## validate
 
@@ -59,6 +59,8 @@ Coverage includes the CycloneDX 1.7 additions cdxgen emits: root-level `citation
 ## fetch
 
 `fetch` takes a batch of registry URLs and fetches them in parallel with per-host concurrency limits, a TTL- and size-bounded on-disk cache, and credential redaction. It exists because registry metadata is a large fraction of scan wall time and most of the latency is waiting on sockets, which is exactly where a small native process with tight connection handling wins.
+
+`fetch` reads no credential from its environment. A request may carry a `githubToken` field, which cdxgen sets only on GitHub API URLs it composed itself (the repository licence lookups), never on a URL taken from the scanned project. cdxrs sends that token as `Authorization: Bearer` with that request alone, and only when the URL is https on the default port to `github.com` or `api.github.com` with no userinfo; any other request goes out without it. A host that receives the token gets its authenticated concurrency and rate budget for that run. A redirect to another host, port or scheme drops the header. The token keeps the request out of the anonymous cache entries for the same URL, and it is never written to the cache, logged or echoed. A 403 or 429 that reports a spent quota comes back with `quotaExhausted: true` and, when the host said, `retryAfterSecs`, so cdxgen can pause the host. cdxrs builds that support this list `fetch-github-token` under `capabilities` in `cdxrs schema-version`, and cdxgen sends GitHub requests to cdxrs only when it sees that marker.
 
 ## Byte-identical round-trips
 

@@ -40,11 +40,39 @@ pub struct BatchRequest {
     pub accept: Option<String>,
     /// Identity of the auth realm this request belongs to — part of the cache
     /// key so that an authenticated response is never served to an anonymous
-    /// lookup. Never a credential: tokens are read from the environment by the
-    /// client and never cross this boundary.
+    /// lookup. Never a credential itself.
     #[serde(default, rename = "authRealm")]
     pub auth_realm: Option<String>,
+    /// A token for this request alone, sent as `Authorization: Bearer` only
+    /// when the URL is https to github.com or api.github.com (see
+    /// [`super::client::token_allowed_for`]). The caller sets it only on URLs
+    /// it composed itself; it is never read from the environment, written to
+    /// the cache, logged or echoed in the output.
+    #[serde(default, rename = "githubToken")]
+    pub github_token: Option<RequestToken>,
 }
+
+/// A per-request token. Its `Debug` form never shows the value.
+#[derive(Clone, Deserialize)]
+#[serde(transparent)]
+pub struct RequestToken(String);
+
+impl RequestToken {
+    /// The token value, for building the request header.
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Debug for RequestToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("RequestToken([redacted])")
+    }
+}
+
+/// The cache realm for a request that carries a token without naming a
+/// realm, so its response never shares a cache entry with an anonymous one.
+const TOKEN_REALM: &str = "github-token";
 
 /// The batch envelope read from stdin.
 #[derive(Debug, Clone, Deserialize)]
@@ -67,6 +95,13 @@ pub struct BatchResult {
     pub from_cache: bool,
     /// True when a stale cache entry was confirmed still valid with a 304.
     pub revalidated: bool,
+    /// True when the host answered 403 or 429 and said its request quota is
+    /// used up, so the caller can stop asking it for a while.
+    #[serde(rename = "quotaExhausted", skip_serializing_if = "std::ops::Not::not")]
+    pub quota_exhausted: bool,
+    /// Seconds the host asked the caller to wait, with `quotaExhausted`.
+    #[serde(rename = "retryAfterSecs", skip_serializing_if = "Option::is_none")]
+    pub retry_after_secs: Option<u64>,
 }
 
 /// Aggregate counters, emitted on stderr as NDJSON and on stdout with the
@@ -138,38 +173,54 @@ pub async fn run_batch(
     // workspaces), and the JS path deduplicates through its in-process
     // `metadata_cache`. Not doing the same here would issue N identical
     // requests and look like a rate-limit problem of our own making.
+    //
+    // A token is part of the request identity: a request that carries one and
+    // a request that does not never share a fetch, so the anonymous one cannot
+    // be answered with what the token could read.
     let mut order: Vec<String> = Vec::new();
-    let mut by_key: HashMap<String, (CacheKey, Vec<String>)> = HashMap::new();
+    let mut by_key: HashMap<String, (CacheKey, Option<RequestToken>, Vec<String>)> = HashMap::new();
     for req in &input.requests {
+        let token = req.github_token.clone().filter(|t| !t.expose().is_empty());
+        let realm = match (&req.auth_realm, &token) {
+            (Some(realm), _) => Some(realm.as_str()),
+            (None, Some(_)) => Some(TOKEN_REALM),
+            (None, None) => None,
+        };
         let key = CacheKey::get(&req.url)
             .with_accept(req.accept.as_deref())
-            .with_auth_realm(req.auth_realm.as_deref());
-        let hash = key.hash();
+            .with_auth_realm(realm);
+        let hash = format!("{}|{}", key.hash(), u8::from(token.is_some()));
         match by_key.get_mut(&hash) {
-            Some((_, ids)) => ids.push(req.id.clone()),
+            Some((_, _, ids)) => ids.push(req.id.clone()),
             None => {
                 order.push(hash.clone());
-                by_key.insert(hash, (key, vec![req.id.clone()]));
+                by_key.insert(hash, (key, token, vec![req.id.clone()]));
             }
         }
     }
     stats.unique = order.len();
+    for (key, token, _) in by_key.values() {
+        if token.is_some() {
+            client.note_token_for(&key.url);
+        }
+    }
 
     let mut tasks = Vec::with_capacity(order.len());
     for hash in &order {
-        let (key, _) = by_key.get(hash).expect("hash was just inserted");
+        let (key, token, _) = by_key.get(hash).expect("hash was just inserted");
         let key = key.clone();
+        let token = token.clone();
         let client = Arc::clone(&client);
         let cache = Arc::clone(&cache);
         let offline = options.offline;
         tasks.push(tokio::spawn(async move {
-            fetch_one(&client, &cache, &key, offline).await
+            fetch_one(&client, &cache, &key, token.as_ref(), offline).await
         }));
     }
 
     let mut results: Vec<BatchResult> = Vec::with_capacity(input.requests.len());
     for (hash, task) in order.iter().zip(tasks) {
-        let (key, ids) = by_key.get(hash).expect("hash was just inserted");
+        let (key, _, ids) = by_key.get(hash).expect("hash was just inserted");
         let host = super::client::extract_host(&key.url).unwrap_or_else(|| "?".to_string());
         let host_stats = stats.hosts.entry(host).or_default();
         host_stats.requests += 1;
@@ -181,6 +232,7 @@ pub async fn run_batch(
             Err(e) => Outcome::Failed(format!("worker task failed: {e}")),
         };
 
+        let mut quota = None;
         let (ok, status, body, error, from_cache, revalidated) = match outcome {
             Outcome::Fetched { status, body } => {
                 (true, Some(status), Some(body), None, false, false)
@@ -205,6 +257,21 @@ pub async fn run_batch(
                 false,
                 false,
             ),
+            Outcome::QuotaExhausted {
+                status,
+                retry_after_secs,
+            } => {
+                quota = Some(retry_after_secs);
+                host_stats.rate_limited += 1;
+                (
+                    false,
+                    Some(status),
+                    None,
+                    Some(format!("http status {status} (request quota used up)")),
+                    false,
+                    false,
+                )
+            }
             Outcome::Failed(msg) => (false, None, None, Some(msg), false, false),
         };
 
@@ -235,6 +302,8 @@ pub async fn run_batch(
                 error: error.clone(),
                 from_cache,
                 revalidated,
+                quota_exhausted: quota.is_some(),
+                retry_after_secs: quota.flatten(),
             });
         }
     }
@@ -266,6 +335,10 @@ enum Outcome {
     },
     OfflineMiss,
     Status(u16),
+    QuotaExhausted {
+        status: u16,
+        retry_after_secs: Option<u64>,
+    },
     Failed(String),
 }
 
@@ -273,6 +346,7 @@ async fn fetch_one(
     client: &FetchClient,
     cache: &HttpCache,
     key: &CacheKey,
+    token: Option<&RequestToken>,
     offline: bool,
 ) -> Outcome {
     let lookup = cache.get(key);
@@ -305,7 +379,12 @@ async fn fetch_one(
     };
 
     match client
-        .get_json(&key.url, key.accept.as_deref(), None, &validators)
+        .get_json(
+            &key.url,
+            key.accept.as_deref(),
+            token.map(RequestToken::expose),
+            &validators,
+        )
         .await
     {
         Ok(success) if success.not_modified => {
@@ -362,6 +441,13 @@ async fn fetch_one(
             }
             Outcome::Status(code)
         }
+        Err(FetchFailure::QuotaExhausted {
+            status,
+            retry_after_secs,
+        }) => Outcome::QuotaExhausted {
+            status,
+            retry_after_secs,
+        },
         Err(failure) => {
             if let Lookup::Stale(entry) = lookup {
                 return Outcome::Cached {
@@ -371,5 +457,27 @@ async fn fetch_one(
             }
             Outcome::Failed(failure.to_string())
         }
+    }
+}
+
+#[cfg(test)]
+mod batch_tests {
+    use super::*;
+
+    #[test]
+    fn a_request_token_never_shows_in_debug_output() {
+        let input: BatchInput = serde_json::from_str(
+            r#"{"requests":[{"id":"a","url":"https://api.github.com/x","githubToken":"t0ken"}]}"#,
+        )
+        .expect("envelope parses");
+        let rendered = format!("{input:?}");
+        assert!(!rendered.contains("t0ken"), "{rendered}");
+        assert_eq!(
+            input.requests[0]
+                .github_token
+                .as_ref()
+                .map(RequestToken::expose),
+            Some("t0ken")
+        );
     }
 }

@@ -18,3 +18,9 @@ pub const CDXRS_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Spec versions supported by this build of cdxrs.
 pub const SUPPORTED_SPEC_VERSIONS: &[&str] = &["1.6", "1.7"];
+
+/// Optional behaviours a caller can detect before relying on them, printed by
+/// `cdxrs schema-version`. `fetch-github-token`: a `fetch` request may carry
+/// `githubToken`, sent as a bearer token with that request alone when it goes
+/// over https to github.com or api.github.com.
+pub const CAPABILITIES: &[&str] = &["fetch-github-token"];
