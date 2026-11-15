@@ -1,0 +1,39 @@
+thirdparty/rusi/fixtures/macro-zoo-app/src/hoisted.rs
+  s_83469fa515bf6a::t_33f327d7820081 1-8
+thirdparty/rusi/corpus.toml
+  s_83469fa515bf6a::t_9ce51c3556e222 122-127
+thirdparty/rusi/fixtures/macro-zoo-app/src/macros/make_units.rs
+  s_83469fa515bf6a::t_55cd281aff3311 1-26
+thirdparty/rusi/fixtures/macro-zoo-app/src/textual.rs
+  s_83469fa515bf6a::t_f2f4fd6c1f56b4 1-5
+thirdparty/rusi/fixtures/macro-zoo-app/src/lib.rs
+  s_83469fa515bf6a::t_57ec2ce34a20e8 1-57,59-76,80-86,89-95
+  s_83469fa515bf6a::t_e4a9efa0fb5e15 58,77-79,87-88
+thirdparty/rusi/fixtures/macro-zoo-app/src/macros/mod.rs
+  s_83469fa515bf6a::t_ea00552524860c 4
+  s_83469fa515bf6a::t_8b043dae733793 1-3,5
+thirdparty/rusi/fixtures/macro-zoo-app/src/macros/path_scoped.rs
+  s_83469fa515bf6a::t_ce95e2c808e01a 1-10
+thirdparty/rusi/fixtures/macro-zoo-app/Cargo.toml
+  s_83469fa515bf6a::t_b58d1d7706cf9c 1-11
+thirdparty/rusi/fixtures/macro-zoo-app/src/helper.rs
+  s_83469fa515bf6a::t_7079b9158ad04d 1-3
+thirdparty/rusi/fixtures/macro-zoo-app/Cargo.lock
+  s_83469fa515bf6a::t_a6d120ee765b5b 1-119
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7786b2881cd3b2865fab97df52548d5a32cef22a",
+  "prompts": {},
+  "sessions": {
+    "s_83469fa515bf6a": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_837a0813-be05-4498-87cd-fdc8fd94a0c4",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
