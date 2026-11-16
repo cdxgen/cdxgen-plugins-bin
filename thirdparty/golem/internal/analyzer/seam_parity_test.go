@@ -69,7 +69,7 @@ func analyzeWithEngine(t *testing.T, dir, mode, engine string) *model.Report {
 	if err != nil {
 		t.Fatalf("parsing golem:env directives: %v", err)
 	}
-	report, err := Analyze(Options{
+	options := Options{
 		Dir:                   dir,
 		IncludeLocal:          true,
 		CallGraphMode:         "rta",
@@ -79,7 +79,13 @@ func analyzeWithEngine(t *testing.T, dir, mode, engine string) *model.Report {
 		TaintEngine:           engine,
 		Env:                   env,
 		ToolVersion:           "test",
-	})
+	}
+	// A case whose files import "C" needs the load to run with cgo, which the
+	// parallel-test option carries (an annotation must never turn cgo on).
+	if caseImportsC(dir) {
+		options.cgoEnabled = "1"
+	}
+	report, err := Analyze(options)
 	if err != nil {
 		t.Fatalf("analyze %s with engine %s in mode %s: %v", dir, engine, mode, err)
 	}

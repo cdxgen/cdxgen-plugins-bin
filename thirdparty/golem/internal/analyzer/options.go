@@ -48,7 +48,7 @@ type Options struct {
 	// GOEXPERIMENT, GOOS, GOARCH, GOAMD64, GOARM64 — because arbitrary keys
 	// such as GOFLAGS would turn an analysis option into command execution in
 	// the toolchain. See THREAT_MODEL.md.
-	Env              []string
+	Env []string
 	// cgoEnabled, when non-empty, is the CGO_ENABLED every load runs with.
 	// It exists for this package's parallel tests, which cannot touch the
 	// process environment; every consumer outside the package leaves it empty

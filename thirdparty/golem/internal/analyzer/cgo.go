@@ -219,15 +219,15 @@ func (c *cgoEvidence) readCgoFile(path, packagePath, modulePath string, loaded b
 		position := fset.Position(file.Pos())
 		line := position.Line
 		record.signals = []model.SecuritySignal{{
-			ID:               stableID("textual", packagePath, "native-interop", path, "import-C"),
-			Category:         "native-interop",
-			Severity:         "high",
-			Confidence:       "textual",
-			PackagePath:      packagePath,
-			Symbol:           "C",
-			Description:      "Imports cgo package C; the file was read textually because the load ran with cgo disabled.",
-			Recommendation:   "Review native build flags, linked libraries, and C memory safety.",
-			Range:            model.Range{Start: model.Position{Filename: path, Line: line}, End: model.Position{Filename: path, Line: line}},
+			ID:             stableID("textual", packagePath, "native-interop", path, "import-C"),
+			Category:       "native-interop",
+			Severity:       "high",
+			Confidence:     "textual",
+			PackagePath:    packagePath,
+			Symbol:         "C",
+			Description:    "Imports cgo package C; the file was read textually because the load ran with cgo disabled.",
+			Recommendation: "Review native build flags, linked libraries, and C memory safety.",
+			Range:          model.Range{Start: model.Position{Filename: path, Line: line}, End: model.Position{Filename: path, Line: line}},
 		}}
 	}
 	c.files[path] = record
@@ -436,9 +436,9 @@ func (a *Analyzer) assembleCgoReport(collected *cgoEvidence, mode, toolchainVers
 			summary.SysoCount++
 		}
 		attachment.artifactsByPackage[owner] = append(attachment.artifactsByPackage[owner], model.NativeArtifact{
-			Path:      path,
-			Kind:      "native-object",
-			Extension: ".syso",
+			Path:       path,
+			Kind:       "native-object",
+			Extension:  ".syso",
 			Properties: map[string]string{"objectHeaderValid": boolLabel(valid)},
 		})
 	}
