@@ -1,0 +1,27 @@
+thirdparty/rusi/JSON_ATTRIBUTE_REFERENCE.md
+  s_83469fa515bf6a::t_72749af0db6eaf 602
+  s_83469fa515bf6a::t_66f29581030610 180,187,204,243-255,374-375,388-389,631
+thirdparty/rusi/crates/rusi-core/src/lib.rs
+  s_83469fa515bf6a::t_f8dbc9f5d7aed5 2000-2003
+  s_83469fa515bf6a::t_7c4aa092b0c476 2740-2743
+thirdparty/rusi/docs/ANALYSIS_ARCHITECTURE.md
+  s_83469fa515bf6a::t_e4b20ad16c76d1 124-134,463-467
+docs/RUSI.md
+  s_83469fa515bf6a::t_e4b20ad16c76d1 111
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "3abcc33412b59905ab1c992e3e15492f3cb6bdc8",
+  "prompts": {},
+  "sessions": {
+    "s_83469fa515bf6a": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_837a0813-be05-4498-87cd-fdc8fd94a0c4",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
