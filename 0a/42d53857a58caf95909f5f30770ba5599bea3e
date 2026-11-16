@@ -1,0 +1,33 @@
+thirdparty/golem/JSON_ATTRIBUTE_REFERENCE.md
+  s_5ae344e6b6bab9::t_8ecac9263be7fb 575-641
+docs/GOLEM.md
+  s_5ae344e6b6bab9::t_8ecac9263be7fb 110-129
+README.md
+  s_5ae344e6b6bab9::t_8ecac9263be7fb 306-307
+.github/workflows/go-test.yml
+  s_5ae344e6b6bab9::t_5d50f0d365cd9d 90,116,146
+.github/workflows/native-builds.yml
+  s_5ae344e6b6bab9::t_5d50f0d365cd9d 39
+thirdparty/golem/README.md
+  s_5ae344e6b6bab9::t_ed12b8719f1f82 246-248
+.github/workflows/release.yml
+  s_5ae344e6b6bab9::t_5d50f0d365cd9d 236
+thirdparty/golem/THREAT_MODEL.md
+  s_5ae344e6b6bab9::t_ed12b8719f1f82 23-31
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0a42d53857a58caf95909f5f30770ba5599bea3e",
+  "prompts": {},
+  "sessions": {
+    "s_5ae344e6b6bab9": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_51e3c837-2993-4607-9eb9-fd5852bb5a3b",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

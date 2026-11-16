@@ -1,0 +1,31 @@
+thirdparty/golem/internal/analyzer/cgo.go
+  s_0e34e16b6c9ad2::t_e87ff30e1a72e5 152-154,213-217
+thirdparty/golem/internal/analyzer/cgo_fifo_test.go
+  s_7318da1b9edd46::t_0a1f4ca1cf7087 1-45
+thirdparty/golem/internal/native/cgoflags.go
+  s_0e34e16b6c9ad2::t_4ca59db941e6e3 378-386,479-482
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "66db470824fa69969285b083d8e7966a428e233b",
+  "prompts": {},
+  "sessions": {
+    "s_0e34e16b6c9ad2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4e2522b4-2584-4dbf-98b0-7a09eb05d6d7",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    },
+    "s_7318da1b9edd46": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ec4cd02e-10f8-411b-a4d1-40ff6af5049b",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

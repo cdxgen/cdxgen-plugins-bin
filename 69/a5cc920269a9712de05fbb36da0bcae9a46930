@@ -1,0 +1,21 @@
+thirdparty/golem/internal/analyzer/buildenv.go
+  s_0e34e16b6c9ad2::t_4ccf3e943b880b 50-54,92-94,98
+thirdparty/golem/internal/analyzer/buildenv_test.go
+  s_0e34e16b6c9ad2::t_7c779ebd36e09c 172-190
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "69a5cc920269a9712de05fbb36da0bcae9a46930",
+  "prompts": {},
+  "sessions": {
+    "s_0e34e16b6c9ad2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4e2522b4-2584-4dbf-98b0-7a09eb05d6d7",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
