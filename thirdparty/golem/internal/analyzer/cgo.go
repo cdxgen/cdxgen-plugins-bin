@@ -149,7 +149,9 @@ func (a *Analyzer) collectCgoEvidence(pkgs []*packages.Package, moduleRoot strin
 			}
 			return nil
 		}
-		if entry.Type()&fs.ModeSymlink != 0 {
+		// Symlinks, FIFOs and devices are never opened: a link could leave
+		// the module root, and a FIFO would block the read.
+		if !entry.Type().IsRegular() {
 			return nil
 		}
 		switch {
@@ -207,6 +209,11 @@ func (c *cgoEvidence) readCgoFile(path, packagePath, modulePath string, loaded b
 			existing.loaded = true
 		}
 		return true
+	}
+	// Only a regular file is read: a FIFO or device under a .go name would
+	// block the read for as long as nothing writes to it.
+	if info, err := os.Lstat(path); err != nil || !info.Mode().IsRegular() {
+		return false
 	}
 	data, err := os.ReadFile(path)
 	if err != nil || !importsC(data) {

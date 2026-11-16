@@ -375,6 +375,15 @@ func ClassifyCompilerDirective(text string) (name string, categories []string, o
 // cannot be opened counts as valid: unreadable is not the same as not an
 // object, and the caller reports a classification, not a verdict.
 func SysoObjectValid(path string) bool {
+	// Only a regular file is opened: a FIFO or device committed as a .syso
+	// would block the read, and the linker could not use it either.
+	info, err := os.Lstat(path)
+	if err != nil {
+		return true
+	}
+	if !info.Mode().IsRegular() {
+		return false
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return true
@@ -465,6 +474,10 @@ func statIsRegular(path string) bool {
 // analyst's disk.
 func dirHoldsSpecFile(dir string) bool {
 	if dir == "" {
+		return false
+	}
+	// Opening a FIFO named by a flag would block, so only a directory is read.
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
 		return false
 	}
 	entries, err := os.ReadDir(dir)
