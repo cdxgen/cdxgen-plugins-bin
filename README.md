@@ -303,6 +303,8 @@ Binaries are compressed using UPX (Ultimate Packer for eXecutables) with LZMA co
 
 All helper binaries treat the analyzed repository as untrusted input. Golem and Rusi do not execute `go:generate` or `cargo:generate` commands. They record these directives as evidence only.
 
+Golem loads Go packages with cgo disabled unless `CGO_ENABLED` is set in the environment, because compiling a cgo preamble runs the host C compiler with flags the analysed packages choose; the fixes are go1.26.11 and go1.27.4, and `CGO_CFLAGS_ALLOW`-style variables widen the checks again for every package in a build. cgo evidence (variables, flag names, risk categories) is still collected, by reading the source rather than compiling it.
+
 ### Secret Handling
 
 Golem and Rusi do not copy raw secret-bearing content into reports. This includes environment values, command output, embedded file contents, private keys, tokens, passwords, and literal string values that appear to contain cryptographic material. They may report names, categories, counts, symbols, file paths, source ranges, and material types.

@@ -572,6 +572,73 @@ Sort slices by `severity`, `riskScore`, `confidence`, then `pathLength`. For cry
 
 Check `dataFlow.stats.truncated`, `dataFlow.stats.truncationReasons`, and section diagnostics. If truncated, rerun with larger slice budget or narrower patterns.
 
+## cgo build-input reference
+
+The top-level `cgo` object summarises what crosses into C and what the build
+inputs could do to the host that compiles them. It is collected by reading
+source textually with `go/parser`; no C compiler runs in any mode.
+
+`mode` is the `CGO_ENABLED` the load ran with: `disabled` unless the analyst
+exported `CGO_ENABLED=1`. `toolchainVersion` and `toolchainPatched` name the
+toolchain the `go env` probe answered and whether it carries the cgo flag
+checks fixed in go1.26.11 and go1.27.4. `envOverrideNames[]` lists the NAMES of
+`CGO_*_ALLOW` and `CGO_*FLAGS` variables present in the load environment; each
+`_ALLOW` variable re-opens refused flags for every package in the build, and
+the values are deliberately not reported.
+
+`riskyFlags[]` and `riskCategories[]` are sorted and unique. The categories are
+`refused-by-go1.27.4` (the patched toolchains refuse the input outright),
+`path-escape` (a path argument that is absolute or climbs with `..`),
+`module-path` (informational: a path argument inside the analysed module),
+`cgo-directive-in-source` (a `//go:cgo_*` directive in hand-written source,
+where the compiler only accepts them in cgo-generated files) and
+`invalid-object` (a `.syso` whose first bytes are not an ELF, Mach-O, PE/COFF
+or archive header). `unloadedPackageCount` counts packages seen only textually
+because cgo was off and the loader never returned them.
+
+### `cgo` object fields
+
+| Field                   | Type    | Purpose                                                                     |
+| ----------------------- | ------- | --------------------------------------------------------------------------- |
+| `mode`                  | string  | `enabled` or `disabled`; the `CGO_ENABLED` the load ran with.               |
+| `toolchainVersion`      | string  | Toolchain version from the `go env` probe, e.g. `go1.27.4`.                 |
+| `toolchainPatched`      | boolean | Whether that toolchain carries the go1.26.11/go1.27.4 cgo flag fixes.       |
+| `envOverrideNames[]`    | array   | Names of `CGO_*_ALLOW` / `CGO_*FLAGS` variables in the load environment.    |
+| `packageCount`          | number  | Packages with cgo evidence, loaded or textual.                             |
+| `fileCount`             | number  | Files that import "C".                                                      |
+| `directiveCount`        | number  | `#cgo` and `//go:cgo_*` directives found.                                   |
+| `riskyFlagCount`        | number  | Distinct risky flag names.                                                  |
+| `riskyFlags[]`          | array   | Sorted unique flag NAMES, e.g. `--sysroot`. Never values.                   |
+| `riskCategories[]`      | array   | Sorted unique risk categories.                                              |
+| `pkgConfigCount`        | number  | `#cgo pkg-config:` directives.                                              |
+| `sysoCount`             | number  | `.syso` inputs classified.                                                  |
+| `sysoInvalidCount`      | number  | `.syso` inputs whose header is not an object or archive.                    |
+| `unloadedPackageCount`  | number  | Packages seen only textually because cgo was off.                           |
+| `packages[]`            | array   | Per-package summaries, see below.                                           |
+
+### `cgo.packages[]` fields
+
+| Field               | Type    | Purpose                                                                 |
+| ------------------- | ------- | ----------------------------------------------------------------------- |
+| `packagePath`       | string  | Go package path.                                                        |
+| `modulePath`        | string  | Module that owns the package, so findings attach to the right component. |
+| `loaded`            | boolean | Whether the loader returned the package (`false` when seen textually).   |
+| `fileCount`         | number  | Files of the package that import "C".                                   |
+| `directiveCount`    | number  | Directives of the package.                                              |
+| `riskyFlags[]`      | array   | Flag names of this package (names only).                                |
+| `riskCategories[]`  | array   | Categories observed in this package.                                    |
+| `pkgConfigCount`    | number  | `pkg-config` directives of this package.                                |
+| `sysoCount`         | number  | `.syso` files of the package.                                           |
+| `sysoInvalidCount`  | number  | Invalid `.syso` files of the package.                                   |
+
+The `cgo` kind of `buildDirectives[]` carries `variable` (CFLAGS, LDFLAGS,
+pkg-config, ...), `constraint` (the build constraint scoping the line),
+`flags[]` (flag names) and `categories[]`. It carries no `text`: the raw value
+of a directive is where paths and values that must not reach a report live.
+`//go:cgo_*` lines in hand-written source appear as kind `go-cgo` with the
+directive name in `variable`. Evidence whose file lies under the build cache
+never appears in the report.
+
 ## Native boundary reference
 
 The `nativeBoundary[]` section records crossing points between Go and C, in both

@@ -87,7 +87,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
-          go-version: '^1.27.0'
+          go-version: '^1.27.4'
       # Both targets run twice: against upstream Trivy and against the build
       # overlay/patches produces (see the Makefile).
       - name: go test
@@ -113,7 +113,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
-          go-version: '^1.27.0'
+          go-version: '^1.27.4'
       - name: go test
         # internal/analyzer runs every corpus case under both engines and
         # takes ~8 minutes on a hosted runner, close to go test's default
@@ -143,7 +143,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
-          go-version: '^1.27.0'
+          go-version: '^1.27.4'
       - name: go test
         run: go test ./...
       - name: go vet
