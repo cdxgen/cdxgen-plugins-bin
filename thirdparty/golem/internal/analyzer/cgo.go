@@ -213,9 +213,11 @@ func (c *cgoEvidence) readCgoFile(path, packagePath, modulePath string, loaded b
 		}
 	}
 	c.absorbCompilerDirectives(record, data, path)
-	if !loaded {
-		// A package the loader returned speaks through its own evidence; one
-		// seen only textually would otherwise be silent about crossing into C.
+	{
+		// The loader never reports this signal itself: the files it parsed of
+		// a cgo package are cgo-generated, and the `import "C"` line is gone
+		// from them. The textual read is the only place the boundary is
+		// visible in every mode.
 		position := fset.Position(file.Pos())
 		line := position.Line
 		record.signals = []model.SecuritySignal{{
@@ -225,7 +227,7 @@ func (c *cgoEvidence) readCgoFile(path, packagePath, modulePath string, loaded b
 			Confidence:     "textual",
 			PackagePath:    packagePath,
 			Symbol:         "C",
-			Description:    "Imports cgo package C; the file was read textually because the load ran with cgo disabled.",
+			Description:    "Imports cgo package C.",
 			Recommendation: "Review native build flags, linked libraries, and C memory safety.",
 			Range:          model.Range{Start: model.Position{Filename: path, Line: line}, End: model.Position{Filename: path, Line: line}},
 		}}
