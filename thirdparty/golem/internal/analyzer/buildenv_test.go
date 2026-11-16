@@ -169,3 +169,22 @@ func TestAnalyzeRejectsUnknownGoexperiment(t *testing.T) {
 		t.Fatalf("Analyze with GOEXPERIMENT=smd: err = %v, want the toolchain's unknown GOEXPERIMENT error", err)
 	}
 }
+
+// An empty CGO_ENABLED is not a choice: the go command treats it as unset and
+// falls back to its default, which turns cgo on whenever a C compiler exists.
+func TestEffectiveLoadEnvPinsCgoOffWhenEmpty(t *testing.T) {
+	t.Setenv("CGO_ENABLED", "")
+	env, err := effectiveLoadEnv(nil, "")
+	if err != nil {
+		t.Fatalf("effectiveLoadEnv with an empty CGO_ENABLED: %v", err)
+	}
+	var found []string
+	for _, entry := range env {
+		if strings.HasPrefix(entry, "CGO_ENABLED=") {
+			found = append(found, entry)
+		}
+	}
+	if len(found) != 1 || found[0] != "CGO_ENABLED=0" {
+		t.Fatalf("load environment carries %q for CGO_ENABLED; an empty value must be replaced by CGO_ENABLED=0", found)
+	}
+}

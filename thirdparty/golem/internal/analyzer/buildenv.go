@@ -47,6 +47,11 @@ func effectiveLoadEnv(extra []string, cgoEnabled string) ([]string, error) {
 	if cgoEnabled == "" {
 		cgoEnabled = cgoEnabledFor(os.Environ())
 	}
+	if len(extra) == 0 && cgoEnabled == "" {
+		// Nothing is overridden and the process environment already states
+		// the cgo choice, so the load inherits it directly.
+		return nil, nil
+	}
 	// CGO_ENABLED is never among the validated pairs (the allowlist is the
 	// build shape only), so setting it here cannot fight an option.
 	if cgoEnabled != "" {
@@ -79,23 +84,18 @@ func effectiveLoadEnv(extra []string, cgoEnabled string) ([]string, error) {
 	if cgoEnabled != "" {
 		out = append(out, "CGO_ENABLED="+cgoEnabled)
 	}
-	if len(out) == len(base) && len(extra) == 0 {
-		// Nothing was overridden and the process environment already states
-		// the cgo choice, so the load can inherit it directly.
-		return nil, nil
-	}
 	return out, nil
 }
 
 // cgoEnabledFor reports the CGO_ENABLED value the load must pin, or "" when
 // the environment already states the analyst's choice and the load may inherit
-// it. An unset CGO_ENABLED would otherwise let the toolchain's own default
-// (cgo on whenever a C compiler is present) run the host compiler with flags
-// any package in the module graph chooses; the fixes are go1.26.11 and
+// it. An unset or empty CGO_ENABLED would otherwise let the toolchain's own
+// default (cgo on whenever a C compiler is present) run the host compiler with
+// flags any package in the module graph chooses; the fixes are go1.26.11 and
 // go1.27.4, and a report cannot assume the host runs one of them.
 func cgoEnabledFor(environ []string) string {
 	for _, entry := range environ {
-		if strings.HasPrefix(entry, "CGO_ENABLED=") {
+		if value, ok := strings.CutPrefix(entry, "CGO_ENABLED="); ok && strings.TrimSpace(value) != "" {
 			return ""
 		}
 	}
