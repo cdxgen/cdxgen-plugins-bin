@@ -101,12 +101,20 @@ type FileEvidence struct {
 	Properties      map[string]string `json:"properties,omitempty"`
 }
 type BuildDirective struct {
-	Kind       string            `json:"kind"`
-	Text       string            `json:"text,omitempty"`
-	Command    string            `json:"command,omitempty"`
-	Arguments  []string          `json:"arguments,omitempty"`
-	Target     string            `json:"target,omitempty"`
-	Patterns   []string          `json:"patterns,omitempty"`
+	Kind      string   `json:"kind"`
+	Text      string   `json:"text,omitempty"`
+	Command   string   `json:"command,omitempty"`
+	Arguments []string `json:"arguments,omitempty"`
+	Target    string   `json:"target,omitempty"`
+	Patterns  []string `json:"patterns,omitempty"`
+	// The four fields below carry the cgo kinds. A #cgo line never appears as
+	// Text: the raw value can hold paths and values that must not reach a
+	// report, so the directive names the variable, the build constraint that
+	// scopes it, the flag NAMES and the risk categories instead.
+	Variable   string            `json:"variable,omitempty"`
+	Constraint string            `json:"constraint,omitempty"`
+	Flags      []string          `json:"flags,omitempty"`
+	Categories []string          `json:"categories,omitempty"`
 	Range      Range             `json:"range"`
 	Properties map[string]string `json:"properties,omitempty"`
 }
@@ -689,42 +697,46 @@ type DataFlowSliceReachability struct {
 	UnrootedSliceCount int      `json:"unrootedSliceCount"`
 }
 type Stats struct {
-	PackageCount           int `json:"packageCount"`
-	ModuleCount            int `json:"moduleCount"`
-	FileCount              int `json:"fileCount"`
-	GeneratedFileCount     int `json:"generatedFileCount"`
-	ImportCount            int `json:"importCount"`
-	DeclarationCount       int `json:"declarationCount"`
-	UsageCount             int `json:"usageCount"`
-	RuntimeUsageCount      int `json:"runtimeUsageCount"`
-	TestUsageCount         int `json:"testUsageCount"`
-	BenchmarkUsageCount    int `json:"benchmarkUsageCount"`
-	FuzzUsageCount         int `json:"fuzzUsageCount"`
-	ExampleUsageCount      int `json:"exampleUsageCount"`
-	BuildDirectiveCount    int `json:"buildDirectiveCount"`
-	NativeArtifactCount    int `json:"nativeArtifactCount"`
-	NativeBoundaryCount    int `json:"nativeBoundaryCount"`
-	BuildShapeDeltaCount   int `json:"buildShapeDeltaCount"`
-	APIEndpointCount       int `json:"apiEndpointCount"`
-	ExternalURLCount       int `json:"externalUrlCount"`
-	ServiceCount           int `json:"serviceCount"`
-	SecuritySignalCount    int `json:"securitySignalCount"`
-	GoModReplaceCount      int `json:"goModReplaceCount"`
-	GoModExcludeCount      int `json:"goModExcludeCount"`
-	VendorModuleCount      int `json:"vendorModuleCount"`
-	WorkspaceModuleCount   int `json:"workspaceModuleCount"`
-	PrivateModuleHintCount int `json:"privateModuleHintCount"`
-	LicenseFileModuleCount int `json:"licenseFileModuleCount"`
-	CryptoLibraryCount     int `json:"cryptoLibraryCount"`
-	CryptoAssetCount       int `json:"cryptoAssetCount"`
-	CryptoOperationCount   int `json:"cryptoOperationCount"`
-	CryptoMaterialCount    int `json:"cryptoMaterialCount"`
-	CryptoProtocolCount    int `json:"cryptoProtocolCount"`
-	CryptoFindingCount     int `json:"cryptoFindingCount"`
-	DataFlowSourceCount    int `json:"dataFlowSourceCount"`
-	DataFlowSinkCount      int `json:"dataFlowSinkCount"`
-	DataFlowSliceCount     int `json:"dataFlowSliceCount"`
-	DiagnosticCount        int `json:"diagnosticCount"`
+	PackageCount            int `json:"packageCount"`
+	ModuleCount             int `json:"moduleCount"`
+	FileCount               int `json:"fileCount"`
+	GeneratedFileCount      int `json:"generatedFileCount"`
+	ImportCount             int `json:"importCount"`
+	DeclarationCount        int `json:"declarationCount"`
+	UsageCount              int `json:"usageCount"`
+	RuntimeUsageCount       int `json:"runtimeUsageCount"`
+	TestUsageCount          int `json:"testUsageCount"`
+	BenchmarkUsageCount     int `json:"benchmarkUsageCount"`
+	FuzzUsageCount          int `json:"fuzzUsageCount"`
+	ExampleUsageCount       int `json:"exampleUsageCount"`
+	BuildDirectiveCount     int `json:"buildDirectiveCount"`
+	NativeArtifactCount     int `json:"nativeArtifactCount"`
+	NativeBoundaryCount     int `json:"nativeBoundaryCount"`
+	BuildShapeDeltaCount    int `json:"buildShapeDeltaCount"`
+	APIEndpointCount        int `json:"apiEndpointCount"`
+	ExternalURLCount        int `json:"externalUrlCount"`
+	ServiceCount            int `json:"serviceCount"`
+	SecuritySignalCount     int `json:"securitySignalCount"`
+	GoModReplaceCount       int `json:"goModReplaceCount"`
+	GoModExcludeCount       int `json:"goModExcludeCount"`
+	VendorModuleCount       int `json:"vendorModuleCount"`
+	WorkspaceModuleCount    int `json:"workspaceModuleCount"`
+	PrivateModuleHintCount  int `json:"privateModuleHintCount"`
+	LicenseFileModuleCount  int `json:"licenseFileModuleCount"`
+	CryptoLibraryCount      int `json:"cryptoLibraryCount"`
+	CryptoAssetCount        int `json:"cryptoAssetCount"`
+	CryptoOperationCount    int `json:"cryptoOperationCount"`
+	CryptoMaterialCount     int `json:"cryptoMaterialCount"`
+	CryptoProtocolCount     int `json:"cryptoProtocolCount"`
+	CryptoFindingCount      int `json:"cryptoFindingCount"`
+	DataFlowSourceCount     int `json:"dataFlowSourceCount"`
+	DataFlowSinkCount       int `json:"dataFlowSinkCount"`
+	DataFlowSliceCount      int `json:"dataFlowSliceCount"`
+	CgoPackageCount         int `json:"cgoPackageCount"`
+	CgoDirectiveCount       int `json:"cgoDirectiveCount"`
+	CgoRiskyFlagCount       int `json:"cgoRiskyFlagCount"`
+	CgoUnloadedPackageCount int `json:"cgoUnloadedPackageCount"`
+	DiagnosticCount         int `json:"diagnosticCount"`
 }
 
 type GoModDirective struct {
@@ -748,6 +760,50 @@ type ModuleCompliance struct {
 	LicenseFiles           []string          `json:"licenseFiles,omitempty"`
 	Properties             map[string]string `json:"properties,omitempty"`
 }
+
+// CgoEvidence describes what crossed the Go/C boundary and the risk in the
+// build inputs that drive the host C toolchain. It is collected by reading
+// source textually, never by running the toolchain, so it is present whatever
+// CGO_ENABLED the load ran with.
+//
+// Everything here is a name or a count. Flag values, paths, pkg-config
+// package names that look like paths and environment values never appear,
+// because a report travels further than the analyst's terminal.
+type CgoEvidence struct {
+	Mode                 string              `json:"mode"` // "enabled" or "disabled"
+	ToolchainVersion     string              `json:"toolchainVersion,omitempty"`
+	ToolchainPatched     bool                `json:"toolchainPatched"`
+	EnvOverrideNames     []string            `json:"envOverrideNames,omitempty"`
+	PackageCount         int                 `json:"packageCount"`
+	FileCount            int                 `json:"fileCount"`
+	DirectiveCount       int                 `json:"directiveCount"`
+	RiskyFlagCount       int                 `json:"riskyFlagCount"`
+	RiskyFlags           []string            `json:"riskyFlags,omitempty"`
+	RiskCategories       []string            `json:"riskCategories,omitempty"`
+	PkgConfigCount       int                 `json:"pkgConfigCount"`
+	SysoCount            int                 `json:"sysoCount"`
+	SysoInvalidCount     int                 `json:"sysoInvalidCount"`
+	UnloadedPackageCount int                 `json:"unloadedPackageCount"`
+	Packages             []CgoPackageSummary `json:"packages,omitempty"`
+}
+
+// CgoPackageSummary is the cgo evidence of one package. ModulePath names the
+// module that owns the package so a consumer can attach findings to the right
+// component, including for packages that were only read textually because cgo
+// was off and the loader never returned them.
+type CgoPackageSummary struct {
+	PackagePath      string   `json:"packagePath"`
+	ModulePath       string   `json:"modulePath,omitempty"`
+	Loaded           bool     `json:"loaded"`
+	FileCount        int      `json:"fileCount"`
+	DirectiveCount   int      `json:"directiveCount"`
+	RiskyFlags       []string `json:"riskyFlags,omitempty"`
+	RiskCategories   []string `json:"riskCategories,omitempty"`
+	PkgConfigCount   int      `json:"pkgConfigCount,omitempty"`
+	SysoCount        int      `json:"sysoCount,omitempty"`
+	SysoInvalidCount int      `json:"sysoInvalidCount,omitempty"`
+}
+
 type SupplyChainEvidence struct {
 	GoDirectiveVersion     string             `json:"goDirectiveVersion,omitempty"`
 	ToolchainDirective     string             `json:"toolchainDirective,omitempty"`
@@ -783,6 +839,7 @@ type Report struct {
 	Crypto           *CryptoEvidence      `json:"crypto,omitempty"`
 	DataFlow         *DataFlowEvidence    `json:"dataFlow,omitempty"`
 	SupplyChain      *SupplyChainEvidence `json:"supplyChain,omitempty"`
+	Cgo              *CgoEvidence         `json:"cgo,omitempty"`
 	CallGraph        *CallGraph           `json:"callGraph,omitempty"`
 	Diagnostics      []Diagnostic         `json:"diagnostics,omitempty"`
 	Stats            Stats                `json:"stats"`

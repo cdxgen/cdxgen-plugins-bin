@@ -49,6 +49,12 @@ type Options struct {
 	// such as GOFLAGS would turn an analysis option into command execution in
 	// the toolchain. See THREAT_MODEL.md.
 	Env              []string
+	// cgoEnabled, when non-empty, is the CGO_ENABLED every load runs with.
+	// It exists for this package's parallel tests, which cannot touch the
+	// process environment; every consumer outside the package leaves it empty
+	// and the process environment decides (unset means CGO_ENABLED=0, an
+	// explicit value passes through). See effectiveLoadEnv.
+	cgoEnabled       string
 	MaxProcs         int
 	MemoryLimit      int64
 	Progress         bool
@@ -70,6 +76,19 @@ type Analyzer struct {
 	// and standardByPath the standard-library classification of every loaded
 	// package. See isStandardPackage.
 	goroot string
+	// gocache and modcache locate the build cache and module cache of the go
+	// command the packages were loaded with, from the same `go env` probe that
+	// answered the target. Evidence whose file lies outside the analysed
+	// module and the module cache (typically cgo-generated files in the build
+	// cache) is not reportable: it is derived output the analyst cannot open,
+	// and its absolute path would leak the analyst's home directory into the
+	// report. See reportableSource.
+	gocache  string
+	modcache string
+	// cgoArtifacts carries the classified .syso records of this run, keyed by
+	// path, so the artifact list can annotate the entries it would have
+	// produced anyway instead of emitting each file twice.
+	cgoArtifacts map[string]model.NativeArtifact
 	// rawCallGraphs caches buildRawCallGraph results by requested mode. The
 	// report call graph and the taint engines each ask for a graph from the
 	// same program, and a static build is not cheap on a large one; the
