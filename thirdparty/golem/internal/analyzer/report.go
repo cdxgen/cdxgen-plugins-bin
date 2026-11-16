@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go/build"
 	"go/token"
+	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -54,7 +55,18 @@ func Analyze(options Options) (*model.Report, error) {
 	progress.Logf("analysis starting dir=%s patterns=%s maxProcs=%d workers=%d memoryLimit=%s", options.Dir, strings.Join(options.Patterns, ","), runtime.GOMAXPROCS(0), dataFlowWorkerCount(options, 0), formatBytes(options.MemoryLimit))
 
 	fset := token.NewFileSet()
-	loadEnv, err := effectiveLoadEnv(options.Env)
+	// The cgo decision the load runs with. An analyst who exported
+	// CGO_ENABLED chose to let the analysed tree drive the host C compiler;
+	// without that explicit choice the load pins CGO_ENABLED=0, because a
+	// #cgo directive, .syso file or pkg-config line in any package of the
+	// module graph can otherwise run the compiler with flags that package
+	// chose (CVE-2026-97033 through CVE-2026-97043, fixed in go1.26.11 and
+	// go1.27.4).
+	cgoPinned := options.cgoEnabled
+	if cgoPinned == "" {
+		cgoPinned = cgoEnabledFor(os.Environ())
+	}
+	loadEnv, err := effectiveLoadEnv(options.Env, cgoPinned)
 	if err != nil {
 		return nil, err
 	}
@@ -82,8 +94,9 @@ func Analyze(options Options) (*model.Report, error) {
 		Dir:   absDir,
 		Fset:  fset,
 		Tests: options.Tests,
-		// nil when no override is set, which loads under the process
-		// environment — the default every existing consumer relies on.
+		// nil when no override is set and the process environment already
+		// states the cgo choice, which loads under the process environment —
+		// the default every existing consumer relies on.
 		Env: loadEnv,
 	}
 	if len(options.BuildTags) > 0 {
@@ -100,9 +113,33 @@ func Analyze(options Options) (*model.Report, error) {
 		moduleByPath:   map[string]*model.Module{},
 		rootModules:    map[string]*model.Module{},
 		goroot:         loadGOROOT(target),
+		gocache:        gocacheDir(target),
+		modcache:       strings.TrimSpace(target.GOMODCACHE),
 		standardByPath: map[string]bool{},
 	}
 	a.indexPackages(pkgs)
+	// The cgo view of the analysis: the mode and toolchain the load ran with,
+	// the environment overrides that widen the toolchain's flag checks, and
+	// every file that imports "C" read textually, so the Go/C boundary stays
+	// in the report whatever CGO_ENABLED was.
+	cgoMode := cgoModeOf(cgoPinned == "0", target)
+	toolchainVersion := strings.TrimSpace(target.GOVERSION)
+	toolchainPatched := toolchainCarriesCgoFixes(toolchainVersion)
+	envForOverrides := loadEnv
+	if envForOverrides == nil {
+		envForOverrides = os.Environ()
+	}
+	if cgoMode == "enabled" && !toolchainPatched {
+		warnUnpatchedCgoToolchain(options, toolchainVersion)
+	}
+	collected := a.collectCgoEvidence(pkgs, absDir)
+	cgoReport, cgoAttach := a.assembleCgoReport(collected, cgoMode, toolchainVersion, toolchainPatched, cgoEnvOverrideNames(envForOverrides))
+	a.cgoArtifacts = map[string]model.NativeArtifact{}
+	for _, artifacts := range cgoAttach.artifactsByPackage {
+		for _, artifact := range artifacts {
+			a.cgoArtifacts[artifact.Path] = artifact
+		}
+	}
 
 	report := &model.Report{
 		SchemaVersion: SchemaVersion,
@@ -150,12 +187,20 @@ func Analyze(options Options) (*model.Report, error) {
 			IncludeSSA:                      options.IncludeSSA,
 			IncludeSources:                  options.IncludeSources,
 		},
+		Cgo: cgoReport,
 	}
 	if loadErr != nil {
 		report.Diagnostics = append(report.Diagnostics, model.Diagnostic{Kind: "load", Message: loadErr.Error()})
 	}
 	for _, pkg := range pkgs {
 		pe := a.packageEvidence(pkg)
+		// The directives and signals read textually from files that import
+		// "C" join the package the loader returned; the loader's own pass
+		// never saw those files when cgo was off.
+		pe.BuildDirectives = append(pe.BuildDirectives, cgoAttach.directivesByPackage[pkg.PkgPath]...)
+		pe.SecuritySignals = append(pe.SecuritySignals, cgoAttach.signalsByPackage[pkg.PkgPath]...)
+		delete(cgoAttach.directivesByPackage, pkg.PkgPath)
+		delete(cgoAttach.signalsByPackage, pkg.PkgPath)
 		ef := a.endpointFactsForPackage(pkg)
 		report.Packages = append(report.Packages, pe)
 		report.Imports = append(report.Imports, pe.Imports...)
@@ -169,6 +214,39 @@ func Analyze(options Options) (*model.Report, error) {
 		report.Crypto = mergeCryptoEvidence(report.Crypto, pe.Crypto)
 		report.Diagnostics = append(report.Diagnostics, pe.Diagnostics...)
 		report.Files = append(report.Files, a.fileEvidence(pkg, pe)...)
+	}
+	// Packages seen only textually (cgo off, or a load the toolchain refused)
+	// still report their directives, signals and native artifacts, attached to
+	// file evidence rather than to a package entry the loader never produced.
+	for pkgPath, directives := range cgoAttach.directivesByPackage {
+		if len(directives) == 0 && len(cgoAttach.signalsByPackage[pkgPath]) == 0 {
+			continue
+		}
+		report.BuildDirectives = append(report.BuildDirectives, directives...)
+		report.SecuritySignals = append(report.SecuritySignals, cgoAttach.signalsByPackage[pkgPath]...)
+		byFile := map[string]*model.FileEvidence{}
+		for _, directive := range directives {
+			file := ensureTextualFile(byFile, directive.Range.Start.Filename, pkgPath)
+			file.BuildDirectives = append(file.BuildDirectives, directive)
+		}
+		for _, signal := range cgoAttach.signalsByPackage[pkgPath] {
+			file := ensureTextualFile(byFile, signal.Range.Start.Filename, pkgPath)
+			file.SecuritySignals = append(file.SecuritySignals, signal)
+		}
+		for _, file := range byFile {
+			report.Files = append(report.Files, *file)
+		}
+	}
+	for pkgPath, artifacts := range cgoAttach.artifactsByPackage {
+		for _, artifact := range artifacts {
+			if a.packageByPath[pkgPath] != nil {
+				// The package's own artifact scan already listed the file;
+				// only its classification is new.
+				continue
+			}
+			artifact.PackageID = pkgPath
+			report.NativeArtifacts = append(report.NativeArtifacts, artifact)
+		}
 	}
 	report.APIEndpoints = dedupeEndpoints(report.APIEndpoints)
 	report.ExternalURLs = dedupeExternalURLs(report.ExternalURLs)
@@ -290,6 +368,12 @@ func (a *Analyzer) populateStats(report *model.Report) {
 				report.Stats.LicenseFileModuleCount++
 			}
 		}
+	}
+	if report.Cgo != nil {
+		report.Stats.CgoPackageCount = report.Cgo.PackageCount
+		report.Stats.CgoDirectiveCount = report.Cgo.DirectiveCount
+		report.Stats.CgoRiskyFlagCount = report.Cgo.RiskyFlagCount
+		report.Stats.CgoUnloadedPackageCount = report.Cgo.UnloadedPackageCount
 	}
 	report.Stats.DiagnosticCount = len(report.Diagnostics)
 	if report.CallGraph != nil {

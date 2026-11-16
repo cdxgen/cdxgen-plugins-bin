@@ -26,12 +26,15 @@ func analyzeCorpusCase(t *testing.T, dir, mode string) *model.Report {
 	t.Helper()
 	// The case's golem:env build shape (GOEXPERIMENT, target GOARCH) travels
 	// in the load configuration: cases run in parallel in this process, so
-	// the process environment is not available to them.
+	// the process environment is not available to them. A case whose files
+	// import "C" states nothing in its annotations (a golem:env key for it
+	// would let an analysed repository turn cgo on), so the driver asks for
+	// cgo itself through the option that exists for these parallel tests.
 	env, err := corpus.ParseEnvSettings(dir)
 	if err != nil {
 		t.Fatalf("parsing golem:env directives: %v", err)
 	}
-	report, err := Analyze(Options{
+	options := Options{
 		Dir:                   dir,
 		IncludeLocal:          true,
 		CallGraphMode:         "rta",
@@ -40,7 +43,11 @@ func analyzeCorpusCase(t *testing.T, dir, mode string) *model.Report {
 		DataFlowMax:           200,
 		Env:                   env,
 		ToolVersion:           "test",
-	})
+	}
+	if caseImportsC(dir) {
+		options.cgoEnabled = "1"
+	}
+	report, err := Analyze(options)
 	if err != nil {
 		t.Fatalf("analyze %s in mode %s: %v", dir, mode, err)
 	}

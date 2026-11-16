@@ -233,7 +233,7 @@ jobs:
         package-manager-cache: false
     - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
       with:
-        go-version: '^1.27.0'
+        go-version: '^1.27.4'
         cache: false
     - name: Set up QEMU
       uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1  # v4.4.0

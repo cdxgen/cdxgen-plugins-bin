@@ -107,6 +107,26 @@ The AST and types pass classifies crypto imports into families, resolves selecto
 
 This is a finding aid for CBOM work. It is strong on direct use of known Go crypto APIs and weak primitives, and intentionally weak on custom wrappers, reflection-heavy code, and questions about key lifetime.
 
+## cgo evidence
+
+Golem loads packages with `CGO_ENABLED=0` unless the environment states a
+choice, because compiling a cgo preamble would run the host C compiler with
+flags the analysed packages choose through `#cgo` directives, `.syso` files and
+pkg-config lines. Export `CGO_ENABLED=1` for the compiled view; golem warns on
+stderr when that runs on a toolchain older than go1.26.11 or go1.27.4.
+
+Either way, files that import "C" are read textually, and the report's `cgo`
+object states the mode, the toolchain and its patch state, the names of any
+`CGO_*_ALLOW` / `CGO_*FLAGS` variables in the load environment, and per-package
+summaries with the owning module path, flag names and risk categories. A
+`refused-by-go1.27.4` category means the patched toolchains refuse that input
+outright; `path-escape` and `module-path` name where a path argument points;
+`cgo-directive-in-source` marks `//go:cgo_*` directives in hand-written source;
+`invalid-object` marks a `.syso` that is not an object or archive. Values,
+paths and environment contents are never reported, only names and categories.
+Note that `CGO_CFLAGS_ALLOW` and its siblings re-open refused flags for every
+package in the build, and flags set in `CGO_CFLAGS` itself are never checked.
+
 ## Output formats
 
 `json` is the full report. `graphml` and `gexf` export the call graph and require a call graph mode. Data-flow sidecars are written with `--dataflow-graph-out` in graphml or gexf.

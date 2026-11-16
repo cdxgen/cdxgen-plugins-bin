@@ -243,7 +243,9 @@ Go 1.27 ships the `simd` and `simd/archsimd` packages behind `GOEXPERIMENT=simd`
 Crypto evidence classifies API use and obvious material indicators. It does not validate protocol handshakes, key sizes derived at runtime, entropy quality beyond recognized APIs, certificate validation logic beyond simple patterns, or whether a weak primitive is acceptable for a non-security checksum.
 
 
-Package loading follows the local Go environment. Missing modules, unsupported build tags, cgo settings, platform differences, or incomplete workspaces can change what Golem sees. Always inspect diagnostics before treating absence of evidence as meaningful.
+Package loading follows the local Go environment. Missing modules, unsupported build tags, platform differences, or incomplete workspaces can change what Golem sees. Always inspect diagnostics before treating absence of evidence as meaningful.
+
+Loading runs with `CGO_ENABLED=0` unless the environment states a choice, because compiling a cgo preamble would run the host C compiler with flags the analysed packages choose (see THREAT_MODEL.md). Export `CGO_ENABLED=1` to load cgo packages through the toolchain as before; the `cgo` object in the report then names the toolchain and whether it carries the go1.26.11/go1.27.4 cgo flag fixes, and packages that import "C" appear with their `#cgo` variables, flag names and risk categories in every mode, collected by reading the source rather than compiling it.
 
 ## Threat Model
 

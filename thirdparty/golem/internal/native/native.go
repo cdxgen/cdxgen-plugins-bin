@@ -287,6 +287,41 @@ type cgoPreamble struct {
 	headers    []string
 }
 
+// CgoDirective is one parsed `#cgo [constraints] VAR: values...` line. It is
+// the single reader for that grammar: the native boundary, the build-directive
+// evidence and the cgo risk classifier all consume it, so one package's
+// preamble cannot be read three different ways.
+type CgoDirective struct {
+	Constraint string   // build constraint expression before the variable, "" when none
+	Variable   string   // CFLAGS, CPPFLAGS, CXXFLAGS, FFLAGS, LDFLAGS or pkg-config
+	Values     []string // value tokens, split with cgo's quoting rules
+}
+
+// ParseCgoDirective reads one comment line of a cgo preamble that starts with
+// `#cgo`. The value tokens are split the way the go command splits them, on
+// spaces with Go's quoting rules, so a quoted flag that contains a space
+// survives as one token. Lines that name no variable (build constraints only)
+// report ok as false.
+func ParseCgoDirective(text string) (CgoDirective, bool) {
+	rest, found := strings.CutPrefix(text, "#cgo")
+	if !found {
+		return CgoDirective{}, false
+	}
+	fields := strings.Fields(rest)
+	var out CgoDirective
+	for i, field := range fields {
+		name, ok := strings.CutSuffix(field, ":")
+		if !ok {
+			continue
+		}
+		out.Variable = name
+		out.Values = SplitCgoFields(strings.Join(fields[i+1:], " "))
+		out.Constraint = strings.Join(fields[:i], " ")
+		return out, true
+	}
+	return CgoDirective{}, false
+}
+
 // headerFor picks the header a C symbol most plausibly came from. With one
 // include there is no ambiguity; with several there is, so say nothing rather
 // than guess, since a wrong attribution is worse than a missing one.
@@ -323,14 +358,11 @@ func (p *cgoPreamble) absorb(text string) {
 	switch {
 	case strings.HasPrefix(text, "#cgo"):
 		p.directives = append(p.directives, text)
-		// The form is `#cgo [constraints] VAR: values...`, so the variable is
-		// the field ending in a colon and everything after it is its value.
-		fields := strings.Fields(strings.TrimPrefix(text, "#cgo"))
-		for i, field := range fields {
-			if field == "LDFLAGS:" {
-				p.libraries = append(p.libraries, fields[i+1:]...)
-				break
-			}
+		// The same grammar ParseCgoDirective reads; keeping one parser means
+		// the boundary record and the directive evidence cannot disagree
+		// about where LDFLAGS ends and its values begin.
+		if directive, ok := ParseCgoDirective(text); ok && directive.Variable == "LDFLAGS" {
+			p.libraries = append(p.libraries, directive.Values...)
 		}
 	case strings.HasPrefix(text, "#include"):
 		include := strings.TrimSpace(strings.TrimPrefix(text, "#include"))
