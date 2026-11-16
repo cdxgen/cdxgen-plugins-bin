@@ -1,0 +1,23 @@
+thirdparty/golem/internal/analyzer/cgo.go
+  s_0e34e16b6c9ad2::t_0b8ba15ee1c42d 79,93-95,139-148,531-546
+thirdparty/golem/internal/analyzer/cgo_test.go
+  s_0e34e16b6c9ad2::t_62e32622bcf178 424-492
+thirdparty/golem/internal/analyzer/multimodule.go
+  s_0e34e16b6c9ad2::t_5e259243a00166 226-228,230,233-234,249
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "19ba3a6e70375e2969c1c25e10ee0ba3fd5a5273",
+  "prompts": {},
+  "sessions": {
+    "s_0e34e16b6c9ad2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4e2522b4-2584-4dbf-98b0-7a09eb05d6d7",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
