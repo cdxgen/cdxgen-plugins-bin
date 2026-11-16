@@ -4,9 +4,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/token"
-	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -91,8 +89,11 @@ func (a *Analyzer) buildDirectivesForFile(file *ast.File) []model.BuildDirective
 					directives = append(directives, model.BuildDirective{Kind: "go-linkname", Text: strings.TrimSpace(strings.TrimPrefix(text, "go:linkname")), Range: a.commentRange(comment), Properties: map[string]string{"risk": "links to unexported or external symbol"}})
 				} else if strings.HasPrefix(text, "go:nosplit") {
 					directives = append(directives, model.BuildDirective{Kind: "go-nosplit", Range: a.commentRange(comment), Properties: map[string]string{"risk": "stack growth checks disabled for function"}})
-				} else if strings.HasPrefix(text, "#cgo") {
-					directives = append(directives, cgoDirective(text, a.commentRange(comment)))
+				} else if strings.HasPrefix(text, "go:cgo_") {
+					// The textual cgo read classifies these (kind "go-cgo");
+					// what the loader parsed of a cgo package is generated
+					// cache files, whose copies of the directives are not
+					// evidence about hand-written source.
 				}
 			}
 		}
@@ -385,54 +386,10 @@ func headerFamilyUnion(expr ast.Expr) string {
 	return ""
 }
 
-func nativeArtifactsForPackage(pkg *packages.Package) []model.NativeArtifact {
-	dirs := map[string]bool{}
-	for _, file := range append(append([]string{}, pkg.GoFiles...), pkg.CompiledGoFiles...) {
-		if file != "" {
-			dirs[filepath.Dir(file)] = true
-		}
-	}
-	var artifacts []model.NativeArtifact
-	seen := map[string]bool{}
-	for dir := range dirs {
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			continue
-		}
-		for _, entry := range entries {
-			if entry.IsDir() {
-				continue
-			}
-			path := filepath.Join(dir, entry.Name())
-			ext := filepath.Ext(entry.Name())
-			kind, ok := nativeExtensions[ext]
-			if !ok || seen[path] {
-				continue
-			}
-			seen[path] = true
-			artifacts = append(artifacts, model.NativeArtifact{Path: path, Kind: kind, Extension: ext, PackageID: pkg.ID})
-		}
-	}
-	sort.Slice(artifacts, func(i, j int) bool { return artifacts[i].Path < artifacts[j].Path })
-	return artifacts
-}
-
 func (a *Analyzer) commentRange(comment *ast.Comment) model.Range {
 	start := a.position(comment.Pos())
 	end := a.position(comment.End())
 	return model.Range{Start: start, End: end}
-}
-
-func cgoDirective(text string, r model.Range) model.BuildDirective {
-	fields := strings.Fields(text)
-	d := model.BuildDirective{Kind: "cgo", Text: text, Range: r, Properties: map[string]string{}}
-	for _, field := range fields[1:] {
-		if strings.Contains(field, ":") {
-			parts := strings.SplitN(field, ":", 2)
-			d.Properties[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
-		}
-	}
-	return d
 }
 
 func embedTarget(file *ast.File, pos token.Pos) string {

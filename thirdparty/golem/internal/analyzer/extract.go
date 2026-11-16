@@ -3,6 +3,8 @@ package analyzer
 import (
 	"go/ast"
 	"go/types"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -20,9 +22,9 @@ func (a *Analyzer) packageEvidence(pkg *packages.Package) model.PackageEvidence 
 		Module:          mod,
 		Standard:        a.isStandardPackage(pkg.PkgPath, mod),
 		Local:           isLocalModule(mod),
-		GoFiles:         sortedStrings(pkg.GoFiles),
-		CompiledGoFiles: sortedStrings(pkg.CompiledGoFiles),
-		OtherFiles:      sortedStrings(pkg.OtherFiles),
+		GoFiles:         a.reportableFiles(pkg.GoFiles),
+		CompiledGoFiles: a.reportableFiles(pkg.CompiledGoFiles),
+		OtherFiles:      a.reportableFiles(pkg.OtherFiles),
 	}
 	for _, err := range pkg.Errors {
 		pe.Diagnostics = append(pe.Diagnostics, model.Diagnostic{PackageID: pkg.ID, Position: positionFromPackagesError(err), Kind: "package", Message: err.Msg})
@@ -44,19 +46,142 @@ func (a *Analyzer) packageEvidence(pkg *packages.Package) model.PackageEvidence 
 		pe.SecuritySignals = append(pe.SecuritySignals, signals...)
 		pe.Crypto = mergeCryptoEvidence(pe.Crypto, crypto)
 	}
-	pe.NativeArtifacts = nativeArtifactsForPackage(pkg)
+	// Evidence the loader derived from cgo-generated cache files is dropped:
+	// its positions name build output under GOCACHE rather than source, and
+	// the absolute cache path would leak the analyst's home directory. What a
+	// cgo package actually says lives in its own files, which the textual cgo
+	// read reports.
+	pe.Imports = a.reportableImports(pe.Imports)
+	pe.Declarations = a.reportableDeclarations(pe.Declarations)
+	pe.Usages = a.reportableUsages(pe.Usages)
+	pe.BuildDirectives = a.reportableDirectives(pe.BuildDirectives)
+	pe.SecuritySignals = a.reportableSignals(pe.SecuritySignals)
+	pe.NativeArtifacts = a.nativeArtifactsForPackage(pkg)
 	return pe
+}
+
+// reportableFiles keeps the file lists a report may name. The loader lists a
+// cgo package's compiled files under the build cache; those are output, not
+// source, and the report keeps only what an analyst can open.
+func (a *Analyzer) reportableFiles(files []string) []string {
+	out := make([]string, 0, len(files))
+	for _, file := range files {
+		if a.reportableSource(file) {
+			out = append(out, file)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	sort.Strings(out)
+	return out
+}
+
+func (a *Analyzer) reportableImports(imports []model.ImportUsage) []model.ImportUsage {
+	out := imports[:0]
+	for _, imp := range imports {
+		if a.reportableSource(imp.Range.Start.Filename) {
+			out = append(out, imp)
+		}
+	}
+	return out
+}
+
+func (a *Analyzer) reportableDeclarations(declarations []model.Declaration) []model.Declaration {
+	out := declarations[:0]
+	for _, decl := range declarations {
+		if a.reportableSource(decl.Range.Start.Filename) {
+			out = append(out, decl)
+		}
+	}
+	return out
+}
+
+func (a *Analyzer) reportableUsages(usages []model.LibraryUsage) []model.LibraryUsage {
+	out := usages[:0]
+	for _, usage := range usages {
+		if a.reportableSource(usage.Range.Start.Filename) {
+			out = append(out, usage)
+		}
+	}
+	return out
+}
+
+func (a *Analyzer) reportableDirectives(directives []model.BuildDirective) []model.BuildDirective {
+	out := directives[:0]
+	for _, directive := range directives {
+		if a.reportableSource(directive.Range.Start.Filename) {
+			out = append(out, directive)
+		}
+	}
+	return out
+}
+
+func (a *Analyzer) reportableSignals(signals []model.SecuritySignal) []model.SecuritySignal {
+	out := signals[:0]
+	for _, signal := range signals {
+		if a.reportableSource(signal.Range.Start.Filename) {
+			out = append(out, signal)
+		}
+	}
+	return out
+}
+
+// nativeArtifactsForPackage lists the native files that sit next to a loaded
+// package's source. Directories the loader derived (the build cache) are not
+// scanned: their entries are cgo's temporary files, not the project's native
+// sources, and a .syso there would be counted twice.
+func (a *Analyzer) nativeArtifactsForPackage(pkg *packages.Package) []model.NativeArtifact {
+	dirs := map[string]bool{}
+	for _, file := range append(append([]string{}, pkg.GoFiles...), pkg.CompiledGoFiles...) {
+		if file != "" && a.reportableSource(file) {
+			dirs[filepath.Dir(file)] = true
+		}
+	}
+	var artifacts []model.NativeArtifact
+	seen := map[string]bool{}
+	for dir := range dirs {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			path := filepath.Join(dir, entry.Name())
+			ext := filepath.Ext(entry.Name())
+			kind, ok := nativeExtensions[ext]
+			if !ok || seen[path] {
+				continue
+			}
+			seen[path] = true
+			artifact := model.NativeArtifact{Path: path, Kind: kind, Extension: ext, PackageID: pkg.ID}
+			// A .syso the cgo pass classified carries its verdict.
+			if classified, ok := a.cgoArtifacts[path]; ok {
+				artifact.Properties = classified.Properties
+			}
+			artifacts = append(artifacts, artifact)
+		}
+	}
+	sort.Slice(artifacts, func(i, j int) bool { return artifacts[i].Path < artifacts[j].Path })
+	return artifacts
 }
 
 func (a *Analyzer) fileEvidence(pkg *packages.Package, pe model.PackageEvidence) []model.FileEvidence {
 	byFile := map[string]*model.FileEvidence{}
 	compiled := map[string]bool{}
+	// CompiledGoFiles of a cgo package are cache paths; a report names only
+	// files inside the module or the module cache, so the compiled flag rides
+	// on the reportable entries and the cache files are skipped.
 	for _, f := range pkg.CompiledGoFiles {
-		compiled[f] = true
-		byFile[f] = newFileEvidence(f, pkg, true)
+		compiled[f] = a.reportableSource(f)
+		if a.reportableSource(f) {
+			byFile[f] = newFileEvidence(f, pkg, true)
+		}
 	}
 	for _, f := range pkg.GoFiles {
-		if _, ok := byFile[f]; !ok {
+		if _, ok := byFile[f]; !ok && a.reportableSource(f) {
 			byFile[f] = newFileEvidence(f, pkg, compiled[f])
 		}
 	}

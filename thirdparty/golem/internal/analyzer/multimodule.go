@@ -139,6 +139,7 @@ func mergeReports(dst *model.Report, src *model.Report) {
 	dst.SecuritySignals = dedupeSignals(append(dst.SecuritySignals, src.SecuritySignals...))
 	dst.Crypto = mergeCryptoEvidence(dst.Crypto, src.Crypto)
 	dst.SupplyChain = mergeSupplyChainEvidence(dst.SupplyChain, src.SupplyChain)
+	dst.Cgo = mergeCgoEvidence(dst.Cgo, src.Cgo)
 	dst.Diagnostics = append(dst.Diagnostics, src.Diagnostics...)
 	if src.CallGraph != nil {
 		if dst.CallGraph == nil {
@@ -185,6 +186,82 @@ func mergeDataFlowAggregateStats(dst *model.DataFlowStats, src model.DataFlowSta
 	if src.WorkerCount > dst.WorkerCount {
 		dst.WorkerCount = src.WorkerCount
 	}
+}
+
+// mergeCgoEvidence folds one child module's cgo object into another. Mode,
+// toolchain and the environment override names come from the first child that
+// reported them (the children of one run share them); counts and per-package
+// summaries accumulate, and a package reached through two children keeps the
+// loader's attribution.
+func mergeCgoEvidence(dst, src *model.CgoEvidence) *model.CgoEvidence {
+	if src == nil {
+		return dst
+	}
+	if dst == nil {
+		copied := *src
+		copied.Packages = append([]model.CgoPackageSummary{}, src.Packages...)
+		copied.RiskyFlags = append([]string{}, src.RiskyFlags...)
+		copied.RiskCategories = append([]string{}, src.RiskCategories...)
+		copied.EnvOverrideNames = append([]string{}, src.EnvOverrideNames...)
+		return &copied
+	}
+	if dst.Mode == "" {
+		dst.Mode = src.Mode
+	}
+	if dst.ToolchainVersion == "" {
+		dst.ToolchainVersion = src.ToolchainVersion
+		dst.ToolchainPatched = src.ToolchainPatched
+	}
+	seen := map[string]bool{}
+	for _, name := range dst.EnvOverrideNames {
+		seen[name] = true
+	}
+	for _, name := range src.EnvOverrideNames {
+		if !seen[name] {
+			dst.EnvOverrideNames = append(dst.EnvOverrideNames, name)
+			seen[name] = true
+		}
+	}
+	sort.Strings(dst.EnvOverrideNames)
+	byPath := map[string]*model.CgoPackageSummary{}
+	for i := range dst.Packages {
+		byPath[dst.Packages[i].PackagePath] = &dst.Packages[i]
+	}
+	for _, summary := range src.Packages {
+		if existing := byPath[summary.PackagePath]; existing != nil {
+			existing.FileCount += summary.FileCount
+			existing.DirectiveCount += summary.DirectiveCount
+			existing.PkgConfigCount += summary.PkgConfigCount
+			existing.SysoCount += summary.SysoCount
+			existing.SysoInvalidCount += summary.SysoInvalidCount
+			existing.Loaded = existing.Loaded || summary.Loaded
+			if existing.ModulePath == "" {
+				existing.ModulePath = summary.ModulePath
+			}
+			existing.RiskyFlags = sortedUnique(append(existing.RiskyFlags, summary.RiskyFlags...))
+			existing.RiskCategories = sortedUnique(append(existing.RiskCategories, summary.RiskCategories...))
+			continue
+		}
+		dst.Packages = append(dst.Packages, summary)
+		byPath[summary.PackagePath] = &dst.Packages[len(dst.Packages)-1]
+	}
+	sort.Slice(dst.Packages, func(i, j int) bool { return dst.Packages[i].PackagePath < dst.Packages[j].PackagePath })
+	dst.PackageCount = len(dst.Packages)
+	dst.FileCount += src.FileCount
+	dst.DirectiveCount += src.DirectiveCount
+	dst.PkgConfigCount += src.PkgConfigCount
+	dst.SysoCount += src.SysoCount
+	dst.SysoInvalidCount += src.SysoInvalidCount
+	dst.UnloadedPackageCount = 0
+	for _, summary := range dst.Packages {
+		if !summary.Loaded {
+			dst.UnloadedPackageCount++
+		}
+	}
+	dst.RiskyFlags = sortedUnique(append(dst.RiskyFlags, src.RiskyFlags...))
+	dst.RiskCategories = sortedUnique(append(dst.RiskCategories, src.RiskCategories...))
+	dst.RiskyFlagCount = len(dst.RiskyFlags)
+	return dst
 }
 
 func mergeSupplyChainEvidence(dst *model.SupplyChainEvidence, src *model.SupplyChainEvidence) *model.SupplyChainEvidence {
