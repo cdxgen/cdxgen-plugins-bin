@@ -223,12 +223,15 @@ func mergeCgoEvidence(dst, src *model.CgoEvidence) *model.CgoEvidence {
 		}
 	}
 	sort.Strings(dst.EnvOverrideNames)
-	byPath := map[string]*model.CgoPackageSummary{}
+	// Indexes rather than pointers: appending to dst.Packages can move its
+	// backing array, and a pointer taken before that would update a copy.
+	byPath := map[string]int{}
 	for i := range dst.Packages {
-		byPath[dst.Packages[i].PackagePath] = &dst.Packages[i]
+		byPath[dst.Packages[i].PackagePath] = i
 	}
 	for _, summary := range src.Packages {
-		if existing := byPath[summary.PackagePath]; existing != nil {
+		if index, ok := byPath[summary.PackagePath]; ok {
+			existing := &dst.Packages[index]
 			existing.FileCount += summary.FileCount
 			existing.DirectiveCount += summary.DirectiveCount
 			existing.PkgConfigCount += summary.PkgConfigCount
@@ -243,7 +246,7 @@ func mergeCgoEvidence(dst, src *model.CgoEvidence) *model.CgoEvidence {
 			continue
 		}
 		dst.Packages = append(dst.Packages, summary)
-		byPath[summary.PackagePath] = &dst.Packages[len(dst.Packages)-1]
+		byPath[summary.PackagePath] = len(dst.Packages) - 1
 	}
 	sort.Slice(dst.Packages, func(i, j int) bool { return dst.Packages[i].PackagePath < dst.Packages[j].PackagePath })
 	dst.PackageCount = len(dst.Packages)

@@ -76,6 +76,7 @@ func (a *Analyzer) collectCgoEvidence(pkgs []*packages.Package, moduleRoot strin
 	}
 	known := map[string]bool{}
 	seenPkg := map[string]bool{}
+	loadedModuleDirs := map[string]bool{}
 	packages.Visit(pkgs, nil, func(pkg *packages.Package) {
 		if pkg == nil || seenPkg[pkg.ID] {
 			return
@@ -89,6 +90,9 @@ func (a *Analyzer) collectCgoEvidence(pkgs []*packages.Package, moduleRoot strin
 		modulePath := ""
 		if pkg.Module != nil {
 			modulePath = pkg.Module.Path
+			if pkg.Module.Dir != "" {
+				loadedModuleDirs[filepath.Clean(pkg.Module.Dir)] = true
+			}
 		}
 		// Every source file of every loaded package is offered to the textual
 		// reader: a package whose cgo step failed (a patched toolchain
@@ -131,6 +135,16 @@ func (a *Analyzer) collectCgoEvidence(pkgs []*packages.Package, moduleRoot strin
 				switch name := entry.Name(); {
 				case name == ".git", name == "testdata", strings.HasPrefix(name, "."), strings.HasPrefix(name, "_"):
 					return filepath.SkipDir
+				}
+				// A nested module is outside the load's ./... unless a
+				// workspace brought it in. Its own run (multi-module
+				// recursion, or a scan of that directory) reports it, so
+				// reading it here would count its packages twice and call
+				// them unloaded.
+				if !loadedModuleDirs[filepath.Clean(path)] && !underVendor(moduleRoot, path) {
+					if _, err := os.Lstat(filepath.Join(path, "go.mod")); err == nil {
+						return filepath.SkipDir
+					}
 				}
 			}
 			return nil
@@ -514,6 +528,22 @@ func onlyInformational(categories []string) bool {
 
 // underPath reports whether path names something inside root, both absolute
 // and cleaned by the caller.
+// underVendor reports whether path lies in a vendor directory of the module
+// rooted at moduleRoot. Vendored dependencies are part of the build, so a
+// go.mod copied into one does not make it a separate module.
+func underVendor(moduleRoot, path string) bool {
+	rel, err := filepath.Rel(moduleRoot, path)
+	if err != nil {
+		return false
+	}
+	for _, part := range strings.Split(filepath.ToSlash(rel), "/") {
+		if part == "vendor" {
+			return true
+		}
+	}
+	return false
+}
+
 func underPath(path, root string) bool {
 	return path == root || strings.HasPrefix(path, root+string(filepath.Separator))
 }

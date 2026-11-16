@@ -421,3 +421,72 @@ func goEnv(key string) (string, error) {
 	}
 	return strings.TrimSpace(string(out)), nil
 }
+
+// Merging several child reports must keep every per-package update, including
+// ones that arrive after earlier appends have moved the packages slice.
+func TestMergeCgoEvidenceKeepsEveryPackageUpdate(t *testing.T) {
+	dst := &model.CgoEvidence{Packages: []model.CgoPackageSummary{{PackagePath: "example.com/a", FileCount: 1}}}
+	first := &model.CgoEvidence{Packages: []model.CgoPackageSummary{
+		{PackagePath: "example.com/b", FileCount: 1},
+		{PackagePath: "example.com/c", FileCount: 1},
+		{PackagePath: "example.com/d", FileCount: 1},
+	}}
+	// A new package first, so the append can move the slice before the
+	// updates to packages already present.
+	second := &model.CgoEvidence{Packages: []model.CgoPackageSummary{
+		{PackagePath: "example.com/e", FileCount: 1},
+		{PackagePath: "example.com/a", FileCount: 2},
+		{PackagePath: "example.com/d", FileCount: 3, RiskyFlags: []string{"--sysroot"}},
+	}}
+	merged := mergeCgoEvidence(mergeCgoEvidence(dst, first), second)
+	counts := map[string]int{}
+	for _, summary := range merged.Packages {
+		counts[summary.PackagePath] = summary.FileCount
+		if summary.PackagePath == "example.com/d" && strings.Join(summary.RiskyFlags, ",") != "--sysroot" {
+			t.Errorf("example.com/d lost its risky flags: %v", summary.RiskyFlags)
+		}
+	}
+	want := map[string]int{"example.com/a": 3, "example.com/b": 1, "example.com/c": 1, "example.com/d": 4, "example.com/e": 1}
+	for path, count := range want {
+		if counts[path] != count {
+			t.Errorf("%s file count = %d, want %d (all counts %v)", path, counts[path], count, counts)
+		}
+	}
+}
+
+// A nested module that the load did not include is left to its own run: the
+// walk neither reads it nor reports its packages as unloaded.
+func TestCgoWalkSkipsNestedModules(t *testing.T) {
+	root := t.TempDir()
+	write := func(rel, content string) {
+		path := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("go.mod", "module example.com/outer\n\ngo 1.26\n")
+	write("main.go", "package main\n\nfunc main() {}\n")
+	write("inner/go.mod", "module example.com/inner\n\ngo 1.26\n")
+	write("inner/c.go", "package inner\n\n// #cgo CFLAGS: --sysroot=/tmp\nimport \"C\"\n")
+	write("vendor/example.com/dep/go.mod", "module example.com/dep\n\ngo 1.26\n")
+	write("vendor/example.com/dep/c.go", "package dep\n\n// #cgo LDFLAGS: -lm\nimport \"C\"\n")
+	a := &Analyzer{options: Options{Dir: root}}
+	collected := a.collectCgoEvidence(nil, root)
+	for path := range collected.files {
+		if strings.Contains(filepath.ToSlash(path), "/inner/") {
+			t.Errorf("the walk read %s from a nested module the load did not include", path)
+		}
+	}
+	vendored := false
+	for path := range collected.files {
+		if strings.Contains(filepath.ToSlash(path), "/vendor/") {
+			vendored = true
+		}
+	}
+	if !vendored {
+		t.Error("a vendored dependency's cgo file was skipped; vendored code is part of the build even when a go.mod was copied into it")
+	}
+}
