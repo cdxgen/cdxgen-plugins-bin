@@ -45,9 +45,9 @@ The `compiler` backend is different.
 
 It ultimately runs:
 
-- `cargo check --all-targets`
+- `cargo check` (`--all-targets` when `--tests` is passed)
 - with a custom `RUSTC_WRAPPER`
-- against a nightly toolchain with `rustc-dev`/`rust-src`
+- against the selected toolchain with `rustc-dev`/`rust-src`; the repository pins a stable channel and sets `RUSTC_BOOTSTRAP=1` to build the wrapper, while `--toolchain auto` prefers an installed nightly
 
 That means the compiler backend inherits the execution model of Cargo and `rustc`, including repository-controlled behavior such as:
 
@@ -161,7 +161,7 @@ The stable backend depends on Cargo metadata resolution and local manifests.
 The compiler backend additionally depends on:
 
 - the selected toolchain
-- nightly `rustc_private` components
+- the `rustc-dev`/`rust-src` components that provide `rustc_private`
 - the embedded wrapper build
 - dependency graph build behavior
 
@@ -188,7 +188,7 @@ In practice:
 
 - `edition = "2024"` enables the Rust 2024 language edition for this codebase
 - the actual compiler version comes from the installed Rust toolchain (`rustc`, `cargo`, or `rustup`-selected toolchain)
-- compiler-backed analysis is additionally governed by `--toolchain` and the locally installed nightly toolchain/components required for `rustc_private`
+- compiler-backed analysis is additionally governed by `--toolchain` and the locally installed toolchain components required for `rustc_private` (`rustc-dev` and `rust-src`; the pinned channel is stable, and `--toolchain auto` prefers an installed nightly)
 
 So using the "latest Rust" generally means updating the toolchain in the environment or in `rust-toolchain.toml`, not changing `edition = "2024"`.
 
@@ -228,7 +228,7 @@ Use compiler mode only when you want type-resolved and MIR-informed evidence and
 cargo run -p rusi-cli -- analyze \
   --dir /path/to/repo \
   --backend compiler \
-  --toolchain nightly \
+  --toolchain auto \
   --callgraph static \
   --dataflow security \
   --out rusi-compiler.json

@@ -1056,7 +1056,7 @@ object Connectivity {
         return current == slice.sinkId
     }
 
-    /** Full invariant set asserted by `kosi golden` on every slice. */
+    /** Full invariant set asserted by `kosi bench` on every slice. */
     fun invariantsHold(
         slice: io.cdxgen.kosi.schema.FlowSlice,
         edgesById: Map<String, io.cdxgen.kosi.schema.FlowEdge>,

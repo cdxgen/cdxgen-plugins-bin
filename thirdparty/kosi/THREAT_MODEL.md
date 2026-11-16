@@ -85,7 +85,7 @@ Same discipline as rusi's, applied to a Kotlin front end.
 - Send any data anywhere (no telemetry, no network in default tiers).
 - Copy source file contents into reports.
 - Report findings without positions, or slices without connected witness
-  paths (`kosi golden` asserts `sourceId ∈ nodeIds`, `sinkId ∈ nodeIds`,
+  paths (`kosi bench` asserts `sourceId ∈ nodeIds`, `sinkId ∈ nodeIds`,
   connected `edgeIds` on every slice).
 
 ## Known limits (stated, not hidden)
@@ -118,6 +118,6 @@ Same discipline as rusi's, applied to a Kotlin front end.
 - The Analysis API standalone session cannot be constructed from the
   allowlisted artifacts alone (unrelocated IntelliJ platform classes are
   missing; KSP2 fat-jars thousands of them). `kosi version` reports this as
-  `analysis-api-standalone: unavailable: ...` — a `resolve-capability`
-  diagnostic, not a pretend capability. Closing it is a deliberate, recorded
+  `analysis-api-standalone: unavailable: ...` in the `kosi version`
+  output, not a pretend capability and not a silent drop. Closing it is a deliberate, recorded
   decision.
