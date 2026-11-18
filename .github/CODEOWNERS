@@ -1,0 +1,4 @@
+# The lockfile records every GitHub Actions dependency the workflows use,
+# so changes to it need the same review as the workflows themselves.
+# See https://docs.github.com/en/actions/concepts/security/workflow-dependency-lockfiles
+/.github/workflows/actions.lock @prabhu
