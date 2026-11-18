@@ -1,0 +1,27 @@
+.github/workflows/project-sync.yml
+  s_80859a04583160::t_464dc9f6ed2bb8 33,35
+renovate.json
+  s_80859a04583160::t_9c88f9fe3130c6 1-4
+.github/workflows/verify-actions-lock.yml
+  s_80859a04583160::t_4f1de33bfbcdda 1-27
+.github/CODEOWNERS
+  s_80859a04583160::t_74b232d3f01611 1-4
+.github/workflows/actions.lock
+  s_80859a04583160::t_0d62a853d88eaf 1-138
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "69f488553ecd7c7d4ecde935e9ea6afaf219a5a3",
+  "prompts": {},
+  "sessions": {
+    "s_80859a04583160": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_dwf-dwfrun-762b1b17-74d9-4cb7-8589-feaadd54f154-actor_7_2",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
