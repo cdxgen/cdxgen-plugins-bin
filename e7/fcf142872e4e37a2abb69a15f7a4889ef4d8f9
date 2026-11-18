@@ -1,0 +1,75 @@
+thirdparty/golem/testdata/cgo-risk/target/main.go
+  s_5ae344e6b6bab9::t_2bd9307a02e008 1-8
+thirdparty/golem/testdata/cgo-risk/gcc-gnat/main.go
+  s_5ae344e6b6bab9::t_2bd9307a02e008 1-8
+thirdparty/golem/internal/analyzer/corpus_test.go
+  s_5ae344e6b6bab9::t_ce42bbec6d0f0f 29-32,37,46-50
+thirdparty/golem/testdata/cgo-directive-source/main.go
+  s_5ae344e6b6bab9::t_2bd9307a02e008 1-17
+thirdparty/golem/internal/analyzer/options.go
+  s_5ae344e6b6bab9::t_7777bdb1d544ee 51
+thirdparty/golem/internal/analyzer/analyzer_test.go
+  s_5ae344e6b6bab9::t_c2d803dd1490f2 372,537,851,934,958
+thirdparty/golem/testdata/cgo-syso/invalid/go.mod
+  s_5ae344e6b6bab9::t_2bd9307a02e008 1-3
+thirdparty/golem/testdata/cgo-risk/x-language/main.go
+  s_5ae344e6b6bab9::t_2bd9307a02e008 1-8
+thirdparty/golem/testdata/corpus/cgo-benign/go.mod
+  s_5ae344e6b6bab9::t_2bd9307a02e008 1-3
+thirdparty/golem/testdata/cgo-risk/split-wl/main.go
+  s_5ae344e6b6bab9::t_2bd9307a02e008 1-8
+thirdparty/golem/testdata/cgo-syso/valid/go.mod
+  s_5ae344e6b6bab9::t_2bd9307a02e008 1-3
+thirdparty/golem/testdata/cgo-risk/go.mod
+  s_5ae344e6b6bab9::t_2bd9307a02e008 1-3
+thirdparty/golem/internal/analyzer/cgo.go
+  s_5ae344e6b6bab9::t_7777bdb1d544ee 222-230,439-441
+thirdparty/golem/testdata/cgo-risk/isysroot-file/main.go
+  s_5ae344e6b6bab9::t_2bd9307a02e008 1-8
+thirdparty/golem/testdata/corpus/cgo-benign/main.go
+  s_5ae344e6b6bab9::t_2bd9307a02e008 1-23
+thirdparty/golem/testdata/cgo-directive-source/go.mod
+  s_5ae344e6b6bab9::t_2bd9307a02e008 1-3
+thirdparty/golem/testdata/cgo-risk/specdir/specs/specs
+  s_5ae344e6b6bab9::t_2bd9307a02e008 1
+thirdparty/golem/testdata/cgo-risk/syslibroot-file/main.go
+  s_5ae344e6b6bab9::t_2bd9307a02e008 1-8
+thirdparty/golem/testdata/cgo-syso/invalid/main.go
+  s_5ae344e6b6bab9::t_2bd9307a02e008 1-5
+thirdparty/golem/internal/analyzer/seam_parity_test.go
+  s_5ae344e6b6bab9::t_9ea90a8c6a6270 72,82-88
+thirdparty/golem/testdata/cgo-risk/sysroot/main.go
+  s_5ae344e6b6bab9::t_2bd9307a02e008 1-8
+thirdparty/golem/testdata/cgo-risk/clang-gen/main.go
+  s_5ae344e6b6bab9::t_2bd9307a02e008 1-8
+thirdparty/golem/internal/analyzer/cgo_test.go
+  s_5ae344e6b6bab9::t_4a726269653482 339,341
+  s_5ae344e6b6bab9::t_fe8991f5025309 201
+  s_5ae344e6b6bab9::t_037c6cc511b5cb 1-200,202-318,322-333,335,343-423
+  s_5ae344e6b6bab9::t_fe0132b6a22277 319-321,334,336-338,340,342
+thirdparty/golem/testdata/cgo-syso/valid/main.go
+  s_5ae344e6b6bab9::t_2bd9307a02e008 1-5
+thirdparty/golem/testdata/cgo-risk/macos-loader/main.go
+  s_5ae344e6b6bab9::t_2bd9307a02e008 1-3,5-8
+  s_5ae344e6b6bab9::t_605f835d9d9506 4
+thirdparty/golem/testdata/cgo-risk/pkgconfig-refused/main.go
+  s_5ae344e6b6bab9::t_2bd9307a02e008 1-8
+thirdparty/golem/testdata/cgo-risk/specdir/main.go
+  s_5ae344e6b6bab9::t_2bd9307a02e008 1-8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e7fcf142872e4e37a2abb69a15f7a4889ef4d8f9",
+  "prompts": {},
+  "sessions": {
+    "s_5ae344e6b6bab9": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_51e3c837-2993-4607-9eb9-fd5852bb5a3b",
+        "model": "GLM-5.3"
+      },
+      "human_author": null
+    }
+  }
+}

@@ -1,0 +1,24 @@
+thirdparty/rusi/THREAT_MODEL.md
+  s_c6c2eef264b80a::t_db1617aa98add7 231
+  s_c6c2eef264b80a::t_44f365eff1a2a0 48,50,164,191
+thirdparty/kosi/modules/kosi-bench/src/main/kotlin/io/cdxgen/kosi/bench/BenchRunner.kt
+  s_c6c2eef264b80a::t_e49e9816f68faa 1059
+thirdparty/kosi/THREAT_MODEL.md
+  s_c6c2eef264b80a::t_e49e9816f68faa 88,121-122
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "3e5b55c67d016d508f27a6dca3050fa2b91dcd7e",
+  "prompts": {},
+  "sessions": {
+    "s_c6c2eef264b80a": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_ca5a02be-9bad-4280-9f9f-602d6836ad7c",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

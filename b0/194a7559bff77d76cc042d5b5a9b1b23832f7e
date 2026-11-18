@@ -1,0 +1,19 @@
+thirdparty/golem/internal/analyzer/cgo.go
+  s_5ae344e6b6bab9::t_4609d8af5b46bb 216-220,230
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b0194a7559bff77d76cc042d5b5a9b1b23832f7e",
+  "prompts": {},
+  "sessions": {
+    "s_5ae344e6b6bab9": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_51e3c837-2993-4607-9eb9-fd5852bb5a3b",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

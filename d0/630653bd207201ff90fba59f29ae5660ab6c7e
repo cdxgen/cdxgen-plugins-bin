@@ -1,0 +1,31 @@
+thirdparty/golem/internal/model/model.go
+  s_5ae344e6b6bab9::t_984b9c3697b31e 104-109,700-737,739,763
+  s_5ae344e6b6bab9::t_7171ea7da670ef 842
+  s_5ae344e6b6bab9::t_cdda6f7dd9b675 764-806
+  s_5ae344e6b6bab9::t_e42ecc50289919 738
+  s_5ae344e6b6bab9::t_65ec4b17c02755 110-117
+thirdparty/golem/internal/analyzer/options.go
+  s_5ae344e6b6bab9::t_8db79c7bc70070 52-57
+  s_5ae344e6b6bab9::t_d26bb55720ad31 79-91
+thirdparty/golem/internal/analyzer/buildenv_test.go
+  s_5ae344e6b6bab9::t_20debdcfe950f2 4,10-11,16,20,27,46-47,52-141,146
+thirdparty/golem/internal/analyzer/buildenv.go
+  s_5ae344e6b6bab9::t_970898c57dbc90 98
+  s_5ae344e6b6bab9::t_169d46be415bf0 9-10,19-35,47-54,56,79-86,90-97,99-104,120-125,127,150-153,166-251
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d0630653bd207201ff90fba59f29ae5660ab6c7e",
+  "prompts": {},
+  "sessions": {
+    "s_5ae344e6b6bab9": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_51e3c837-2993-4607-9eb9-fd5852bb5a3b",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
