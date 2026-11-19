@@ -1,0 +1,77 @@
+thirdparty/cdxrs/Cargo.toml
+  s_c143e52f207eb0::t_c6ef8899e2249b 3
+  s_c143e52f207eb0::t_59c59dde21b437 47-49
+  s_c143e52f207eb0::t_135c7a1368270f 29-34
+  s_c143e52f207eb0::t_fe8180e1b6ec08 20-24
+thirdparty/cdxrs/src/cli.rs
+  s_c143e52f207eb0::t_9b3ffe3990fd27 80-85
+thirdparty/cdxrs/src/fetch/cache.rs
+  s_c143e52f207eb0::t_a4e1ea8c6f0f24 712-721,723-724
+  s_c143e52f207eb0::t_1a8cbdc6726354 1439-1450
+  s_c143e52f207eb0::t_8d161e37b14ae8 1385-1394,1400-1405
+  s_c143e52f207eb0::t_c0133ac7dc07db 648-711,725
+  s_c143e52f207eb0::t_d30cc873eee937 307-319
+  s_c143e52f207eb0::t_0ae48a0b1e1ec7 1428
+  s_c143e52f207eb0::t_8d9b93129b21c8 1319
+  s_c143e52f207eb0::t_61bb8dcfbb4930 1306-1318,1320-1369,1373-1384,1395-1399,1406-1427,1429-1438,1451-1472
+  s_c143e52f207eb0::t_133ed8efafded2 1370-1372
+  s_c143e52f207eb0::t_91691c68a2714f 1473
+docs/CDXRS.md
+  s_c143e52f207eb0::t_a4569a2e2a3cde 63-70
+thirdparty/cdxrs/src/io.rs
+  s_c143e52f207eb0::t_c6245ee4fbcd82 87-120
+thirdparty/cdxrs/tests/fetch.rs
+  s_c143e52f207eb0::t_9f6e0640f004cd 1291-1292,1295-1297
+  s_c143e52f207eb0::t_f67c35e7375482 1138-1139
+  s_c143e52f207eb0::t_44b419e3c492bb 12,1158-1216
+  s_c143e52f207eb0::t_19931492070718 1294
+  s_c143e52f207eb0::t_5c9d64cd814c79 1289
+  s_c143e52f207eb0::t_7f74ab7fd71f4c 1041-1137,1140-1157,1217-1288,1290,1293,1298-1318
+thirdparty/cdxrs/src/fetch/batch.rs
+  s_c143e52f207eb0::t_d1dce022d9bdf2 389-391
+  s_c143e52f207eb0::t_5241b0a1187534 148
+  s_c143e52f207eb0::t_ffe7e68f1fd8a5 501
+  s_c143e52f207eb0::t_d1cb1a57397aad 84-90,97-101,117-123
+  s_c143e52f207eb0::t_18fdeda30f4909 265,268-271,274,307-317,337-339,341-342
+  s_c143e52f207eb0::t_107d01be9e9503 124,126-130
+  s_c143e52f207eb0::t_65b85b4924fd62 145-147,149
+  s_c143e52f207eb0::t_975d1904c34910 125
+thirdparty/cdxrs/src/cmd/fetch.rs
+  s_c143e52f207eb0::t_57f0fe6dc699c1 141-144,146-151
+  s_c143e52f207eb0::t_0456c15dc6aecb 145
+thirdparty/cdxrs/src/main.rs
+  s_c143e52f207eb0::t_b2d6b4d914ecd4 94
+thirdparty/cdxrs/src/fetch/client.rs
+  s_c143e52f207eb0::t_784d167e782152 132
+  s_c143e52f207eb0::t_23a7a6d75cec50 147-152
+  s_c143e52f207eb0::t_65432e71f451e5 548-549,551-560,565,567-580,590,594,596,601,603,607-656
+  s_c143e52f207eb0::t_79b1f1a2f4bcb2 116-118
+  s_c143e52f207eb0::t_2e17785fd9cebd 697-700,702-703
+  s_c143e52f207eb0::t_14b4f9aa99b179 276-280
+  s_c143e52f207eb0::t_18cef670125415 210-246,251
+  s_c143e52f207eb0::t_e2049bdc73ddbd 71-96
+  s_c143e52f207eb0::t_781881afde8d07 172-180
+  s_c143e52f207eb0::t_f0d8baf3c28617 27-29
+  s_c143e52f207eb0::t_c1cd51f80c2dc3 311,316
+  s_c143e52f207eb0::t_20984b77f4dbf2 419-421
+  s_c143e52f207eb0::t_90a560b768b6ed 701
+  s_c143e52f207eb0::t_97a74fe66d6f00 657-658,1057-1091
+thirdparty/cdxrs/Cargo.lock
+  s_c143e52f207eb0::t_91a820e22ee711 215,218
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "1f42ac740db95353bb0196cb0ae1d3f2b56fca3e",
+  "prompts": {},
+  "sessions": {
+    "s_c143e52f207eb0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_858a662d-d1a5-44ed-8858-e40c68415945",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
