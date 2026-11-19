@@ -1,0 +1,33 @@
+thirdparty/kosi/modules/kosi-schema/src/main/kotlin/io/cdxgen/kosi/schema/SafeFiles.kt
+  s_2eedb38e56f0f1::t_c2e81f041fc9e6 12-14,16-27,30-31,34-35,39,42-51,67-68
+thirdparty/kosi/THREAT_MODEL.md
+  s_2eedb38e56f0f1::t_ba91ddf704e203 78-81,83-95
+thirdparty/kosi/modules/kosi-endpoints/src/test/kotlin/io/cdxgen/kosi/endpoints/ConfigResolverSymlinkTest.kt
+  s_2eedb38e56f0f1::t_b47df28e71055a 14-17
+thirdparty/kosi/modules/kosi-evidence/src/main/kotlin/io/cdxgen/kosi/evidence/ForwardedHeaders.kt
+  s_2eedb38e56f0f1::t_9bc5ac595dc10b 9,128,139
+thirdparty/kosi/modules/kosi-project/src/main/kotlin/io/cdxgen/kosi/project/GradleDiscovery.kt
+  s_2eedb38e56f0f1::t_cf9c031ce52104 114-117,411-412
+thirdparty/kosi/modules/kosi-project/src/main/kotlin/io/cdxgen/kosi/project/MavenDiscovery.kt
+  s_2eedb38e56f0f1::t_939da37e71b4d8 117-119,121-126,130
+thirdparty/kosi/modules/kosi-project/src/main/kotlin/io/cdxgen/kosi/project/ProjectDiscovery.kt
+  s_2eedb38e56f0f1::t_c8a47210e53946 61,102-107
+thirdparty/kosi/modules/kosi-project/src/test/kotlin/io/cdxgen/kosi/project/SourceCollectorSymlinkGuardTest.kt
+  s_2eedb38e56f0f1::t_54502f5b267dca 12-16,19,103-105,117-195
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4bba00ca5364db87aa24b493396cb5584c3d8f45",
+  "prompts": {},
+  "sessions": {
+    "s_2eedb38e56f0f1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ca38e7c0-e4fd-4d28-b564-301fcbad24f1",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
