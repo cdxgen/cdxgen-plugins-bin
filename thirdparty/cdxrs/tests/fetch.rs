@@ -1351,7 +1351,7 @@ async fn a_malformed_body_gives_its_budget_back() {
         "[\"{}\"",
         String::from_utf8(hex_noise(1024 * 1024)).unwrap()
     );
-    let good = format!("\"{}\"", String::from_utf8(hex_noise(700 * 1024)).unwrap());
+    let good = format!("\"{}\"", String::from_utf8(hex_noise(100 * 1024)).unwrap());
     Mock::given(method("GET"))
         .and(path_regex("/bad.*"))
         .respond_with(ResponseTemplate::new(200).set_body_raw(bad, JSON))
@@ -1362,9 +1362,11 @@ async fn a_malformed_body_gives_its_budget_back() {
         .respond_with(ResponseTemplate::new(200).set_body_raw(good, JSON))
         .mount(&server)
         .await;
-    // One request at a time, bad ones first, so the outcome does not depend
-    // on scheduling: three malformed MiB would spend a 1.6 MB budget twice
-    // over if their charges stood.
+    // One request at a time, in whatever order the tasks get their permits.
+    // The sizes make every order pass when refunds work: the good answers
+    // (200 KB) plus one malformed MiB fit the 1.6 MB budget, so no request
+    // ever finds it spent. Without refunds, three malformed MiB spend it,
+    // and a good answer that runs after the second of them fails.
     let input = batch(vec![
         request("bad1", &format!("{}/bad?1", server.uri())),
         request("bad2", &format!("{}/bad?2", server.uri())),
