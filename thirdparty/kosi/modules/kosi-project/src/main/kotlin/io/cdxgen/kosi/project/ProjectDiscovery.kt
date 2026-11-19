@@ -58,8 +58,7 @@ object ProjectDiscovery {
         Files.walk(root).use { stream ->
             stream.anyMatch { p ->
                 val n = p.fileName.toString()
-                // SafeFiles: a linked source file is the same escape as a
-                // linked config file — the tree must own what it analyses.
+                // A linked source file is not one of the tree's own.
                 SafeFiles.isRegularFile(p) && (n.endsWith(".kt") || n.endsWith(".java"))
             }
         }
@@ -100,6 +99,12 @@ object SourceCollector {
                     if (Files.isDirectory(moduleDir)) rootDir = moduleDir
                 }
                 if (!Files.isDirectory(rootDir)) continue
+                // Resolving a source root follows links in its middle
+                // components (`src` committed as a link to a directory
+                // elsewhere), so the root itself must lie inside the tree.
+                // The walk below does not descend into links, so a
+                // contained start keeps every collected file contained.
+                if (!SafeFiles.isInside(root, rootDir)) continue
                 Files.walk(rootDir).use { stream ->
                     // SORTED: Files.walk yields directory-entry order, which
                     // the filesystem defines — the same tree at two locations

@@ -114,13 +114,20 @@ object MavenDiscovery {
             val xml = XmlElement.parse(text)
             val modulesSection = xml.child("modules") ?: continue
             for (m in modulesSection.childrenNamed("module")) {
+                // A <module> names a directory under the root. An absolute
+                // path, `..`, or a linked directory that leads out of the
+                // tree is not one of the project's modules.
                 val dir = root.resolve(m.text.trim())
-                val nested = dir.resolve("pom.xml")
-                if (SafeFiles.isRegularFile(nested)) poms.add(nested)
+                if (!SafeFiles.isInside(root, dir)) continue
+                // Normalized and de-duplicated, so a module list that names
+                // a pom already queued (`<module>.</module>`, or two poms
+                // naming each other) ends the walk instead of extending it.
+                val nested = dir.resolve("pom.xml").normalize()
+                if (SafeFiles.isRegularFile(nested) && nested !in poms) poms.add(nested)
             }
         }
         for (pom in poms) {
-            val text = Files.readString(pom)
+            val text = SafeFiles.readString(pom) ?: continue
             val xml = XmlElement.parse(text)
             val parent = xml.child("parent")
             val groupId = xml.textOr("groupId") ?: parent?.textOr("groupId")

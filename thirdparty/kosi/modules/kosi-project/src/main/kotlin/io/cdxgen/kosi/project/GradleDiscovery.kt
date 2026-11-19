@@ -111,7 +111,10 @@ object GradleDiscovery {
                 members.add(Member(dir, ":$name", name, buildFile))
             }
         }
-        return members
+        // A member directory must be the root's own: `includeProject` can
+        // name an absolute path, and a member directory committed as a link
+        // can point anywhere. Neither is part of the analysed tree.
+        return members.filter { it.dir == root || SafeFiles.isInside(root, it.dir) }
     }
 
     private fun findBuildFile(dir: Path): Path? =
@@ -405,9 +408,8 @@ object GradleDiscovery {
         return r.relativize(d).toString().replace('\\', '/')
     }
 
-    // SafeFiles on both: a linked settings/build file or gradle.properties
-    // is the analysed tree reaching outside itself, and its text (group,
-    // version, member list) must not come from there.
+    // A linked settings or build file, or gradle.properties, is not read:
+    // its text (group, version, member list) must come from the tree.
     private fun readIfExists(dir: Path, name: String): String? =
         SafeFiles.readString(dir.resolve(name))
 

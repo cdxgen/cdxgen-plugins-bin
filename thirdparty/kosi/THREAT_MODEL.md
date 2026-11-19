@@ -75,18 +75,24 @@ Same discipline as rusi's, applied to a Kotlin front end.
    environment or flags, never from the analysed tree, and a filesystem root
    never counts as one. Only `--classpath` and `--classpath-file` reach other
    paths.
-10. **A committed symbolic link is not the file it names.** Every read of
-   the analysed tree (sources, build files, `application.*` config,
-   manifests, descriptors, the discovered `classpath.txt`/`.classpath`)
-   resolves the final path component with
+10. **The analysis reads only the tree it was given.** Every read of a
+   file in the analysed tree (sources, build files, `application.*`
+   config, manifests, descriptors, the discovered
+   `classpath.txt`/`.classpath`) resolves the final path component with
    `LinkOption.NOFOLLOW_LINKS` (`kosi-schema`'s `SafeFiles`), so a
-   repository that commits `src/main/resources/application.properties` as a
-   link to a file outside the tree cannot have that file read and its
-   values substituted into reported routes; a linked Kotlin source is not
-   analysed. Directory links were never descended (`Files.walk` does not
-   follow them), and a `--dir` that is itself a link keeps working, as the
-   operator's own choice. Hard links are indistinguishable from regular
-   files and remain outside this rule.
+   repository that commits `src/main/resources/application.properties` as
+   a link to a file outside the tree cannot have that file read and its
+   values substituted into reported routes, and a linked Kotlin source is
+   not analysed. Directories the analysis reaches by resolving names under
+   the root, such as source roots and Gradle or Maven module directories,
+   follow links in their middle components, so each one is used only when
+   its real path lies under the real path of `--dir`. That refuses `src`
+   committed as a link to a directory elsewhere, an absolute or `..`
+   `<module>`, and an `includeProject` directory outside the tree.
+   `Files.walk` does not descend into links below its start, so a
+   contained start keeps the walk contained. A `--dir` that is itself a
+   link keeps working, as the operator's own choice. Hard links are
+   indistinguishable from regular files and remain outside this rule.
 
 ## What kosi will never do
 

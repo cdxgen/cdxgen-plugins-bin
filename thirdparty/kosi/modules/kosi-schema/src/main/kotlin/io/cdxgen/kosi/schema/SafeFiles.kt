@@ -9,29 +9,45 @@ import java.nio.file.Path
  * File access over the analysed tree, which is untrusted input: a checkout
  * the repository's author chose, not the operator.
  *
- * Every reader here resolves the FINAL path component with
+ * Two rules keep every read inside the tree.
+ *
+ * Files: every reader here resolves the FINAL path component with
  * [LinkOption.NOFOLLOW_LINKS], so a symbolic link committed inside the tree
- * is never mistaken for the file it names. Before this rule, discovery
- * walked with `Files.isRegularFile` — which follows links — so a repo that
- * committed `src/main/resources/application.properties` as a link to a file
- * outside the tree made the analysis read that file, and the values it
- * found were substituted into reported routes. The same held for a linked
- * Kotlin source and a linked build script. Directories are not at issue:
- * `Files.walk` never descends into links, and a `--dir` that is itself a
- * link is the operator's own choice and keeps working.
+ * (`src/main/resources/application.properties` pointing at a credentials
+ * file, say) is never read as the file it names.
+ *
+ * Directories: a path the analysis builds by resolving names under the root
+ * (a source root such as `src/main/kotlin`, a Gradle or Maven module
+ * directory) follows any link in its middle components, so `src` committed
+ * as a link to a directory elsewhere would take the whole source walk out
+ * of the tree. Such a directory is used only when [isInside] holds: its real
+ * path lies under the real path of the analysis root. `Files.walk` does not
+ * descend into links below its start, so a contained start keeps the whole
+ * walk contained. A `--dir` that is itself a link is the operator's choice;
+ * comparing real paths on both sides keeps it working.
  *
  * A hard link cannot be told apart from a regular file and is out of scope.
- * A link the analysis refuses costs a key's value (it stays honestly
- * unresolved) or a source file's presence — never a wrong fact.
+ * A path the analysis refuses costs a key's value (it stays unresolved) or a
+ * source file's presence, never a wrong fact.
  *
  * This lives in kosi-schema because every module that reads project files
- * (kosi-project, kosi-endpoints, kosi-front) depends on it and it must stay
- * stdlib-only, like the rest of this module.
+ * (kosi-project, kosi-endpoints, kosi-evidence, kosi-front) depends on it,
+ * and it stays stdlib-only like the rest of this module.
  */
 object SafeFiles {
 
-    /** A regular file at exactly this path — not a link to one. */
+    /** A regular file at exactly this path, not a link to one. */
     fun isRegularFile(path: Path): Boolean = Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)
+
+    /**
+     * Whether [path] resolves, links and all, to [root] or somewhere under
+     * it. False when either does not exist or cannot be resolved.
+     */
+    fun isInside(root: Path, path: Path): Boolean = try {
+        path.toRealPath().startsWith(root.toRealPath())
+    } catch (_: Exception) {
+        false
+    }
 
     /** The file's bytes, or null when it is not a regular file at this path. */
     fun readBytes(path: Path): ByteArray? =
@@ -48,9 +64,8 @@ object SafeFiles {
 
     /**
      * The file's lines, or an empty list when it is not a regular file at
-     * this path. Matches `Files.readAllLines`: no trailing empty element
-     * for a text that ends in a newline (the config readers treat a blank
-     * line as no line, but the parity with the previous reader is free).
+     * this path. Like `Files.readAllLines`, a text that ends in a newline
+     * has no trailing empty element.
      */
     fun readLines(path: Path): List<String> {
         val lines = readString(path)?.lines() ?: return emptyList()

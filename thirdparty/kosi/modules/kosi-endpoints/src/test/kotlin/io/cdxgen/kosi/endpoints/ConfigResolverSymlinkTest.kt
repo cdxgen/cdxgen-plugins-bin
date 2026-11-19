@@ -11,11 +11,10 @@ import kotlin.test.assertTrue
 
 /**
  * A repository that commits `application.properties` as a link to a file
- * outside the analysed tree used to have that file read, and the value it
- * found was substituted into Spring route templates and published in the
- * report's `apiEndpoints[].pathTemplate`. The no-follow rule leaves the
- * key honestly unresolved instead — and a value that comes from the tree
- * itself still resolves, so the fix must not cost the feature.
+ * outside the analysed tree must not have that file read: a value found
+ * there would be substituted into Spring route templates and published in
+ * the report's `apiEndpoints[].pathTemplate`. The key stays unresolved
+ * instead, and a value that comes from the tree itself still resolves.
  */
 class ConfigResolverSymlinkTest {
 
