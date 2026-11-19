@@ -1,0 +1,49 @@
+thirdparty/kosi/modules/kosi-endpoints/src/main/kotlin/io/cdxgen/kosi/endpoints/Endpoints.kt
+  s_c143e52f207eb0::t_faee114f6c3e74 13,715,719,745,749,807,828,830
+thirdparty/kosi/modules/kosi-endpoints/src/main/kotlin/io/cdxgen/kosi/endpoints/ConfigResolver.kt
+  s_c143e52f207eb0::t_ba68eb05fdc2ce 3,92-94,96,156,172,213,263
+thirdparty/kosi/modules/kosi-front/src/main/kotlin/io/cdxgen/kosi/front/Analyzer.kt
+  s_c143e52f207eb0::t_c4f633d042bb1e 286-289,748
+  s_c143e52f207eb0::t_dd49c7cc846dc7 290-293
+thirdparty/kosi/modules/kosi-endpoints/src/main/kotlin/io/cdxgen/kosi/endpoints/AndroidManifestParser.kt
+  s_c143e52f207eb0::t_ac6b9bd22491db 92
+  s_c143e52f207eb0::t_6c36b61c826e39 3,41,49,91
+thirdparty/kosi/modules/kosi-project/src/main/kotlin/io/cdxgen/kosi/project/ClasspathResolver.kt
+  s_c143e52f207eb0::t_82840a39dd6050 4,247-249,257,262,291,340
+thirdparty/kosi/modules/kosi-schema/src/main/kotlin/io/cdxgen/kosi/schema/SafeFiles.kt
+  s_c143e52f207eb0::t_f745584dc18b45 49-58
+  s_c143e52f207eb0::t_1fbfdce471905d 1-48,59-73
+thirdparty/kosi/modules/kosi-project/src/main/kotlin/io/cdxgen/kosi/project/GradleDiscovery.kt
+  s_c143e52f207eb0::t_0a8098ded5ee83 3,119,408-412,414
+thirdparty/kosi/modules/kosi-endpoints/src/main/kotlin/io/cdxgen/kosi/endpoints/WebXmlParser.kt
+  s_c143e52f207eb0::t_6c36b61c826e39 3,63,72,85,94
+thirdparty/kosi/modules/kosi-schema/src/test/kotlin/io/cdxgen/kosi/schema/SafeFilesTest.kt
+  s_c143e52f207eb0::t_74d364511f1a58 1-91
+thirdparty/kosi/modules/kosi-project/src/main/kotlin/io/cdxgen/kosi/project/MavenDiscovery.kt
+  s_c143e52f207eb0::t_0a8098ded5ee83 3,113,119
+thirdparty/kosi/modules/kosi-endpoints/src/test/kotlin/io/cdxgen/kosi/endpoints/ConfigResolverSymlinkTest.kt
+  s_c143e52f207eb0::t_6019577e3ad11e 1-114
+thirdparty/kosi/THREAT_MODEL.md
+  s_c143e52f207eb0::t_b0b7989a247ecb 78-89
+thirdparty/kosi/modules/kosi-project/src/main/kotlin/io/cdxgen/kosi/project/ProjectDiscovery.kt
+  s_c143e52f207eb0::t_0a8098ded5ee83 3,16-21,61-63,111
+thirdparty/kosi/modules/kosi-project/src/test/kotlin/io/cdxgen/kosi/project/SourceCollectorSymlinkGuardTest.kt
+  s_c143e52f207eb0::t_41046385fea6a9 105-113,117-120
+  s_c143e52f207eb0::t_f7d0c071bc1a34 1-104,114-116,121-122
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "79479beb38b0fcb30b6c9c1f8e47260b527c4ab4",
+  "prompts": {},
+  "sessions": {
+    "s_c143e52f207eb0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_858a662d-d1a5-44ed-8858-e40c68415945",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
