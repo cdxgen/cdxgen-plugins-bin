@@ -91,6 +91,7 @@ fn build_fetch_config(args: &cdxrs::cli::FetchArgs) -> cdxrs::cmd::fetch::FetchC
         total_timeout: Duration::from_secs(args.total_timeout),
         request_deadline: Duration::from_secs(args.request_deadline),
         max_body_bytes: args.max_body_bytes,
+        max_total_bytes: args.max_total_bytes,
         ..Default::default()
     };
     cdxrs::cmd::fetch::FetchConfig {

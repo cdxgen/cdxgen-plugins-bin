@@ -81,14 +81,24 @@ pub struct BatchInput {
 }
 
 /// One result, correlated by `id`.
+///
+/// `body` is shared, not copied: a body fanned out to N caller ids costs one
+/// allocation plus N `Arc` clones, not N deep copies. Before it was shared,
+/// a single URL named by many ids (the shape the coalescing below exists
+/// for) multiplied the body in memory by the id count, and the batch's
+/// decoded-byte budget could not see any of it — the clones happened after
+/// the fetch that was charged.
 #[derive(Debug, Clone, Serialize)]
 pub struct BatchResult {
     pub id: String,
     pub ok: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<u16>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub body: Option<serde_json::Value>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "serialize_shared_body"
+    )]
+    pub body: Option<Arc<serde_json::Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     #[serde(rename = "fromCache")]
@@ -102,6 +112,20 @@ pub struct BatchResult {
     /// Seconds the host asked the caller to wait, with `quotaExhausted`.
     #[serde(rename = "retryAfterSecs", skip_serializing_if = "Option::is_none")]
     pub retry_after_secs: Option<u64>,
+}
+
+/// Serialize a shared body by reference: the wire format is unchanged, only
+/// the in-memory representation is shared.
+fn serialize_shared_body<S>(value: &Option<Arc<serde_json::Value>>, s: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    value.as_deref().serialize(s)
+}
+
+/// A count of zero adds nothing to the envelope.
+fn is_zero(n: &usize) -> bool {
+    *n == 0
 }
 
 /// Aggregate counters, emitted on stderr as NDJSON and on stdout with the
@@ -118,6 +142,11 @@ pub struct BatchStats {
     pub revalidated: usize,
     #[serde(rename = "offlineMisses")]
     pub offline_misses: usize,
+    /// Results not served because the batch's decoded-byte budget was
+    /// spent; the individual errors say the same thing, the count says how
+    /// much of the batch it was.
+    #[serde(rename = "budgetExhausted", skip_serializing_if = "is_zero")]
+    pub budget_exhausted: usize,
     #[serde(rename = "elapsedMs")]
     pub elapsed_ms: u64,
     #[serde(rename = "peakConcurrency")]
@@ -233,13 +262,16 @@ pub async fn run_batch(
         };
 
         let mut quota = None;
+        let mut budget_exhausted = false;
         let (ok, status, body, error, from_cache, revalidated) = match outcome {
             Outcome::Fetched { status, body } => {
-                (true, Some(status), Some(body), None, false, false)
+                (true, Some(status), Some(Arc::new(body)), None, false, false)
             }
-            Outcome::Cached { status, body } => (true, Some(status), Some(body), None, true, false),
+            Outcome::Cached { status, body } => {
+                (true, Some(status), Some(Arc::new(body)), None, true, false)
+            }
             Outcome::Revalidated { status, body } => {
-                (true, Some(status), Some(body), None, true, true)
+                (true, Some(status), Some(Arc::new(body)), None, true, true)
             }
             Outcome::OfflineMiss => (
                 false,
@@ -272,6 +304,17 @@ pub async fn run_batch(
                     false,
                 )
             }
+            Outcome::BudgetExhausted => {
+                budget_exhausted = true;
+                (
+                    false,
+                    None,
+                    None,
+                    Some(super::client::FetchFailure::BudgetExhausted.to_string()),
+                    false,
+                    false,
+                )
+            }
             Outcome::Failed(msg) => (false, None, None, Some(msg), false, false),
         };
 
@@ -291,8 +334,12 @@ pub async fn run_batch(
         if error.as_deref() == Some("offline-miss") {
             stats.offline_misses += ids.len();
         }
+        if budget_exhausted {
+            stats.budget_exhausted += ids.len();
+        }
 
-        // Fan the single fetch back out to every caller id that asked for it.
+        // Fan the single fetch back out to every caller id that asked for
+        // it. The body is an Arc, so the fan-out shares one copy.
         for id in ids {
             results.push(BatchResult {
                 id: id.clone(),
@@ -339,6 +386,9 @@ enum Outcome {
         status: u16,
         retry_after_secs: Option<u64>,
     },
+    /// The batch's decoded-byte budget was spent before this request's
+    /// body could be decoded.
+    BudgetExhausted,
     Failed(String),
 }
 
@@ -448,6 +498,7 @@ async fn fetch_one(
             status,
             retry_after_secs,
         },
+        Err(FetchFailure::BudgetExhausted) => Outcome::BudgetExhausted,
         Err(failure) => {
             if let Lookup::Stale(entry) = lookup {
                 return Outcome::Cached {

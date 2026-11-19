@@ -84,3 +84,37 @@ pub fn write_output(path: &Option<String>, data: &[u8]) -> Result<(), CdxrsError
         }
     }
 }
+
+/// Stream output to a file path or stdout (when path is "-" or None).
+///
+/// For a document that can be as large as the fetch batch's decoded-byte
+/// budget, building it in memory first only to write it out doubles the
+/// peak; this hands the writer straight to the serializer.
+pub fn write_output_streaming<F>(path: &Option<String>, write: F) -> Result<(), CdxrsError>
+where
+    F: FnOnce(&mut dyn io::Write) -> Result<(), CdxrsError>,
+{
+    match path {
+        None => {
+            let stdout = io::stdout();
+            let mut writer = stdout.lock();
+            write(&mut writer)?;
+            writer.flush()?;
+            Ok(())
+        }
+        Some(p) if p == "-" => {
+            let stdout = io::stdout();
+            let mut writer = stdout.lock();
+            write(&mut writer)?;
+            writer.flush()?;
+            Ok(())
+        }
+        Some(p) => {
+            let file = File::create(p)?;
+            let mut writer = BufWriter::new(file);
+            write(&mut writer)?;
+            writer.flush()?;
+            Ok(())
+        }
+    }
+}

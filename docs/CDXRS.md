@@ -60,6 +60,14 @@ Coverage includes the CycloneDX 1.7 additions cdxgen emits: root-level `citation
 
 `fetch` takes a batch of registry URLs and fetches them in parallel with per-host concurrency limits, a TTL- and size-bounded on-disk cache, and credential redaction. It exists because registry metadata is a large fraction of scan wall time and most of the latency is waiting on sockets, which is exactly where a small native process with tight connection handling wins.
 
+The URLs come from the scanned lockfiles, so every size and name derived from them is treated as untrusted. Three bounds follow from that:
+
+- A single body is capped at 50 MiB decoded (`--max-body-bytes`), abandoned mid-stream.
+- A body whose decoded size passes 100x the bytes received for it (once past 1 MiB decoded) is refused; gzip is decoded by cdxrs itself so the two sizes can be compared — a decompressing HTTP client deletes `Content-Length` on the way past, after which no ratio exists. Registry metadata does not compress anywhere near 100:1.
+- The whole batch may buffer at most 512 MiB decoded in total (`--max-total-bytes`, 0 disables). Requests that would cross it come back as individual failures (`batch decoded-body budget exhausted`), counted in `stats.budgetExhausted`; coalesced duplicates share one in-memory body rather than a copy per caller.
+
+The cache directory for a host is `<cache dir>/cdxrs-fetch/<host>/`, and the host is validated before it becomes a directory name: `.`, `..`, percent-encoded dot spellings, separators, characters Windows forbids, reserved device names and trailing dots are all refused, so such a URL is neither cached nor swept. Before that check, a lockfile naming `http://../x` made the once-per-process sweep delete expired files from the cache directory itself.
+
 `fetch` reads no credential from its environment. A request may carry a `githubToken` field, which cdxgen sets only on GitHub API URLs it composed itself (the repository licence lookups), never on a URL taken from the scanned project. cdxrs sends that token as `Authorization: Bearer` with that request alone, and only when the URL is https on the default port to `github.com` or `api.github.com` with no userinfo; any other request goes out without it. A host that receives the token gets its authenticated concurrency and rate budget for that run. A redirect to another host, port or scheme drops the header. The token keeps the request out of the anonymous cache entries for the same URL, and it is never written to the cache, logged or echoed. A 403 or 429 that reports a spent quota comes back with `quotaExhausted: true` and, when the host said, `retryAfterSecs`, so cdxgen can pause the host. cdxrs builds that support this list `fetch-github-token` under `capabilities` in `cdxrs schema-version`, and cdxgen sends GitHub requests to cdxrs only when it sees that marker.
 
 ## Byte-identical round-trips

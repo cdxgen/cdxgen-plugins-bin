@@ -9,7 +9,7 @@ mod common;
 
 use common::{batch, request, run_fetch, run_fetch_cached, run_fetch_env, walk};
 use tempfile::TempDir;
-use wiremock::matchers::{header, method, path};
+use wiremock::matchers::{header, method, path, path_regex};
 use wiremock::{Mock, MockServer, Request, ResponseTemplate};
 
 const JSON: &str = "application/json";
@@ -1037,4 +1037,282 @@ async fn output_flag_writes_the_envelope_to_a_file() {
         .unwrap_or_else(|e| panic!("--output file is not valid JSON ({e}): {text}"));
     assert_eq!(envelope["results"][0]["id"], "npm:left-pad");
     assert_eq!(envelope["results"][0]["body"]["name"], "left-pad");
+}
+
+// ------------------------------------------------------ gzip and size budgets
+
+/// Deterministic pseudo-random bytes: hex-of-xorshift, so every platform and
+/// every run compresses the same. Random hex is near the worst case for
+/// gzip (~2:1), which is exactly the shape of real registry metadata and
+/// stays comfortably under the decode ratio.
+fn hex_noise(len: usize) -> Vec<u8> {
+    let mut state: u64 = 0x9E37_79B9_7F4A_7C15;
+    let mut out = Vec::with_capacity(len);
+    while out.len() < len {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        let hex = format!("{state:016x}");
+        out.extend_from_slice(hex.as_bytes());
+    }
+    out.truncate(len);
+    out
+}
+
+fn gzip(data: &[u8]) -> Vec<u8> {
+    use std::io::Write;
+    let mut enc = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    enc.write_all(data).unwrap();
+    enc.finish().unwrap()
+}
+
+/// A registry that answers with `Content-Encoding: gzip` must still come
+/// back decoded — this is the behaviour reqwest's `.gzip(true)` used to
+/// provide, kept now that the client decodes gzip itself.
+#[tokio::test]
+async fn gzip_responses_are_decoded() {
+    let server = MockServer::start().await;
+    let body = serde_json::json!({"name": "left-pad", "versions": String::from_utf8(hex_noise(120 * 1024)).unwrap()});
+    let raw = serde_json::to_vec(&body).unwrap();
+    let gz = gzip(&raw);
+    Mock::given(method("GET"))
+        .and(path("/gz"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-encoding", "gzip")
+                .set_body_raw(gz, JSON),
+        )
+        .mount(&server)
+        .await;
+
+    let input = batch(vec![request("x", &format!("{}/gz", server.uri()))]);
+    let run = run_fetch(&input, &[]).expect_success();
+    assert_eq!(run.result("x")["ok"], true, "{}", run.result("x"));
+    assert_eq!(run.result("x")["body"], body);
+}
+
+/// The client advertises gzip itself now that reqwest no longer does.
+#[tokio::test]
+async fn accept_encoding_gzip_is_sent() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/negotiate"))
+        .and(header("accept-encoding", "gzip"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"ok": true})))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let input = batch(vec![request("x", &format!("{}/negotiate", server.uri()))]);
+    let run = run_fetch(&input, &[]).expect_success();
+    assert_eq!(run.result("x")["ok"], true);
+}
+
+/// A body that expands beyond [`MAX_DECODE_RATIO`] once past the floor is
+/// refused mid-decode: a few KB on the wire must not become tens of MB in
+/// memory whatever the scanned lockfile asked for.
+#[tokio::test]
+async fn a_gzip_body_expanding_over_the_ratio_is_refused() {
+    let server = MockServer::start().await;
+    // 4 MiB of one character compresses to ~4 KB; the decoded size crosses
+    // the 1 MiB floor and 100x the wire size in the same breath.
+    let raw = vec![b'a'; 4 * 1024 * 1024];
+    let gz = gzip(&raw);
+    assert!(
+        gz.len() * 100 < raw.len(),
+        "fixture must expand past the ratio"
+    );
+    Mock::given(method("GET"))
+        .and(path("/bomb"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-encoding", "gzip")
+                .set_body_raw(gz, JSON),
+        )
+        .mount(&server)
+        .await;
+
+    let input = batch(vec![request("x", &format!("{}/bomb", server.uri()))]);
+    let run = run_fetch(&input, &[]).expect_success();
+    assert_eq!(run.result("x")["ok"], false);
+    let result = run.result("x");
+    let error = result["error"].as_str().unwrap();
+    assert!(
+        error.contains("100x the bytes received"),
+        "unexpected error: {error}"
+    );
+}
+
+/// The batch-wide ceiling on decoded bytes. Requests that would cross it
+/// fail individually; the batch still exits 0 and reports every result.
+#[tokio::test]
+async fn the_total_decoded_budget_bounds_the_batch() {
+    let server = MockServer::start().await;
+    // 1 MiB of near-incompressible text per answer: the ratio never trips,
+    // so only the budget can stop the batch.
+    let raw = format!(
+        "\"{}\"",
+        String::from_utf8(hex_noise(1024 * 1024 - 2)).unwrap()
+    );
+    Mock::given(method("GET"))
+        .and(path_regex("/doc.*"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(raw.clone(), JSON))
+        .mount(&server)
+        .await;
+
+    // Distinct URLs: identical URLs are coalesced into one fetch, which
+    // would charge the budget once and prove nothing about the batch.
+    let input = batch(vec![
+        request("a", &format!("{}/doc?a", server.uri())),
+        request("b", &format!("{}/doc?b", server.uri())),
+        request("c", &format!("{}/doc?c", server.uri())),
+        request("d", &format!("{}/doc?d", server.uri())),
+    ]);
+    let run = run_fetch(&input, &["--max-total-bytes", "2500000"]).expect_success();
+    let ok: Vec<_> = ["a", "b", "c", "d"]
+        .iter()
+        .filter(|id| run.result(id)["ok"] == true)
+        .cloned()
+        .collect();
+    let budget_failures: Vec<_> = ["a", "b", "c", "d"]
+        .iter()
+        .filter(|id| {
+            run.result(id)["error"]
+                .as_str()
+                .is_some_and(|e| e.contains("budget exhausted"))
+        })
+        .cloned()
+        .collect();
+    assert!(
+        !ok.is_empty() && !budget_failures.is_empty(),
+        "the budget must both admit and refuse: ok={ok:?} failures={budget_failures:?}"
+    );
+    assert_eq!(
+        ok.len() + budget_failures.len(),
+        4,
+        "every result is either served or budget-refused: {}",
+        run.json()["results"]
+    );
+    assert_eq!(run.stats()["failures"], budget_failures.len());
+}
+
+/// `--max-total-bytes 0` documents "no ceiling": the whole batch is served.
+#[tokio::test]
+async fn max_total_bytes_zero_disables_the_ceiling() {
+    let server = MockServer::start().await;
+    let raw = format!("\"{}\"", String::from_utf8(hex_noise(512 * 1024)).unwrap());
+    Mock::given(method("GET"))
+        .and(path_regex("/doc.*"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(raw, JSON))
+        .mount(&server)
+        .await;
+
+    let input = batch(vec![
+        request("a", &format!("{}/doc?a", server.uri())),
+        request("b", &format!("{}/doc?b", server.uri())),
+        request("c", &format!("{}/doc?c", server.uri())),
+        request("d", &format!("{}/doc?d", server.uri())),
+        request("e", &format!("{}/doc?e", server.uri())),
+        request("f", &format!("{}/doc?f", server.uri())),
+    ]);
+    let run = run_fetch(&input, &["--max-total-bytes", "0"]).expect_success();
+    for id in ["a", "b", "c", "d", "e", "f"] {
+        assert_eq!(run.result(id)["ok"], true, "{}", run.result(id));
+    }
+}
+
+/// A response that claims gzip but is not a gzip container is a malformed
+/// body, not a transport failure and not a body of compressed bytes handed
+/// to the caller as though it were the document.
+#[tokio::test]
+async fn a_corrupt_gzip_container_is_malformed() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/broken"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-encoding", "gzip")
+                .set_body_raw(b"not really gzip", JSON),
+        )
+        .mount(&server)
+        .await;
+
+    let input = batch(vec![request("x", &format!("{}/broken", server.uri()))]);
+    let run = run_fetch(&input, &[]).expect_success();
+    assert_eq!(run.result("x")["ok"], false);
+    assert_eq!(
+        run.result("x")["error"].as_str().unwrap(),
+        "malformed response body"
+    );
+}
+
+// ------------------------------------------------------ host-directory safety
+
+/// The lockfile-chosen URL `http://../x` must leave the cache root alone:
+/// before host validation, the once-per-process sweep treated the cache
+/// root as the host directory for host `..` and deleted expired files
+/// there, `--offline` or not.
+#[tokio::test]
+async fn dot_and_dotdot_hosts_do_not_touch_the_cache_root() {
+    let cache = TempDir::new().unwrap();
+    let root = cache.path().to_path_buf();
+    let fetch_dir = root.join("cdxrs-fetch");
+    std::fs::create_dir_all(fetch_dir.join("registry.example")).unwrap();
+    // Planted files a sweep of the cache root would delete: an expired json
+    // entry and a stale temp file, plus one file no sweep may ever touch.
+    let old = std::time::SystemTime::now() - std::time::Duration::from_secs(48 * 60 * 60);
+    for (name, contents) in [
+        ("other.json", "{}"),
+        ("download.tmp.1", "x"),
+        ("notes.txt", "keep"),
+    ] {
+        let p = root.join(name);
+        std::fs::write(&p, contents).unwrap();
+        let f = std::fs::OpenOptions::new().write(true).open(&p).unwrap();
+        f.set_times(std::fs::FileTimes::new().set_modified(old))
+            .unwrap();
+    }
+    // And a stale temp directly under cdxrs-fetch, which a `.`-host sweep
+    // would have reclaimed.
+    let tmp_planted = fetch_dir.join("stale.tmp.999.0");
+    std::fs::write(&tmp_planted, "x").unwrap();
+    let f = std::fs::OpenOptions::new()
+        .write(true)
+        .open(&tmp_planted)
+        .unwrap();
+    f.set_times(std::fs::FileTimes::new().set_modified(old))
+        .unwrap();
+
+    let input = batch(vec![
+        request("dotdot", "http://../x"),
+        request("dot", "http://./x"),
+        request("encoded", "http://%2e%2e/x"),
+    ]);
+    let run = run_fetch_cached(&input, &["--offline"], &root);
+    assert_eq!(run.status, 0, "stderr={}", run.stderr);
+    // Offline + no cacheable host: every request is a recorded miss.
+    for id in ["dotdot", "dot", "encoded"] {
+        let result = run.result(id);
+        assert_eq!(result["ok"], false, "{result}");
+        assert_eq!(result["error"].as_str().unwrap(), "offline-miss");
+    }
+    // The cache root is exactly as it was.
+    for name in ["other.json", "download.tmp.1", "notes.txt"] {
+        assert!(
+            root.join(name).exists(),
+            "{name} was swept from the cache root"
+        );
+    }
+    assert!(tmp_planted.exists(), "a . host swept cdxrs-fetch itself");
+    // Nothing new appeared outside cdxrs-fetch either.
+    for file in walk(&root) {
+        assert!(
+            file.starts_with(&fetch_dir)
+                || file == root.join("other.json")
+                || file == root.join("download.tmp.1")
+                || file == root.join("notes.txt"),
+            "unexpected file written: {}",
+            file.display()
+        );
+    }
 }

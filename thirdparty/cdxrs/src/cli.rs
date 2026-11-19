@@ -77,6 +77,12 @@ pub struct FetchArgs {
     #[arg(long, default_value_t = crate::fetch::client::MAX_BODY_BYTES)]
     pub max_body_bytes: usize,
 
+    /// Ceiling on the total decoded bytes the whole batch may buffer, in
+    /// bytes (0 = no ceiling). Bodies that would cross it fail individually
+    /// and are recorded as failures.
+    #[arg(long, default_value_t = crate::fetch::client::DEFAULT_MAX_TOTAL_BYTES)]
+    pub max_total_bytes: u64,
+
     /// Disable on-disk cache.
     #[arg(long)]
     pub no_cache: bool,

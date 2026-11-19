@@ -138,7 +138,16 @@ pub async fn run(
         Some(&serde_json::to_value(&output.stats).unwrap_or_default()),
     );
 
-    let body = serde_json::to_string(&output)?;
-    io_mod::write_output(output_path, format!("{body}\n").as_bytes())?;
+    // Streamed, not built as a String first: the document can be as large
+    // as the decoded-byte budget, and materialising it only to write it
+    // would double the peak for no gain.
+    io_mod::write_output_streaming(output_path, |writer| {
+        serde_json::to_writer(&mut *writer, &output)
+            .map_err(|e| CdxrsError::Other(format!("failed to serialize output: {e}")))?;
+        writer
+            .write_all(b"\n")
+            .map_err(|e| CdxrsError::Other(format!("failed to write output: {e}")))?;
+        Ok(())
+    })?;
     Ok(())
 }

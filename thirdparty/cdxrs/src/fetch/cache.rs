@@ -304,11 +304,19 @@ impl HttpCache {
 
     fn path_for(&self, key: &CacheKey) -> Option<PathBuf> {
         let host = extract_host(&key.url)?;
-        Some(
-            self.fetch_subdir()
-                .join(host)
-                .join(format!("{}.json", key.hash())),
-        )
+        let path = self
+            .fetch_subdir()
+            .join(host)
+            .join(format!("{}.json", key.hash()));
+        // Defense in depth: an entry must live exactly one level below
+        // `cdxrs-fetch`, inside the host directory. `extract_host` refuses
+        // every host that could break this; the check keeps a future
+        // regression in either place from turning into a sweep or a write
+        // outside the fetch directory.
+        if path.parent().and_then(Path::parent) != Some(self.fetch_subdir().as_path()) {
+            return None;
+        }
+        Some(path)
     }
 
     /// Look up an entry, distinguishing fresh from stale-but-revalidatable.
@@ -637,8 +645,84 @@ fn file_age_secs(meta: &fs::Metadata, now: u64) -> u64 {
         .map_or(0, |d| now.saturating_sub(d.as_secs()))
 }
 
+/// Characters a Windows directory name may not contain. A host is used as
+/// a directory name on every platform the helper runs on, so the
+/// intersection of the platforms' rules applies everywhere: a name that is
+/// valid on the build platform but not on another would cache on one and
+/// silently fail on the other, which is worse than never caching.
+const HOST_FORBIDDEN_BYTES: &[u8] = b"/\\:*?\"<>|\0";
+
+/// Whether a host string can serve as one safe directory component.
+///
+/// The host arrives from a URL the scanned project wrote (a lockfile's
+/// `resolved` field), so it is untrusted input to the filesystem layer.
+/// `url` accepts `.` and `..` as hosts (`http://../x`), and
+/// `<root>/cdxrs-fetch/../<hash>.json` then names the cache root itself —
+/// whose files the once-per-process sweep would delete. Any host that
+/// could not be a single directory component on every supported platform
+/// is refused instead: separators, Windows-forbidden characters,
+/// Windows-reserved device names (also in their `NAME.something` spelling),
+/// trailing dots and spaces (stripped by Win32, which would make the
+/// written and read names disagree), and over-long names. A refused host
+/// is neither cached nor swept; the request itself still runs and fails to
+/// resolve on its own.
+fn safe_host_component(host: &str) -> bool {
+    if host.is_empty() || host == "." || host == ".." {
+        return false;
+    }
+    if host.len() > 200 {
+        // A single component is limited to 255 bytes on the filesystems in
+        // use; leave room for the `.tmp.<pid>.<seq>` suffix `put` adds.
+        return false;
+    }
+    if host.bytes().any(|b| HOST_FORBIDDEN_BYTES.contains(&b)) {
+        return false;
+    }
+    // Win32 strips trailing dots and spaces, so `host.` and `host` would
+    // map to the same directory while hashing differently — refuse both
+    // spellings rather than cache under a name only one platform reads
+    // back. (This also covers a host of only dots, e.g. `...`.)
+    if host.ends_with('.') || host.ends_with(' ') {
+        return false;
+    }
+    // Reserved device names: CON, PRN, AUX, NUL, COM1-9, LPT1-9 — matched
+    // on the first dot-separated label because Win32 reserves `CON.foo` as
+    // well. An IPv6 host (`[2001:db8::1]`) is refused here by the `:`
+    // check above; refusing costs only the cache, never the fetch.
+    let first_label = host
+        .split('.')
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if matches!(first_label.as_str(), "con" | "prn" | "aux" | "nul") {
+        return false;
+    }
+    if let Some(digits) = first_label
+        .strip_prefix("com")
+        .or_else(|| first_label.strip_prefix("lpt"))
+        && !digits.is_empty()
+        && digits.bytes().all(|b| b.is_ascii_digit())
+    {
+        return false;
+    }
+    true
+}
+
+/// The host of a URL, when it is safe to use as a cache directory name.
+///
+/// A fully-qualified name's trailing dot names the DNS root, not a
+/// directory; Win32 strips trailing dots from path components after the
+/// fact, which would make the written directory name and the looked-up one
+/// disagree. It is trimmed here instead, so `example.com.` and `example.com`
+/// share one bucket whose name is the same on every platform — the entry
+/// filename is a hash of the full URL, so the two spellings never collide
+/// on content. `%2e` percent-decoding happens before this runs (`url`
+/// decodes it into a literal `..` host), which is why the dot-forms are
+/// refused by value and not by spelling.
 fn extract_host(url: &str) -> Option<String> {
-    url::Url::parse(url).ok()?.host_str().map(|h| h.to_string())
+    let raw = url::Url::parse(url).ok()?.host_str()?.to_string();
+    let host = raw.trim_end_matches(['.', ' ']).to_string();
+    safe_host_component(&host).then_some(host)
 }
 
 /// Whether loopback hosts should be cached at all. Test doubles on
@@ -1217,6 +1301,174 @@ mod tests {
             None,
         );
         assert_eq!(p, Some(PathBuf::from("/home/user/.cache/cdxgen")));
+    }
+
+    // -------------------------------------------------- host-directory safety
+
+    #[test]
+    fn ordinary_hosts_are_safe_directory_names() {
+        for host in [
+            "registry.npmjs.org",
+            "api.github.com",
+            "crates.io",
+            "jsr.io",
+            "127.0.0.1",
+            "192.168.1.10",
+            "a-b.example",
+            "xn--e1afmkfd.xn--p1ai",
+            "x",
+        ] {
+            assert!(safe_host_component(host), "{host}");
+        }
+    }
+
+    #[test]
+    fn dot_hosts_are_refused() {
+        // `url` accepts these (`http://../x` parses with host `..`), and
+        // joined onto the cache root they name the root and its parent.
+        for host in ["", ".", "..", "...", "...."] {
+            assert!(!safe_host_component(host), "{host:?}");
+        }
+    }
+
+    #[test]
+    fn separator_and_windows_forbidden_hosts_are_refused() {
+        for host in [
+            "a/b", "a\\b", "a:b", "a*b", "a?b", "a\"b", "a<b", "a>b", "a|b", "a\0b",
+        ] {
+            assert!(!safe_host_component(host), "{host:?}");
+        }
+        // An IPv6 host arrives bracketed (`[2001:db8::1]`) and is refused by
+        // the same rule: refusing costs the cache, never the fetch.
+        assert!(!safe_host_component("[2001:db8::1]"));
+    }
+
+    #[test]
+    fn windows_reserved_device_hosts_are_refused() {
+        for host in [
+            "con",
+            "CON",
+            "Con.example.com",
+            "prn",
+            "aux",
+            "nul",
+            "com1",
+            "COM9.registry.io",
+            "lpt1",
+            "lpt9.example",
+        ] {
+            assert!(!safe_host_component(host), "{host:?}");
+        }
+        // COM-style names with non-digit tails are ordinary hosts.
+        for host in ["com.example.com", "lptools.io", "community.npmjs.org"] {
+            assert!(safe_host_component(host), "{host:?}");
+        }
+    }
+
+    #[test]
+    fn trailing_dot_and_space_hosts_are_refused() {
+        // Defensive: extract_host trims these before the check, but the
+        // check itself must not pass a name Win32 would mangle.
+        for host in ["host.", "host ", "host..", "host. ", "."] {
+            assert!(!safe_host_component(host), "{host:?}");
+        }
+    }
+
+    #[test]
+    fn overlong_hosts_are_refused() {
+        assert!(safe_host_component(&"a".repeat(200)));
+        assert!(!safe_host_component(&"a".repeat(201)));
+    }
+
+    #[test]
+    fn dot_and_dotdot_urls_extract_no_host() {
+        // `%2e` is decoded into a literal `..` by the parser itself, so the
+        // percent-encoded spelling is refused by value. `http:///x` is not
+        // here: the parser slides the path into the host and yields host
+        // `x`, which is a safe, ordinary directory name.
+        for url in [
+            "http://../x",
+            "http://./x",
+            "http://%2e%2e/x",
+            "http://%2e/x",
+        ] {
+            assert_eq!(extract_host(url), None, "{url}");
+        }
+        assert_eq!(
+            extract_host("https://registry.npmjs.org/left-pad"),
+            Some("registry.npmjs.org".to_string())
+        );
+        // A fully-qualified name's trailing dot is trimmed, and the two
+        // spellings share one directory.
+        assert_eq!(
+            extract_host("http://example.com./x"),
+            Some("example.com".to_string())
+        );
+    }
+
+    /// The regression that mattered: a `..` host must neither write into nor
+    /// sweep the cache root, and `.` must not sweep `cdxrs-fetch` itself.
+    /// Before host validation, the once-per-process sweep deleted every
+    /// expired `*.json` and stale `*.tmp.*` file in whatever directory the
+    /// joined path landed in — the cache root itself for host `..`.
+    #[test]
+    fn unsafe_hosts_neither_cache_nor_sweep_outside_their_directory() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_path_buf();
+        let old = SystemTime::now() - std::time::Duration::from_secs(DEFAULT_CACHE_TTL_SECS + 3600);
+        let planted = ["other.json", "download.tmp.1", "notes.txt"];
+        for name in planted {
+            let p = root.join(name);
+            fs::write(&p, "planted").unwrap();
+            let f = fs::OpenOptions::new().write(true).open(&p).unwrap();
+            f.set_times(fs::FileTimes::new().set_modified(old)).unwrap();
+        }
+
+        let cache = test_cache(root.clone(), DEFAULT_CACHE_TTL_SECS, true);
+        for url in ["http://../x", "http://./x", "http://%2e%2e/x"] {
+            let key = CacheKey::get(url);
+            // A get would sweep the host directory before reading; with a
+            // refused host there is no host directory to sweep.
+            assert!(matches!(cache.get(&key), Lookup::Miss), "{url}");
+            cache.put(&key, &entry(url, unix_now()));
+        }
+
+        for name in planted {
+            assert!(root.join(name).exists(), "{name} was swept");
+        }
+        // Nothing was written anywhere for the refused hosts either: apart
+        // from the planted files and directories, the root is untouched.
+        let written: Vec<_> = walk(&root)
+            .into_iter()
+            .filter(|p| {
+                !p.is_dir() && !planted.contains(&p.file_name().unwrap().to_string_lossy().as_ref())
+            })
+            .collect();
+        assert!(
+            written.is_empty(),
+            "files appeared for refused hosts: {written:?}"
+        );
+    }
+
+    #[test]
+    fn dot_host_request_is_served_neither_from_cache_nor_written() {
+        // Integration-shape check at the unit level: the entry path for a
+        // refused host does not exist, so a get is a plain miss and a put
+        // is a no-op even after a legitimate entry exists next to it.
+        let tmp = TempDir::new().unwrap();
+        let cache = test_cache(tmp.path().to_path_buf(), DEFAULT_CACHE_TTL_SECS, true);
+        let good = CacheKey::get("https://registry.example.com/pkg");
+        cache.put(
+            &good,
+            &entry("https://registry.example.com/pkg", unix_now()),
+        );
+        let evil = CacheKey::get("http://../registry.example.com/pkg");
+        cache.put(
+            &evil,
+            &entry("http://../registry.example.com/pkg", unix_now()),
+        );
+        assert!(matches!(cache.get(&evil), Lookup::Miss));
+        assert!(matches!(cache.get(&good), Lookup::Fresh(_)));
     }
 
     // ----------------------------------------------------- D26: loopback tests

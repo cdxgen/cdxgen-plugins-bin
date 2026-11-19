@@ -1,6 +1,6 @@
 [package]
 name = "cdxrs"
-version = "4.3.1"
+version = "4.4.0"
 edition = "2024"
 rust-version = "1.99"
 description = "Rust-native CycloneDX BOM tooling for cdxgen"
@@ -17,11 +17,21 @@ path = "src/main.rs"
 
 [dependencies]
 clap = { version = "4.6", features = ["derive"] }
+# gzip decode of fetch response bodies. Done by hand rather than through
+# reqwest's `.gzip(true)` so the decoded size can be compared with the wire
+# size (a decompressing middleware removes Content-Length, after which no
+# ratio between the two exists). Already in the tree via reqwest.
+flate2 = "1"
 # `idna` keeps the idn-email/idn-hostname format assertions alive under
 # default-features = false (jsonschema 0.52 split them out); the vendored
 # CycloneDX schemas assert "format": "idn-email" on contact addresses.
 jsonschema = { version = "0.59", default-features = false, features = ["idna"] }
-reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "gzip"] }
+# No "gzip" feature: decompression owned by fetch::client so the decoded
+# size can be measured against the wire size (see MAX_DECODE_RATIO). With
+# the feature compiled in, reqwest 0.13 decompresses by default — the
+# builder flag only turns the default off — and strips the response's
+# Content-Length, after which no ratio between the two sizes exists.
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 sha2 = "0.11"
@@ -34,6 +44,9 @@ httpdate = "1"
 insta = "1"
 tempfile = "3"
 wiremock = "0.6"
+# For building gzip fixtures in the fetch integration tests. Already a
+# regular dependency of the crate, so this adds nothing to the build.
+flate2 = "1"
 
 # Shared release profile across the Rust tools (cdxrs, cdxui, rusi): thin
 # LTO, abort on panic, size-optimized, stripped. Kept in lockstep so the
