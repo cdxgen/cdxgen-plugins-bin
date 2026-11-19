@@ -30,6 +30,7 @@ use reqwest::header::{
 use reqwest::{Client, NoProxy, Response, StatusCode};
 use tokio::sync::{Mutex, Semaphore};
 
+use super::body::Body;
 use super::rate::{Credentials, RateLimiter};
 
 /// Default global concurrency cap.
@@ -71,8 +72,8 @@ pub const MAX_BODY_BYTES: usize = 50 * 1024 * 1024;
 /// Default ceiling on the *total* decoded bytes one batch may buffer (512 MB).
 ///
 /// [`MAX_BODY_BYTES`] bounds a single body; without a batch-wide ceiling, a
-/// batch of a few thousand requests — every URL of which the scanned
-/// lockfile chose — can hold gigabytes of decoded bodies in memory and in
+/// batch of a few thousand requests (every URL of which the scanned
+/// lockfile chose) can hold gigabytes of decoded bodies in memory and in
 /// the output document. Charged per accepted chunk while decoding, so a
 /// run cannot overshoot by more than the chunks already in flight.
 /// `--max-total-bytes 0` disables the ceiling.
@@ -83,14 +84,14 @@ pub const DEFAULT_MAX_TOTAL_BYTES: u64 = 512 * 1024 * 1024;
 /// Registry metadata does not compress anywhere near this well, so a body
 /// that expands more than this once it passes
 /// [`DECODE_RATIO_FLOOR_BYTES`] decoded bytes is an attack, not a document.
-/// Only enforced when the wire size is known — which is why this client
+/// Only enforced when the wire size is known, which is why this client
 /// decodes gzip itself rather than letting reqwest do it invisibly: with
 /// automatic decompression the `Content-Length` header is gone by the time
 /// the body is seen, and there is no way left to relate the two sizes.
 pub const MAX_DECODE_RATIO: u64 = 100;
 
 /// A body is only held against [`MAX_DECODE_RATIO`] above this many decoded
-/// bytes. Below it the ratio is meaningless — a gzip member costs ~18 bytes
+/// bytes. Below it the ratio is meaningless: a gzip member costs ~18 bytes
 /// of header and trailer, so tiny bodies routinely "expand" enormously.
 pub const DECODE_RATIO_FLOOR_BYTES: usize = 1024 * 1024;
 
@@ -163,6 +164,19 @@ pub enum FetchFailure {
     },
 }
 
+impl FetchFailure {
+    /// Whether the body was refused by one of this client's size limits
+    /// (per body, expansion ratio or batch budget). Retrying the same URL
+    /// through another client would only fetch the same oversized body
+    /// again, so the result tells the caller not to.
+    pub fn is_size_refusal(&self) -> bool {
+        matches!(
+            self,
+            Self::BodyTooLarge | Self::BodyExpandsTooMuch | Self::BudgetExhausted
+        )
+    }
+}
+
 impl std::fmt::Display for FetchFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -187,12 +201,12 @@ impl std::fmt::Display for FetchFailure {
     }
 }
 
-/// A successful response: status, parsed body, and the validators needed to
+/// A successful response: status, body, and the validators needed to
 /// revalidate it later.
 #[derive(Debug, Clone)]
 pub struct FetchSuccess {
     pub status: u16,
-    pub body: serde_json::Value,
+    pub body: Body,
     pub etag: Option<String>,
     pub last_modified: Option<String>,
     /// True when the origin answered 304 and the caller should keep the body
@@ -207,12 +221,16 @@ pub struct Validators {
     pub last_modified: Option<String>,
 }
 
-/// The batch's shared ceiling on decoded bytes, charged as bodies decode.
+/// The batch's shared ceiling on the body bytes it holds.
 ///
-/// Every accepted chunk is charged before it is buffered, by the decoding
-/// reader itself, so the sum of what the batch holds — in memory and in the
-/// output document — cannot pass the ceiling by more than the chunks that
-/// were in flight when it tipped. Requests that would tip it fail with
+/// Every accepted chunk is charged before it is buffered, and a body served
+/// from the cache is charged when it is read, so the bytes the batch holds
+/// in memory and writes to its output cannot pass the ceiling by more than
+/// the chunks in flight when it tipped. Bodies are held as text (see
+/// [`Body`]), so these bytes are also the memory they take. A body refused
+/// for its own size or shape gives its charge back, so an oversized or
+/// malformed answer cannot spend the budget that well-formed answers need.
+/// Requests that would tip the ceiling fail with
 /// [`FetchFailure::BudgetExhausted`]; a ceiling of zero means unlimited.
 #[derive(Debug)]
 pub struct DecodedBudget {
@@ -230,7 +248,7 @@ impl DecodedBudget {
 
     /// Charge `bytes` against the ceiling; `false` when the batch is over it.
     ///
-    /// The charge stands even when the answer is no — an over-budget batch
+    /// The charge stands even when the answer is no: an over-budget batch
     /// stays over budget, so every later request also fails fast instead of
     /// each re-reading the same almost-enough headroom.
     fn charge(&self, bytes: usize) -> bool {
@@ -241,6 +259,18 @@ impl DecodedBudget {
             .used
             .fetch_add(bytes as u64, std::sync::atomic::Ordering::Relaxed);
         used.saturating_add(bytes as u64) <= self.ceiling
+    }
+
+    /// Give back the charge for bytes that are no longer held.
+    fn refund(&self, bytes: usize) {
+        if self.ceiling == 0 || bytes == 0 {
+            return;
+        }
+        let _ = self.used.try_update(
+            std::sync::atomic::Ordering::Relaxed,
+            std::sync::atomic::Ordering::Relaxed,
+            |used| Some(used.saturating_sub(bytes as u64)),
+        );
     }
 }
 
@@ -265,6 +295,12 @@ pub struct FetchClient {
 }
 
 impl FetchClient {
+    /// Charge a body served from the cache against the batch budget;
+    /// `false` when the batch is over it and the body must not be served.
+    pub fn charge_cached_body(&self, bytes: usize) -> bool {
+        self.budget.charge(bytes)
+    }
+
     pub fn new(config: FetchClientConfig) -> Result<Self, reqwest::Error> {
         let mut builder = Client::builder()
             .use_rustls_tls()
@@ -395,7 +431,7 @@ impl FetchClient {
                     if status == StatusCode::NOT_MODIFIED {
                         return Ok(FetchSuccess {
                             status: status.as_u16(),
-                            body: serde_json::Value::Null,
+                            body: Body::null(),
                             etag: header_string(&resp, reqwest::header::ETAG),
                             last_modified: header_string(&resp, reqwest::header::LAST_MODIFIED),
                             not_modified: true,
@@ -420,17 +456,21 @@ impl FetchClient {
                         read_body_capped(resp, url, self.config.max_body_bytes, &self.budget)
                             .await?;
 
+                    let held = bytes.len();
                     let body =
                         if content_type.contains("json") || content_type.contains("javascript") {
-                            serde_json::from_slice::<serde_json::Value>(&bytes)
-                                .map_err(|_| FetchFailure::Malformed)?
+                            Body::from_json_bytes(bytes)
                         } else {
                             // Non-JSON (e.g. an HTML licence page) is handed back
                             // as a string so the caller can scrape it.
-                            serde_json::Value::String(
-                                String::from_utf8(bytes).map_err(|_| FetchFailure::Malformed)?,
-                            )
+                            Body::from_text_bytes(bytes)
                         };
+                    let Some(body) = body else {
+                        // Nothing is held for a malformed body, so the budget
+                        // gets its bytes back.
+                        self.budget.refund(held);
+                        return Err(FetchFailure::Malformed);
+                    };
 
                     return Ok(FetchSuccess {
                         status: status.as_u16(),
@@ -552,11 +592,10 @@ impl Drop for InFlightGuard {
 /// never grows a body by more than its own overhead, so a raw body past the
 /// cap can only decode past the cap, and refusing it early bounds what a
 /// gzip decoder is ever handed. A body the response declares as gzip is
-/// inflated here — not by reqwest — so that decoded bytes can be held
+/// inflated here, not by reqwest, so that decoded bytes can be held
 /// against the bytes actually received; see [`MAX_DECODE_RATIO`] for why
-/// that comparison needs this manual decode. A corrupt gzip container was a
-/// transport-level decode error when reqwest owned decompression; it is a
-/// [`FetchFailure::Malformed`] now, which names the body rather than the
+/// that comparison needs this manual decode. A corrupt gzip container is a
+/// [`FetchFailure::Malformed`], which names the body rather than the
 /// connection.
 async fn read_body_capped(
     mut resp: Response,
@@ -620,6 +659,12 @@ async fn read_body_capped(
     let mut out: Vec<u8> = Vec::new();
     let mut reader = flate2::read::MultiGzDecoder::new(wire.as_slice());
     let mut chunk = vec![0u8; 64 * 1024];
+    // Every failure below drops `out`, so it gives back what `out` was
+    // charged. A budget refusal keeps its charge (see DecodedBudget::charge).
+    let refuse = |out: &Vec<u8>, failure: FetchFailure| {
+        budget.refund(out.len());
+        Err(failure)
+    };
     loop {
         use std::io::Read;
         match reader.read(&mut chunk) {
@@ -630,7 +675,7 @@ async fn read_body_capped(
                         "body for {} exceeds {max_body_bytes} bytes decoded, skipping",
                         redact_url(url)
                     ));
-                    return Err(FetchFailure::BodyTooLarge);
+                    return refuse(&out, FetchFailure::BodyTooLarge);
                 }
                 if out.len() + n > DECODE_RATIO_FLOOR_BYTES
                     && (out.len() + n) as u64 > wire.len() as u64 * MAX_DECODE_RATIO
@@ -641,7 +686,7 @@ async fn read_body_capped(
                         MAX_DECODE_RATIO,
                         wire.len()
                     ));
-                    return Err(FetchFailure::BodyExpandsTooMuch);
+                    return refuse(&out, FetchFailure::BodyExpandsTooMuch);
                 }
                 if !budget.charge(n) {
                     crate::log::warn(&format!(
@@ -653,7 +698,7 @@ async fn read_body_capped(
                 }
                 out.extend_from_slice(&chunk[..n]);
             }
-            Err(_) => return Err(FetchFailure::Malformed),
+            Err(_) => return refuse(&out, FetchFailure::Malformed),
         }
     }
 }
@@ -694,10 +739,9 @@ pub fn request_headers(
     validators: &Validators,
 ) -> HeaderMap {
     let mut headers = HeaderMap::new();
-    // Advertise gzip exactly as reqwest's `.gzip(true)` used to: the client
-    // above no longer decompresses transparently, but the negotiation — and
-    // the bandwidth it saves — stays. Only gzip is offered, because only
-    // gzip is decoded (see [`read_body_capped`]).
+    // Advertise gzip, which `read_body_capped` decodes, to keep the
+    // bandwidth compression saves. Only gzip is offered, because only gzip
+    // is decoded.
     if let Ok(v) = HeaderValue::try_from("gzip") {
         headers.insert(ACCEPT_ENCODING, v);
     }
@@ -1079,7 +1123,7 @@ mod client_tests {
         let budget = DecodedBudget::new(100);
         assert!(!budget.charge(200));
         // The refused charge still counted, so even a tiny later charge
-        // fails — an over-budget batch stays over budget.
+        // fails: an over-budget batch stays over budget.
         assert!(!budget.charge(1));
     }
 

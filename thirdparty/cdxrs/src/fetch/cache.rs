@@ -143,7 +143,7 @@ pub struct CacheEntry {
     pub etag: Option<String>,
     pub last_modified: Option<String>,
     pub fetched_at: u64,
-    pub body: serde_json::Value,
+    pub body: super::body::Body,
 }
 
 /// Outcome of a cache lookup.
@@ -657,7 +657,7 @@ const HOST_FORBIDDEN_BYTES: &[u8] = b"/\\:*?\"<>|\0";
 /// The host arrives from a URL the scanned project wrote (a lockfile's
 /// `resolved` field), so it is untrusted input to the filesystem layer.
 /// `url` accepts `.` and `..` as hosts (`http://../x`), and
-/// `<root>/cdxrs-fetch/../<hash>.json` then names the cache root itself —
+/// `<root>/cdxrs-fetch/../<hash>.json` then names the cache root itself,
 /// whose files the once-per-process sweep would delete. Any host that
 /// could not be a single directory component on every supported platform
 /// is refused instead: separators, Windows-forbidden characters,
@@ -679,13 +679,13 @@ fn safe_host_component(host: &str) -> bool {
         return false;
     }
     // Win32 strips trailing dots and spaces, so `host.` and `host` would
-    // map to the same directory while hashing differently — refuse both
+    // map to the same directory while hashing differently, so refuse both
     // spellings rather than cache under a name only one platform reads
     // back. (This also covers a host of only dots, e.g. `...`.)
     if host.ends_with('.') || host.ends_with(' ') {
         return false;
     }
-    // Reserved device names: CON, PRN, AUX, NUL, COM1-9, LPT1-9 — matched
+    // Reserved device names: CON, PRN, AUX, NUL, COM1-9, LPT1-9, matched
     // on the first dot-separated label because Win32 reserves `CON.foo` as
     // well. An IPv6 host (`[2001:db8::1]`) is refused here by the `:`
     // check above; refusing costs only the cache, never the fetch.
@@ -714,7 +714,7 @@ fn safe_host_component(host: &str) -> bool {
 /// directory; Win32 strips trailing dots from path components after the
 /// fact, which would make the written directory name and the looked-up one
 /// disagree. It is trimmed here instead, so `example.com.` and `example.com`
-/// share one bucket whose name is the same on every platform — the entry
+/// share one bucket whose name is the same on every platform. The entry
 /// filename is a hash of the full URL, so the two spellings never collide
 /// on content. `%2e` percent-decoding happens before this runs (`url`
 /// decodes it into a literal `..` host), which is why the dot-forms are
@@ -832,7 +832,9 @@ mod tests {
             etag: Some("\"abc\"".to_string()),
             last_modified: None,
             fetched_at,
-            body: serde_json::json!({"crate": {"description": "test"}}),
+            body: crate::fetch::body::Body::from_value(
+                &serde_json::json!({"crate": {"description": "test"}}),
+            ),
         }
     }
 
@@ -1057,7 +1059,9 @@ mod tests {
                     let cache =
                         HttpCache::new(root, DEFAULT_CACHE_TTL_SECS, DEFAULT_MAX_CACHE_BYTES, true);
                     let mut e = entry(&url, unix_now());
-                    e.body = serde_json::json!({ "writer": i, "pad": "x".repeat(64 * 1024) });
+                    e.body = crate::fetch::body::Body::from_value(
+                        &serde_json::json!({ "writer": i, "pad": "x".repeat(64 * 1024) }),
+                    );
                     cache.put(&key, &e);
                 })
             })
@@ -1068,7 +1072,7 @@ mod tests {
 
         let cache = HttpCache::new(root, DEFAULT_CACHE_TTL_SECS, DEFAULT_MAX_CACHE_BYTES, true);
         match cache.get(&key) {
-            Lookup::Fresh(got) => assert!(got.body.get("writer").is_some()),
+            Lookup::Fresh(got) => assert!(got.body.to_value().get("writer").is_some()),
             other => panic!("expected one complete entry, got {other:?}"),
         }
         // No temp files left behind.
@@ -1406,11 +1410,10 @@ mod tests {
         );
     }
 
-    /// The regression that mattered: a `..` host must neither write into nor
-    /// sweep the cache root, and `.` must not sweep `cdxrs-fetch` itself.
-    /// Before host validation, the once-per-process sweep deleted every
-    /// expired `*.json` and stale `*.tmp.*` file in whatever directory the
-    /// joined path landed in — the cache root itself for host `..`.
+    /// A `..` host must neither write into nor sweep the cache root, and `.`
+    /// must not sweep `cdxrs-fetch` itself. The sweep deletes every expired
+    /// `*.json` and stale `*.tmp.*` file in the host directory, so a host
+    /// directory outside `cdxrs-fetch` would lose other tools' files.
     #[test]
     fn unsafe_hosts_neither_cache_nor_sweep_outside_their_directory() {
         let tmp = TempDir::new().unwrap();
@@ -1521,7 +1524,8 @@ mod tests {
         ];
         for (i, url) in urls.iter().enumerate() {
             let mut e = entry(url, now);
-            e.body = serde_json::json!({"pad": "x".repeat(200)});
+            e.body =
+                crate::fetch::body::Body::from_value(&serde_json::json!({"pad": "x".repeat(200)}));
             cache.put(&CacheKey::get(url), &e);
             // Written an hour apart, so write order alone would evict `a` first.
             let path = cache.path_for(&CacheKey::get(url)).unwrap();
@@ -1610,7 +1614,8 @@ mod tests {
         for i in 0..10 {
             let url = format!("https://host.example.com/pkg-{i}");
             let mut e = entry(&url, now + i);
-            e.body = serde_json::json!({"pad": "x".repeat(200)});
+            e.body =
+                crate::fetch::body::Body::from_value(&serde_json::json!({"pad": "x".repeat(200)}));
             cache.put(&CacheKey::get(&url), &e);
         }
         // Every remaining entry must be readable and well-formed.
@@ -1642,7 +1647,9 @@ mod tests {
                     let cache = HttpCache::new(root, 0, 10 * 1024 * 1024, true);
                     let key = CacheKey::get(&url);
                     let mut e = entry(&url, unix_now());
-                    e.body = serde_json::json!({"i": i, "pad": "x".repeat(1024)});
+                    e.body = crate::fetch::body::Body::from_value(
+                        &serde_json::json!({"i": i, "pad": "x".repeat(1024)}),
+                    );
                     cache.put(&key, &e);
                 })
             })
@@ -1654,7 +1661,7 @@ mod tests {
         for i in 0..8 {
             let url = format!("{url_base}{i}");
             match cache.get(&CacheKey::get(&url)) {
-                Lookup::Fresh(e) => assert_eq!(e.body["i"], i),
+                Lookup::Fresh(e) => assert_eq!(e.body.to_value()["i"], i),
                 other => panic!("entry {i} lost after concurrent writes: {other:?}"),
             }
         }
@@ -1671,7 +1678,9 @@ mod tests {
         for i in 0..200u32 {
             let url = format!("https://registry.example.com/pkg{i}");
             let mut entry = entry(&url, unix_now());
-            entry.body = serde_json::json!({ "pad": "y".repeat(20_000) });
+            entry.body = crate::fetch::body::Body::from_value(
+                &serde_json::json!({ "pad": "y".repeat(20_000) }),
+            );
             cache.put(&CacheKey::get(&url), &entry);
         }
         assert_eq!(
@@ -1699,7 +1708,9 @@ mod tests {
         for i in 0..120u32 {
             let url = format!("https://registry.example.com/big{i}");
             let mut entry = entry(&url, unix_now());
-            entry.body = serde_json::json!({ "pad": "z".repeat(100_000) });
+            entry.body = crate::fetch::body::Body::from_value(
+                &serde_json::json!({ "pad": "z".repeat(100_000) }),
+            );
             cache.put(&CacheKey::get(&url), &entry);
         }
         assert!(
@@ -1777,7 +1788,9 @@ mod tests {
                 etag: None,
                 last_modified: None,
                 fetched_at: i as u64,
-                body: serde_json::json!({"i": i, "pad": "x".repeat(100)}),
+                body: crate::fetch::body::Body::from_value(
+                    &serde_json::json!({"i": i, "pad": "x".repeat(100)}),
+                ),
             };
             let data = serde_json::to_vec(&entry).unwrap();
             let path = host_dir.join(format!("{i:016x}.json"));

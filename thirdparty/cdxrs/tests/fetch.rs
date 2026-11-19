@@ -1067,8 +1067,7 @@ fn gzip(data: &[u8]) -> Vec<u8> {
 }
 
 /// A registry that answers with `Content-Encoding: gzip` must still come
-/// back decoded — this is the behaviour reqwest's `.gzip(true)` used to
-/// provide, kept now that the client decodes gzip itself.
+/// back decoded.
 #[tokio::test]
 async fn gzip_responses_are_decoded() {
     let server = MockServer::start().await;
@@ -1091,7 +1090,7 @@ async fn gzip_responses_are_decoded() {
     assert_eq!(run.result("x")["body"], body);
 }
 
-/// The client advertises gzip itself now that reqwest no longer does.
+/// The client advertises the one encoding it decodes.
 #[tokio::test]
 async fn accept_encoding_gzip_is_sent() {
     let server = MockServer::start().await;
@@ -1140,6 +1139,10 @@ async fn a_gzip_body_expanding_over_the_ratio_is_refused() {
     assert!(
         error.contains("100x the bytes received"),
         "unexpected error: {error}"
+    );
+    assert_eq!(
+        result["refused"], true,
+        "a size refusal tells the caller not to retry"
     );
 }
 
@@ -1315,4 +1318,104 @@ async fn dot_and_dotdot_hosts_do_not_touch_the_cache_root() {
             file.display()
         );
     }
+}
+
+/// Bodies are held as their JSON text, never as a parsed tree, so a body the
+/// budget admits costs memory equal to its bytes. The body still arrives
+/// unchanged, whitespace included, because nothing re-serializes it.
+#[tokio::test]
+async fn bodies_pass_through_as_the_text_received() {
+    let server = MockServer::start().await;
+    let raw = "{ \"name\" :  \"left-pad\", \"n\": [0,0,0] }";
+    Mock::given(method("GET"))
+        .and(path("/raw"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(raw, JSON))
+        .mount(&server)
+        .await;
+    let input = batch(vec![request("x", &format!("{}/raw", server.uri()))]);
+    let run = run_fetch(&input, &[]).expect_success();
+    assert_eq!(run.result("x")["body"]["name"], "left-pad");
+    assert!(
+        run.stdout.contains(raw),
+        "body was rewritten: {}",
+        run.stdout
+    );
+}
+
+/// Malformed JSON is refused without spending the budget, so it cannot
+/// starve the well-formed answers behind it.
+#[tokio::test]
+async fn a_malformed_body_gives_its_budget_back() {
+    let server = MockServer::start().await;
+    let bad = format!(
+        "[\"{}\"",
+        String::from_utf8(hex_noise(1024 * 1024)).unwrap()
+    );
+    let good = format!("\"{}\"", String::from_utf8(hex_noise(700 * 1024)).unwrap());
+    Mock::given(method("GET"))
+        .and(path_regex("/bad.*"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(bad, JSON))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path_regex("/good.*"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(good, JSON))
+        .mount(&server)
+        .await;
+    // One request at a time, bad ones first, so the outcome does not depend
+    // on scheduling: three malformed MiB would spend a 1.6 MB budget twice
+    // over if their charges stood.
+    let input = batch(vec![
+        request("bad1", &format!("{}/bad?1", server.uri())),
+        request("bad2", &format!("{}/bad?2", server.uri())),
+        request("bad3", &format!("{}/bad?3", server.uri())),
+        request("good1", &format!("{}/good?1", server.uri())),
+        request("good2", &format!("{}/good?2", server.uri())),
+    ]);
+    let run = run_fetch(
+        &input,
+        &["--concurrency", "1", "--max-total-bytes", "1600000"],
+    )
+    .expect_success();
+    for id in ["bad1", "bad2", "bad3"] {
+        assert_eq!(run.result(id)["ok"], false);
+        assert!(
+            run.result(id).get("refused").is_none(),
+            "malformed is not a size refusal"
+        );
+    }
+    for id in ["good1", "good2"] {
+        assert_eq!(run.result(id)["ok"], true, "{}", run.result(id)["error"]);
+    }
+}
+
+/// A body served from the cache is held and written like a fetched one, so
+/// it is charged to the budget too. Otherwise each scan of the same project
+/// could add another budget's worth of cached bodies to the next.
+#[tokio::test]
+async fn cached_bodies_are_charged_to_the_budget() {
+    let server = MockServer::start().await;
+    let raw = format!("\"{}\"", String::from_utf8(hex_noise(1024 * 1024)).unwrap());
+    Mock::given(method("GET"))
+        .and(path_regex("/doc.*"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(raw, JSON))
+        .mount(&server)
+        .await;
+    let cache = TempDir::new().unwrap();
+    let input = batch(vec![
+        request("a", &format!("{}/doc?a", server.uri())),
+        request("b", &format!("{}/doc?b", server.uri())),
+    ]);
+    let first = run_fetch_cached(&input, &[], cache.path()).expect_success();
+    assert_eq!(first.stats()["ok"], 2);
+
+    let second =
+        run_fetch_cached(&input, &["--max-total-bytes", "1500000"], cache.path()).expect_success();
+    assert_eq!(
+        second.stats()["cacheHits"],
+        1,
+        "{}",
+        second.json()["results"]
+    );
+    assert_eq!(second.stats()["budgetExhausted"], 1);
 }

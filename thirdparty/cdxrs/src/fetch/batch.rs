@@ -22,6 +22,7 @@ use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 
+use super::body::Body;
 use super::cache::{CacheEntry, CacheKey, HttpCache, Lookup, unix_now};
 use super::client::{FetchClient, FetchFailure, Validators};
 
@@ -82,25 +83,23 @@ pub struct BatchInput {
 
 /// One result, correlated by `id`.
 ///
-/// `body` is shared, not copied: a body fanned out to N caller ids costs one
-/// allocation plus N `Arc` clones, not N deep copies. Before it was shared,
-/// a single URL named by many ids (the shape the coalescing below exists
-/// for) multiplied the body in memory by the id count, and the batch's
-/// decoded-byte budget could not see any of it — the clones happened after
-/// the fetch that was charged.
+/// `body` is shared, not copied: a body fanned out to N caller ids is one
+/// allocation, which is the allocation the batch budget charged for.
 #[derive(Debug, Clone, Serialize)]
 pub struct BatchResult {
     pub id: String,
     pub ok: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<u16>,
-    #[serde(
-        skip_serializing_if = "Option::is_none",
-        serialize_with = "serialize_shared_body"
-    )]
-    pub body: Option<Arc<serde_json::Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub body: Option<Body>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// True when the body was refused by a size limit (per body, expansion
+    /// ratio or batch budget). Fetching the same URL again through another
+    /// client would fetch the same body, so the caller should not retry it.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub refused: bool,
     #[serde(rename = "fromCache")]
     pub from_cache: bool,
     /// True when a stale cache entry was confirmed still valid with a 304.
@@ -112,15 +111,6 @@ pub struct BatchResult {
     /// Seconds the host asked the caller to wait, with `quotaExhausted`.
     #[serde(rename = "retryAfterSecs", skip_serializing_if = "Option::is_none")]
     pub retry_after_secs: Option<u64>,
-}
-
-/// Serialize a shared body by reference: the wire format is unchanged, only
-/// the in-memory representation is shared.
-fn serialize_shared_body<S>(value: &Option<Arc<serde_json::Value>>, s: S) -> Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    value.as_deref().serialize(s)
 }
 
 /// A count of zero adds nothing to the envelope.
@@ -263,15 +253,14 @@ pub async fn run_batch(
 
         let mut quota = None;
         let mut budget_exhausted = false;
+        let mut refused = false;
         let (ok, status, body, error, from_cache, revalidated) = match outcome {
             Outcome::Fetched { status, body } => {
-                (true, Some(status), Some(Arc::new(body)), None, false, false)
+                (true, Some(status), Some(body), None, false, false)
             }
-            Outcome::Cached { status, body } => {
-                (true, Some(status), Some(Arc::new(body)), None, true, false)
-            }
+            Outcome::Cached { status, body } => (true, Some(status), Some(body), None, true, false),
             Outcome::Revalidated { status, body } => {
-                (true, Some(status), Some(Arc::new(body)), None, true, true)
+                (true, Some(status), Some(body), None, true, true)
             }
             Outcome::OfflineMiss => (
                 false,
@@ -306,6 +295,7 @@ pub async fn run_batch(
             }
             Outcome::BudgetExhausted => {
                 budget_exhausted = true;
+                refused = true;
                 (
                     false,
                     None,
@@ -314,6 +304,10 @@ pub async fn run_batch(
                     false,
                     false,
                 )
+            }
+            Outcome::Refused(msg) => {
+                refused = true;
+                (false, None, None, Some(msg), false, false)
             }
             Outcome::Failed(msg) => (false, None, None, Some(msg), false, false),
         };
@@ -339,7 +333,7 @@ pub async fn run_batch(
         }
 
         // Fan the single fetch back out to every caller id that asked for
-        // it. The body is an Arc, so the fan-out shares one copy.
+        // it. Cloning a Body shares its text, so the fan-out holds one copy.
         for id in ids {
             results.push(BatchResult {
                 id: id.clone(),
@@ -347,6 +341,7 @@ pub async fn run_batch(
                 status,
                 body: body.clone(),
                 error: error.clone(),
+                refused,
                 from_cache,
                 revalidated,
                 quota_exhausted: quota.is_some(),
@@ -370,15 +365,15 @@ pub async fn run_batch(
 enum Outcome {
     Fetched {
         status: u16,
-        body: serde_json::Value,
+        body: Body,
     },
     Cached {
         status: u16,
-        body: serde_json::Value,
+        body: Body,
     },
     Revalidated {
         status: u16,
-        body: serde_json::Value,
+        body: Body,
     },
     OfflineMiss,
     Status(u16),
@@ -387,9 +382,26 @@ enum Outcome {
         retry_after_secs: Option<u64>,
     },
     /// The batch's decoded-byte budget was spent before this request's
-    /// body could be decoded.
+    /// body could be held.
     BudgetExhausted,
+    /// The body was refused by its own size or expansion ratio.
+    Refused(String),
     Failed(String),
+}
+
+/// Serve a cache entry, charging its body to the batch budget like a fetched
+/// one: a cached body is held in memory and written to the output just the
+/// same, and an uncharged cache would let repeated scans of one project grow
+/// the batch past the ceiling a run at a time.
+fn serve_cached(client: &FetchClient, status: u16, body: Body, revalidated: bool) -> Outcome {
+    if !client.charge_cached_body(body.len()) {
+        return Outcome::BudgetExhausted;
+    }
+    if revalidated {
+        Outcome::Revalidated { status, body }
+    } else {
+        Outcome::Cached { status, body }
+    }
 }
 
 async fn fetch_one(
@@ -406,20 +418,16 @@ async fn fetch_one(
             // Offline deliberately accepts a stale entry: the alternative is a
             // recorded absence, and a slightly old licence string is more
             // useful than none.
-            Lookup::Fresh(entry) | Lookup::Stale(entry) => Outcome::Cached {
-                status: entry.status,
-                body: entry.body,
-            },
+            Lookup::Fresh(entry) | Lookup::Stale(entry) => {
+                serve_cached(client, entry.status, entry.body, false)
+            }
             Lookup::Miss => Outcome::OfflineMiss,
         };
     }
 
     let validators = match &lookup {
         Lookup::Fresh(entry) => {
-            return Outcome::Cached {
-                status: entry.status,
-                body: entry.body.clone(),
-            };
+            return serve_cached(client, entry.status, entry.body.clone(), false);
         }
         Lookup::Stale(entry) => Validators {
             etag: entry.etag.clone(),
@@ -452,7 +460,7 @@ async fn fetch_one(
                         entry.last_modified = success.last_modified;
                     }
                     cache.put(key, &entry);
-                    Outcome::Revalidated { status, body }
+                    serve_cached(client, status, body, true)
                 }
                 // A 304 without a cached body should not happen (we only send
                 // validators when we have one) but must not be reported as a
@@ -484,10 +492,7 @@ async fn fetch_one(
             if code >= 500
                 && let Lookup::Stale(entry) = lookup
             {
-                return Outcome::Cached {
-                    status: entry.status,
-                    body: entry.body,
-                };
+                return serve_cached(client, entry.status, entry.body, false);
             }
             Outcome::Status(code)
         }
@@ -498,15 +503,17 @@ async fn fetch_one(
             status,
             retry_after_secs,
         },
+        // A spent budget cannot afford the stale copy either.
         Err(FetchFailure::BudgetExhausted) => Outcome::BudgetExhausted,
         Err(failure) => {
             if let Lookup::Stale(entry) = lookup {
-                return Outcome::Cached {
-                    status: entry.status,
-                    body: entry.body,
-                };
+                return serve_cached(client, entry.status, entry.body, false);
             }
-            Outcome::Failed(failure.to_string())
+            if failure.is_size_refusal() {
+                Outcome::Refused(failure.to_string())
+            } else {
+                Outcome::Failed(failure.to_string())
+            }
         }
     }
 }
