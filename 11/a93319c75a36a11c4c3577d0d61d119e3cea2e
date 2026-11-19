@@ -1,0 +1,51 @@
+packages/linux-arm64/package.json
+  s_c143e52f207eb0::t_c6ef8899e2249b 3
+packages/linuxmusl-arm64/package.json
+  s_c143e52f207eb0::t_c6ef8899e2249b 3
+packages/darwin-amd64/package.json
+  s_c143e52f207eb0::t_c6ef8899e2249b 3
+packages/linux-amd64/package.json
+  s_c143e52f207eb0::t_c6ef8899e2249b 3
+packages/linux-arm/package.json
+  s_c143e52f207eb0::t_c6ef8899e2249b 3
+packages/windows-amd64/package.json
+  s_c143e52f207eb0::t_c6ef8899e2249b 3
+thirdparty/cdxui/Cargo.toml
+  s_c143e52f207eb0::t_c6ef8899e2249b 3
+packages/linuxmusl-amd64/package.json
+  s_c143e52f207eb0::t_c6ef8899e2249b 3
+thirdparty/rusi/Cargo.toml
+  s_c143e52f207eb0::t_c6ef8899e2249b 25
+packages/windows-arm64/package.json
+  s_c143e52f207eb0::t_c6ef8899e2249b 3
+packages/darwin-arm64/package.json
+  s_c143e52f207eb0::t_c6ef8899e2249b 3
+packages/ppc64/package.json
+  s_c143e52f207eb0::t_c6ef8899e2249b 3
+package.json
+  s_c143e52f207eb0::t_c6ef8899e2249b 3
+packages/linux-riscv64/package.json
+  s_c143e52f207eb0::t_c6ef8899e2249b 3
+package-lock.json
+  s_c143e52f207eb0::t_e3fcb394130619 3,9
+thirdparty/cdxui/Cargo.lock
+  s_c143e52f207eb0::t_ba43e0f6d7f804 181
+thirdparty/rusi/Cargo.lock
+  s_c143e52f207eb0::t_bb6c74a9032edb 295,309,324,341,352
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "11a93319c75a36a11c4c3577d0d61d119e3cea2e",
+  "prompts": {},
+  "sessions": {
+    "s_c143e52f207eb0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_858a662d-d1a5-44ed-8858-e40c68415945",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
