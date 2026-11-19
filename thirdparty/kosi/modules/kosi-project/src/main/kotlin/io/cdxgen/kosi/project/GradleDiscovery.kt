@@ -1,5 +1,6 @@
 package io.cdxgen.kosi.project
 
+import io.cdxgen.kosi.schema.SafeFiles
 import java.nio.file.Files
 import java.nio.file.Path
 
@@ -115,7 +116,7 @@ object GradleDiscovery {
 
     private fun findBuildFile(dir: Path): Path? =
         listOf("build.gradle.kts", "build.gradle").firstNotNullOfOrNull { f ->
-            Files.isRegularFile(dir.resolve(f)).takeIf { it }?.let { dir.resolve(f) }
+            SafeFiles.isRegularFile(dir.resolve(f)).takeIf { it }?.let { dir.resolve(f) }
         }
 
     private fun groupFromBuildFile(buildFile: Path): String? =
@@ -404,11 +405,11 @@ object GradleDiscovery {
         return r.relativize(d).toString().replace('\\', '/')
     }
 
-    private fun readIfExists(dir: Path, name: String): String? {
-        val p = dir.resolve(name)
-        return if (Files.isRegularFile(p)) Files.readString(p) else null
-    }
+    // SafeFiles on both: a linked settings/build file or gradle.properties
+    // is the analysed tree reaching outside itself, and its text (group,
+    // version, member list) must not come from there.
+    private fun readIfExists(dir: Path, name: String): String? =
+        SafeFiles.readString(dir.resolve(name))
 
-    private fun readText(file: Path): String? =
-        if (Files.isRegularFile(file)) Files.readString(file) else null
+    private fun readText(file: Path): String? = SafeFiles.readString(file)
 }

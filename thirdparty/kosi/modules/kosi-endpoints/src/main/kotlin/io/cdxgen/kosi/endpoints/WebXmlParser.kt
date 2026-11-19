@@ -1,5 +1,6 @@
 package io.cdxgen.kosi.endpoints
 
+import io.cdxgen.kosi.schema.SafeFiles
 import java.nio.file.Files
 import java.nio.file.Path
 
@@ -59,7 +60,7 @@ object WebXmlParser {
     fun parse(root: Path): List<ServletMapping> {
         if (!Files.isDirectory(root)) return emptyList()
         val descriptors = Files.walk(root).use { stream ->
-            stream.filter { Files.isRegularFile(it) }
+            stream.filter { SafeFiles.isRegularFile(it) }
                 .filter { it.fileName.toString() == "web.xml" }
                 .filter { it.parent?.fileName?.toString() == "WEB-INF" }
                 .sorted()
@@ -68,7 +69,7 @@ object WebXmlParser {
         val out = mutableListOf<ServletMapping>()
         for (descriptor in descriptors) {
             val text = try {
-                Files.readString(descriptor)
+                SafeFiles.readString(descriptor) ?: continue
             } catch (_: Exception) {
                 continue
             }
@@ -81,7 +82,7 @@ object WebXmlParser {
     fun securityConstraints(root: Path): List<SecurityConstraint> {
         if (!Files.isDirectory(root)) return emptyList()
         val descriptors = Files.walk(root).use { stream ->
-            stream.filter { Files.isRegularFile(it) }
+            stream.filter { SafeFiles.isRegularFile(it) }
                 .filter { it.fileName.toString() == "web.xml" }
                 .filter { it.parent?.fileName?.toString() == "WEB-INF" }
                 .sorted()
@@ -90,7 +91,7 @@ object WebXmlParser {
         val out = mutableListOf<SecurityConstraint>()
         for (descriptor in descriptors) {
             val text = try {
-                Files.readString(descriptor)
+                SafeFiles.readString(descriptor) ?: continue
             } catch (_: Exception) {
                 continue
             }

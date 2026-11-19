@@ -1,5 +1,6 @@
 package io.cdxgen.kosi.project
 
+import io.cdxgen.kosi.schema.SafeFiles
 import java.nio.file.Files
 import java.nio.file.Path
 
@@ -109,13 +110,13 @@ object MavenDiscovery {
         var index = 0
         while (index < poms.size) {
             val pom = poms[index++]
-            val text = if (Files.isRegularFile(pom)) Files.readString(pom) else continue
+            val text = SafeFiles.readString(pom) ?: continue
             val xml = XmlElement.parse(text)
             val modulesSection = xml.child("modules") ?: continue
             for (m in modulesSection.childrenNamed("module")) {
                 val dir = root.resolve(m.text.trim())
                 val nested = dir.resolve("pom.xml")
-                if (Files.isRegularFile(nested)) poms.add(nested)
+                if (SafeFiles.isRegularFile(nested)) poms.add(nested)
             }
         }
         for (pom in poms) {

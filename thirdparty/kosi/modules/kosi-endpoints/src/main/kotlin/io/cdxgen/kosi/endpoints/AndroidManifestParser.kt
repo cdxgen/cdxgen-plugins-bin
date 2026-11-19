@@ -1,5 +1,6 @@
 package io.cdxgen.kosi.endpoints
 
+import io.cdxgen.kosi.schema.SafeFiles
 import java.nio.file.Files
 import java.nio.file.Path
 
@@ -37,7 +38,7 @@ object AndroidManifestParser {
     fun parse(root: Path): List<Manifest> {
         if (!Files.isDirectory(root)) return emptyList()
         val manifests = Files.walk(root).use { stream ->
-            stream.filter { Files.isRegularFile(it) }
+            stream.filter { SafeFiles.isRegularFile(it) }
                 .filter { it.fileName.toString() == "AndroidManifest.xml" }
                 .filter { !it.toString().contains("/build/") }
                 .sorted()
@@ -45,7 +46,7 @@ object AndroidManifestParser {
         }
         return manifests.mapNotNull { path ->
             val text = try {
-                Files.readString(path)
+                SafeFiles.readString(path) ?: return@mapNotNull null
             } catch (_: Exception) {
                 return@mapNotNull null
             }
@@ -87,12 +88,8 @@ object AndroidManifestParser {
         while (dir != null && dir.startsWith(rootAbs)) {
             for (name in listOf("build.gradle.kts", "build.gradle")) {
                 val build = dir.resolve(name)
-                if (!Files.isRegularFile(build)) continue
-                val text = try {
-                    Files.readString(build)
-                } catch (_: Exception) {
-                    continue
-                }
+                if (!SafeFiles.isRegularFile(build)) continue
+                val text = SafeFiles.readString(build) ?: continue
                 NAMESPACE.find(text)?.groupValues?.get(1)?.takeIf { it.isNotBlank() }?.let { return it }
             }
             if (dir == rootAbs) break

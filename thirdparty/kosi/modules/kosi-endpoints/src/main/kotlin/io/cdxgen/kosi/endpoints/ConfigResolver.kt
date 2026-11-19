@@ -1,5 +1,6 @@
 package io.cdxgen.kosi.endpoints
 
+import io.cdxgen.kosi.schema.SafeFiles
 import java.nio.file.Files
 import java.nio.file.Path
 
@@ -88,8 +89,11 @@ object ConfigResolver {
                 else -> values[key] = ConfigValue(key, null, existing.source)
             }
         }
+        // SafeFiles: a link committed in the tree is not the file it
+        // names; reading through one would pull a value from outside the
+        // analysed tree into the report.
         val files = Files.walk(root).use { stream ->
-            stream.filter { Files.isRegularFile(it) }
+            stream.filter { SafeFiles.isRegularFile(it) }
                 .filter { p -> !isTestResource(root.relativize(p)) }
                 .filter { p ->
                     val name = p.fileName.toString()
@@ -149,7 +153,7 @@ object ConfigResolver {
 
     private fun readProperties(file: Path): Map<String, String> = try {
         val props = java.util.Properties()
-        Files.newInputStream(file).use { props.load(it) }
+        SafeFiles.newInputStream(file)?.use { props.load(it) }
         props.stringPropertyNames().sorted().associateWith { props.getProperty(it) }
     } catch (_: Exception) {
         emptyMap()
@@ -165,7 +169,7 @@ object ConfigResolver {
     private fun readYaml(file: Path): Map<String, String> = try {
         val out = LinkedHashMap<String, String>()
         val stack = ArrayDeque<Pair<Int, String>>() // indent -> key segment
-        for (rawLine in Files.readAllLines(file)) {
+        for (rawLine in SafeFiles.readLines(file)) {
             val noComment = rawLine.substringBefore('#').trimEnd()
             val line = noComment.trim()
             if (line.isEmpty() || line == "---" || line.startsWith("- ")) continue
@@ -206,7 +210,7 @@ object ConfigResolver {
     private fun readHocon(file: Path): Map<String, String> = try {
         val out = LinkedHashMap<String, String>()
         val path = ArrayDeque<String>()
-        for (rawLine in Files.readAllLines(file)) {
+        for (rawLine in SafeFiles.readLines(file)) {
             var line = rawLine.substringBefore('#').substringBefore("//").trim()
             if (line.isEmpty() || line.startsWith("include")) continue
             // A closing brace may trail a value (`deployment { port = 8080 }`),
@@ -256,7 +260,7 @@ object ConfigResolver {
     private fun readBuildConfig(file: Path): Map<String, String> = try {
         val out = LinkedHashMap<String, String>()
         val regex = Regex("""(?:public\s+static\s+final\s+String|const\s+val)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*"([^"]*)"""")
-        for (line in Files.readAllLines(file)) {
+        for (line in SafeFiles.readLines(file)) {
             val match = regex.find(line) ?: continue
             out.putIfAbsent(match.groupValues[1], match.groupValues[2])
         }

@@ -10,6 +10,7 @@ import io.cdxgen.kosi.kir.KirStore
 import io.cdxgen.kosi.kir.KirValueFolder
 import io.cdxgen.kosi.models.EndpointsPack
 import io.cdxgen.kosi.schema.ApiEndpoint
+import io.cdxgen.kosi.schema.SafeFiles
 import io.cdxgen.kosi.schema.Position
 import io.cdxgen.kosi.schema.ServiceRef
 import io.cdxgen.kosi.schema.UrlEvidence
@@ -711,11 +712,11 @@ object Endpoints {
     /** `host.json`'s route prefix for the module, else the framework's default. */
     private fun functionRoutePrefix(framework: io.cdxgen.kosi.models.FrameworkModel, moduleRoot: Path): String {
         val hostJson = moduleRoot.resolve("host.json")
-        if (framework.functionRoutePrefixHostKey.isEmpty() || !java.nio.file.Files.isRegularFile(hostJson)) {
+        if (framework.functionRoutePrefixHostKey.isEmpty() || !SafeFiles.isRegularFile(hostJson)) {
             return framework.functionRoutePrefixDefault
         }
         return try {
-            var node: io.cdxgen.kosi.schema.JsonValue? = io.cdxgen.kosi.schema.JsonReader.parse(java.nio.file.Files.readString(hostJson))
+            var node: io.cdxgen.kosi.schema.JsonValue? = io.cdxgen.kosi.schema.JsonReader.parse(SafeFiles.readString(hostJson) ?: return framework.functionRoutePrefixDefault)
             for (segment in framework.functionRoutePrefixHostKey.split('.')) {
                 node = (node as? io.cdxgen.kosi.schema.JsonObj)?.members?.get(segment)
             }
@@ -741,11 +742,11 @@ object Endpoints {
             val out = HashMap<String, MutableList<Service>>()
             val files = runCatching {
                 java.nio.file.Files.walk(root).use { s ->
-                    s.filter { it.toString().endsWith(".proto") && java.nio.file.Files.isRegularFile(it) }.sorted().toList()
+                    s.filter { it.toString().endsWith(".proto") && SafeFiles.isRegularFile(it) }.sorted().toList()
                 }
             }.getOrDefault(emptyList())
             for (file in files) {
-                val text = runCatching { java.nio.file.Files.readString(file) }.getOrDefault("")
+                val text = SafeFiles.readString(file).orEmpty()
                     .replace(Regex("""//[^\n]*"""), "").replace(Regex("""/\*.*?\*/""", RegexOption.DOT_MATCHES_ALL), "")
                 val pkg = Regex("""\bpackage\s+([\w.]+)\s*;""").find(text)?.groupValues?.get(1).orEmpty()
                 for (m in Regex("""\bservice\s+(\w+)\s*\{""").findAll(text)) {
@@ -803,7 +804,7 @@ object Endpoints {
                 val path = Path.of(file).let { if (it.isAbsolute) it else absoluteRoot.resolve(it) }.normalize()
                 var dir: Path? = path.parent
                 while (dir != null && dir.startsWith(absoluteRoot)) {
-                    if (BUILD_SCRIPTS.any { java.nio.file.Files.isRegularFile(dir!!.resolve(it)) }) return@getOrPut dir
+                    if (BUILD_SCRIPTS.any { SafeFiles.isRegularFile(dir!!.resolve(it)) }) return@getOrPut dir
                     if (dir == absoluteRoot) break
                     dir = dir.parent
                 }
@@ -824,9 +825,9 @@ object Endpoints {
             var sawBuildScript = false
             while (dir != null && dir.startsWith(absoluteRoot)) {
                 val text = buildTexts.getOrPut(dir) {
-                    BUILD_SCRIPTS.map { dir!!.resolve(it) }.filter { java.nio.file.Files.isRegularFile(it) }
+                    BUILD_SCRIPTS.map { dir!!.resolve(it) }.filter { SafeFiles.isRegularFile(it) }
                         .takeIf { it.isNotEmpty() }
-                        ?.joinToString("\n") { runCatching { java.nio.file.Files.readString(it) }.getOrDefault("") }
+                        ?.joinToString("\n") { SafeFiles.readString(it).orEmpty() }
                 }
                 if (text != null) {
                     sawBuildScript = true
