@@ -1,6 +1,7 @@
 package io.cdxgen.kosi.project
 
 import io.cdxgen.kosi.schema.ClasspathStrategy
+import io.cdxgen.kosi.schema.SafeFiles
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.streams.toList
@@ -243,6 +244,9 @@ object ClasspathResolver {
      * `classpath.txt` at the analysed root (the warmed-corpus convention: jar
      * paths and `g:a:v` coordinates, `#` comments — the same grammar the
      * `--classpath-file` flag accepts), then an Eclipse `.classpath` whose
+     * (both are read no-follow: they sit in the analysed tree, and a link
+     * there is the tree reaching outside itself; the jars they name are
+     * still real-path-contained by [AttemptRun.permitted])
      * `<classpathentry kind="lib">` rows name jars relative to the project
      * root. `kind="var"`/`"container"`/`"output"`/`"src"` rows are not jar
      * locations and are skipped.
@@ -250,12 +254,12 @@ object ClasspathResolver {
     private fun runPresentFile(run: AttemptRun, root: Path, moduleDirs: List<Path>): String? {
         val notes = mutableListOf<String>()
         val classpathTxt = root.resolve("classpath.txt")
-        if (Files.isRegularFile(classpathTxt)) {
+        if (SafeFiles.isRegularFile(classpathTxt)) {
             applyClasspathFileLines(run, classpathTxt, root, moduleDirs.toSet())
             notes.add("classpath.txt")
         }
         val eclipse = root.resolve(".classpath")
-        if (Files.isRegularFile(eclipse)) {
+        if (SafeFiles.isRegularFile(eclipse)) {
             val libs = eclipseLibEntries(eclipse)
             for (jar in libs) {
                 val resolved = if (jar.isAbsolute) jar else root.resolve(jar)
@@ -284,7 +288,7 @@ object ClasspathResolver {
         val fileCoordinates = LinkedHashMap<Coordinate, Int>()
         val jarLines = mutableListOf<Path>()
         var lines = 0
-        for (line in file.toFile().readLines()) {
+        for (line in SafeFiles.readLines(file)) {
             val trimmed = line.trim()
             if (trimmed.isEmpty() || trimmed.startsWith("#")) continue
             lines++
@@ -333,7 +337,7 @@ object ClasspathResolver {
 
     private fun eclipseLibEntries(file: Path): List<Path> {
         val document = try {
-            XmlElement.parse(Files.readString(file))
+            XmlElement.parse(SafeFiles.readString(file) ?: return emptyList())
         } catch (_: Exception) {
             return emptyList()
         }

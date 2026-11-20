@@ -11,8 +11,10 @@
 //! - `cache`  — on-disk conditional cache, keyed on URL + method + Accept +
 //!   auth-realm identity.
 //! - `batch`  — request coalescing, fan-out and statistics.
+//! - `body`: a fetched document held as checked JSON text.
 
 pub mod batch;
+pub mod body;
 pub mod cache;
 pub mod client;
 pub mod rate;

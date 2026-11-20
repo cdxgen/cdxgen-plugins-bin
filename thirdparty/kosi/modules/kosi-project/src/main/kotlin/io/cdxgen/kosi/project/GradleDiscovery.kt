@@ -1,5 +1,6 @@
 package io.cdxgen.kosi.project
 
+import io.cdxgen.kosi.schema.SafeFiles
 import java.nio.file.Files
 import java.nio.file.Path
 
@@ -110,12 +111,15 @@ object GradleDiscovery {
                 members.add(Member(dir, ":$name", name, buildFile))
             }
         }
-        return members
+        // A member directory must be the root's own: `includeProject` can
+        // name an absolute path, and a member directory committed as a link
+        // can point anywhere. Neither is part of the analysed tree.
+        return members.filter { it.dir == root || SafeFiles.isInside(root, it.dir) }
     }
 
     private fun findBuildFile(dir: Path): Path? =
         listOf("build.gradle.kts", "build.gradle").firstNotNullOfOrNull { f ->
-            Files.isRegularFile(dir.resolve(f)).takeIf { it }?.let { dir.resolve(f) }
+            SafeFiles.isRegularFile(dir.resolve(f)).takeIf { it }?.let { dir.resolve(f) }
         }
 
     private fun groupFromBuildFile(buildFile: Path): String? =
@@ -404,11 +408,10 @@ object GradleDiscovery {
         return r.relativize(d).toString().replace('\\', '/')
     }
 
-    private fun readIfExists(dir: Path, name: String): String? {
-        val p = dir.resolve(name)
-        return if (Files.isRegularFile(p)) Files.readString(p) else null
-    }
+    // A linked settings or build file, or gradle.properties, is not read:
+    // its text (group, version, member list) must come from the tree.
+    private fun readIfExists(dir: Path, name: String): String? =
+        SafeFiles.readString(dir.resolve(name))
 
-    private fun readText(file: Path): String? =
-        if (Files.isRegularFile(file)) Files.readString(file) else null
+    private fun readText(file: Path): String? = SafeFiles.readString(file)
 }

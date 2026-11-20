@@ -1,5 +1,6 @@
 package io.cdxgen.kosi.project
 
+import io.cdxgen.kosi.schema.SafeFiles
 import java.nio.file.Files
 import java.nio.file.Path
 
@@ -12,12 +13,12 @@ import java.nio.file.Path
 object ProjectDiscovery {
 
     fun discover(root: Path): DiscoveryResult {
-        val hasGradleSettings = Files.isRegularFile(root.resolve("settings.gradle.kts")) ||
-            Files.isRegularFile(root.resolve("settings.gradle")) ||
-            Files.isRegularFile(root.resolve("settings.gradle.dcl"))
-        val hasGradleBuild = Files.isRegularFile(root.resolve("build.gradle.kts")) ||
-            Files.isRegularFile(root.resolve("build.gradle"))
-        val hasPom = Files.isRegularFile(root.resolve("pom.xml"))
+        val hasGradleSettings = SafeFiles.isRegularFile(root.resolve("settings.gradle.kts")) ||
+            SafeFiles.isRegularFile(root.resolve("settings.gradle")) ||
+            SafeFiles.isRegularFile(root.resolve("settings.gradle.dcl"))
+        val hasGradleBuild = SafeFiles.isRegularFile(root.resolve("build.gradle.kts")) ||
+            SafeFiles.isRegularFile(root.resolve("build.gradle"))
+        val hasPom = SafeFiles.isRegularFile(root.resolve("pom.xml"))
         return when {
             hasGradleSettings || hasGradleBuild -> GradleDiscovery.discover(root)
             hasPom -> MavenDiscovery.discover(root)
@@ -57,7 +58,8 @@ object ProjectDiscovery {
         Files.walk(root).use { stream ->
             stream.anyMatch { p ->
                 val n = p.fileName.toString()
-                Files.isRegularFile(p) && (n.endsWith(".kt") || n.endsWith(".java"))
+                // A linked source file is not one of the tree's own.
+                SafeFiles.isRegularFile(p) && (n.endsWith(".kt") || n.endsWith(".java"))
             }
         }
 }
@@ -97,6 +99,12 @@ object SourceCollector {
                     if (Files.isDirectory(moduleDir)) rootDir = moduleDir
                 }
                 if (!Files.isDirectory(rootDir)) continue
+                // Resolving a source root follows links in its middle
+                // components (`src` committed as a link to a directory
+                // elsewhere), so the root itself must lie inside the tree.
+                // The walk below does not descend into links, so a
+                // contained start keeps every collected file contained.
+                if (!SafeFiles.isInside(root, rootDir)) continue
                 Files.walk(rootDir).use { stream ->
                     // SORTED: Files.walk yields directory-entry order, which
                     // the filesystem defines — the same tree at two locations
@@ -105,7 +113,7 @@ object SourceCollector {
                     // ids. Discovery order is part of "two machines compare
                     // equal byte for byte", so it must be a function of the
                     // TREE, not of the filesystem it sits on.
-                    stream.filter { Files.isRegularFile(it) }
+                    stream.filter { SafeFiles.isRegularFile(it) }
                         .filter { p -> !isInExcludedDir(root, p) }
                         .sorted()
                         .forEach { p ->

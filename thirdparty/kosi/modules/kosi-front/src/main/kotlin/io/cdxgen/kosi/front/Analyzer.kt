@@ -283,7 +283,14 @@ object Analyzer {
         environment.use { env ->
             for (source in collected) {
                 val text = try {
-                    Files.readString(source.absolutePath)
+                    // SafeFiles: the collector already refused links; this
+                    // re-read refuses one swapped in since, and never
+                    // follows out of the tree.
+                    io.cdxgen.kosi.schema.SafeFiles.readString(source.absolutePath)
+                        // A collected path that no longer reads as a
+                        // regular file takes the unreadable-source
+                        // diagnostic, like any other failed read.
+                        ?: throw java.nio.file.NoSuchFileException(source.absolutePath.toString())
                 } catch (e: Exception) {
                     diagnostics.add(
                         Diagnostic(
@@ -738,11 +745,7 @@ object Analyzer {
             // in their own modules; the pipeline only wires them.
             val kirModule = io.cdxgen.kosi.kir.KirModule(kir.functions)
             val sourceTexts = collected.associate { source ->
-                source.relativePath to (try {
-                    Files.readString(source.absolutePath)
-                } catch (_: Exception) {
-                    ""
-                })
+                source.relativePath to (io.cdxgen.kosi.schema.SafeFiles.readString(source.absolutePath) ?: "")
             }
             val importResolvedAnnotations = java.util.concurrent.atomic.AtomicInteger()
             val declarationAnnotationValues = declarationAnnotations(

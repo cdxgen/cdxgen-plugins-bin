@@ -6,6 +6,7 @@ import io.cdxgen.kosi.kir.KirLoad
 import io.cdxgen.kosi.kir.KirModule
 import io.cdxgen.kosi.kir.KirNew
 import io.cdxgen.kosi.schema.Position
+import io.cdxgen.kosi.schema.SafeFiles
 import io.cdxgen.kosi.schema.SecuritySignal
 import java.nio.file.Files
 import java.nio.file.Path
@@ -124,7 +125,7 @@ object ForwardedHeaders {
         if (!Files.isDirectory(root)) return emptyList()
         val signals = mutableListOf<SecuritySignal>()
         val files = Files.walk(root).use { stream ->
-            stream.filter { p -> Files.isRegularFile(p) }
+            stream.filter { p -> SafeFiles.isRegularFile(p) }
                 .filter { p -> !skippedConfigDir(root.relativize(p)) }
                 .filter { p ->
                     val name = p.fileName.toString()
@@ -135,7 +136,7 @@ object ForwardedHeaders {
         }
         for (file in files) {
             val rel = root.toAbsolutePath().normalize().relativize(file.toAbsolutePath().normalize()).toString().replace('\\', '/')
-            val lines = Files.readAllLines(file)
+            val lines = SafeFiles.readLines(file)
             var inServerBlock = false
             for ((index, line) in lines.withIndex()) {
                 val trimmed = line.trim()
