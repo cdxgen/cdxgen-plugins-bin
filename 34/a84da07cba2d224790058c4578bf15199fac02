@@ -1,0 +1,22 @@
+thirdparty/rusi/JSON_ATTRIBUTE_REFERENCE.md
+  s_313a3332a63f47::t_c079a0b6f9ffe4 180,186,204,253,256-262,383,396-397,470
+thirdparty/rusi/docs/ANALYSIS_ARCHITECTURE.md
+  s_313a3332a63f47::t_8a0ea211dd90cb 291-293,422-471
+  s_313a3332a63f47::t_5e9fd595d6f697 472
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "34a84da07cba2d224790058c4578bf15199fac02",
+  "prompts": {},
+  "sessions": {
+    "s_313a3332a63f47": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_c5dc46c0-216e-4d08-a8b5-9496b92c2580",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
