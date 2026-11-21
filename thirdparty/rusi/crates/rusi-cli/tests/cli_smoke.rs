@@ -1217,7 +1217,10 @@ fn compiler_mode_fills_expanded_from_for_workspace_generated_code() -> Result<()
         .expanded_from
         .as_ref()
         .expect("generated method carries its macro origin");
-    assert_eq!(origin.macro_path, "macro_zoo_app::macros::make_units::make_units");
+    assert_eq!(
+        origin.macro_path,
+        "macro_zoo_app::macros::make_units::make_units"
+    );
     assert_eq!(origin.file_path, "src/macros/make_units.rs");
     assert_eq!(danger.file_path, "src/lib.rs");
 
@@ -1233,7 +1236,9 @@ fn compiler_mode_fills_expanded_from_for_workspace_generated_code() -> Result<()
     );
     for node in danger_nodes {
         assert_eq!(
-            node.expanded_from.as_ref().map(|origin| origin.macro_path.as_str()),
+            node.expanded_from
+                .as_ref()
+                .map(|origin| origin.macro_path.as_str()),
             Some("macro_zoo_app::macros::make_units::make_units"),
             "every node of the slice inside the generated method names the macro"
         );
@@ -1297,7 +1302,10 @@ fn compiler_mode_names_dependency_macro_helpers_and_matches_stable_macro_calls()
         .iter()
         .filter(|usage| usage.name.starts_with("std::process::Command::new"))
         .count();
-    assert!(command_calls > 0, "fixture has hand-written and macro-written Command::new calls");
+    assert!(
+        command_calls > 0,
+        "fixture has hand-written and macro-written Command::new calls"
+    );
     assert!(
         compiler
             .usages
@@ -1313,7 +1321,8 @@ fn compiler_mode_names_dependency_macro_helpers_and_matches_stable_macro_calls()
         "compiler records the info! call"
     );
     assert_eq!(
-        compiler_sites, macro_call_sites(&stable),
+        compiler_sites,
+        macro_call_sites(&stable),
         "both backends record the same macro-call sites (name and line) on macro-zoo-app; \
          a difference must be explained in the docs"
     );
@@ -1326,12 +1335,7 @@ fn compiler_mode_names_dependency_macro_helpers_and_matches_stable_macro_calls()
             .edges
             .iter()
             .filter(|edge| edge.call_type == "macro")
-            .map(|edge| {
-                (
-                    edge.callee_text.clone().unwrap_or_default(),
-                    edge.line,
-                )
-            })
+            .map(|edge| (edge.callee_text.clone().unwrap_or_default(), edge.line))
             .collect();
         edges.sort();
         edges
@@ -1347,11 +1351,15 @@ fn compiler_mode_names_dependency_macro_helpers_and_matches_stable_macro_calls()
         .expect("call graph")
         .edges
         .iter()
-        .filter(|edge| edge.call_type == "macro" && edge.callee_text.as_deref() == Some("log::info"))
+        .filter(|edge| {
+            edge.call_type == "macro" && edge.callee_text.as_deref() == Some("log::info")
+        })
         .map(|edge| edge.target_purl.as_str())
         .collect();
     assert!(
-        edge_purls.iter().all(|purl| purl.starts_with("pkg:cargo/log")),
+        edge_purls
+            .iter()
+            .all(|purl| purl.starts_with("pkg:cargo/log")),
         "the macro edge names the dependency's purl: {edge_purls:?}"
     );
     Ok(())
@@ -1378,12 +1386,9 @@ fn compiler_mode_drops_stale_macro_note_for_analysed_files() -> Result<()> {
 
     let stable = analyze_with_backend("macro-zoo-app", "stable")?;
     assert!(
-        stable
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic
-                .message
-                .contains("maplit::hashmap! bodies were not analyzed")),
+        stable.diagnostics.iter().any(|diagnostic| diagnostic
+            .message
+            .contains("maplit::hashmap! bodies were not analyzed")),
         "stable mode still reports the body it could not recover"
     );
     Ok(())
@@ -1415,12 +1420,7 @@ fn compiler_mode_keeps_macro_note_when_the_compiler_run_fails() -> Result<()> {
     let mut lib = fs::read_to_string(fixture_path("macro-zoo-app").join("src/lib.rs"))?;
     lib.push_str("\nfn broken() {\n    let x: u32 = \"not a number\";\n}\n");
     fs::write(broken.join("src/lib.rs"), lib)?;
-    for (path, module) in [
-        ("helper.rs", "helper"),
-        ("hoisted.rs", "hoisted"),
-        ("shadow.rs", "shadow"),
-        ("textual.rs", "textual"),
-    ] {
+    for path in ["helper.rs", "hoisted.rs", "shadow.rs", "textual.rs"] {
         fs::copy(
             fixture_path("macro-zoo-app").join("src").join(path),
             broken.join("src").join(path),
@@ -1465,12 +1465,9 @@ fn compiler_mode_keeps_macro_note_when_the_compiler_run_fails() -> Result<()> {
         "the failed compiler run is reported as a backend error"
     );
     assert!(
-        report
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic
-                .message
-                .contains("maplit::hashmap! bodies were not analyzed")),
+        report.diagnostics.iter().any(|diagnostic| diagnostic
+            .message
+            .contains("maplit::hashmap! bodies were not analyzed")),
         "the note about bodies the report does not hold is kept"
     );
     Ok(())

@@ -1307,8 +1307,7 @@ impl<'tcx> BodyVisitor<'tcx, '_> {
         // once.
         if let Some(via_macro) = &via_macro {
             let macro_name = via_macro.clone();
-            let macro_usage_id =
-                stable_id("usage", &[&file_path, "macro-call", &macro_name, &key]);
+            let macro_usage_id = stable_id("usage", &[&file_path, "macro-call", &macro_name, &key]);
             if !self
                 .usages
                 .iter()

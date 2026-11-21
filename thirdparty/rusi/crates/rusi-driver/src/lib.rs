@@ -742,6 +742,13 @@ const EMBEDDED_WRAPPER_FILES: &[(&str, &str)] = &[
         "crates/rusi-rustc-wrapper/src/main.rs",
         include_str!("../../rusi-rustc-wrapper/src/main.rs"),
     ),
+    // A module of the wrapper the macro attribution lives in; leaving it out
+    // of the list makes a wrapper built from the embedded sources fail with a
+    // missing module.
+    (
+        "crates/rusi-rustc-wrapper/src/macro_origin.rs",
+        include_str!("../../rusi-rustc-wrapper/src/macro_origin.rs"),
+    ),
     (
         "crates/rusi-schema/Cargo.toml",
         include_str!("../../rusi-schema/Cargo.toml"),

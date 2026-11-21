@@ -18550,11 +18550,10 @@ pub fn total() -> usize {{ cnt!({long}) }}
         )
         .expect("analysis succeeds");
         assert!(
-            !merged.diagnostics.iter().any(|diagnostic| {
-                diagnostic
-                    .message
-                    .contains("bodies were not analyzed")
-            }),
+            !merged
+                .diagnostics
+                .iter()
+                .any(|diagnostic| { diagnostic.message.contains("bodies were not analyzed") }),
             "no note about bodies the compiler analysed"
         );
         let calls = merged
