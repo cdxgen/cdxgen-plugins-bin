@@ -1287,62 +1287,12 @@ fn analyze_on_this_thread(
         merge_file_evidence(&mut report.files, payload.files);
         extend_unique_imports(&mut report.imports, payload.imports);
         merge_compiler_declarations(&mut report.declarations, payload.declarations);
-        // The compiler backend records every dependency macro invocation it
-        // walked through as a `macro-call` usage at the same call site the
-        // stable backend recorded it from, so the stable entry of an
-        // invocation the compiler also saw is replaced by the compiler's,
-        // which carries the expansion's origin. Both name the macro the
-        // invoking line wrote, at the same file and position.
-        let compiler_macro_calls: HashSet<(&str, &str, usize, usize)> = payload
-            .usages
-            .iter()
-            .filter(|usage| usage.kind == "macro-call")
-            .map(|usage| {
-                (
-                    usage.name.as_str(),
-                    usage.position.filename.as_str(),
-                    usage.position.line,
-                    usage.position.column,
-                )
-            })
-            .collect();
-        report.usages.retain(|usage| {
-            !(usage.kind == "macro-call"
-                && compiler_macro_calls.contains(&(
-                    usage.name.as_str(),
-                    usage.position.filename.as_str(),
-                    usage.position.line,
-                    usage.position.column,
-                )))
-        });
+        drop_stable_macro_calls_the_compiler_recorded(&mut report.usages, &payload.usages);
         extend_unique_usages(&mut report.usages, payload.usages);
-        // The two backends name a signal by different id schemes, so the same
-        // unsafe block at one position arrives twice: once from each. The
-        // compiler's entry is the richer one, carrying the expansion origin,
-        // so the stable entry of a signal the compiler also raised is
-        // replaced by it. Signals only one backend raised are kept.
-        let compiler_signals: HashSet<(&str, &str, &str, usize, usize)> = payload
-            .security_signals
-            .iter()
-            .map(|signal| {
-                (
-                    signal.category.as_str(),
-                    signal.description.as_str(),
-                    signal.file_path.as_str(),
-                    signal.position.line,
-                    signal.position.column,
-                )
-            })
-            .collect();
-        report.security_signals.retain(|signal| {
-            !compiler_signals.contains(&(
-                signal.category.as_str(),
-                signal.description.as_str(),
-                signal.file_path.as_str(),
-                signal.position.line,
-                signal.position.column,
-            ))
-        });
+        drop_stable_signals_the_compiler_raised(
+            &mut report.security_signals,
+            &payload.security_signals,
+        );
         extend_unique_security_signals(&mut report.security_signals, payload.security_signals);
         merge_crypto_evidence(&mut report.crypto, payload.crypto);
         report.call_graph = if options.call_graph_mode != "none" {
@@ -1412,7 +1362,12 @@ fn merge_file_evidence(target: &mut Vec<FileEvidence>, incoming: Vec<FileEvidenc
         if let Some(existing) = target.iter_mut().find(|entry| entry.path == file.path) {
             extend_unique_imports(&mut existing.imports, file.imports);
             merge_compiler_declarations(&mut existing.declarations, file.declarations);
+            drop_stable_macro_calls_the_compiler_recorded(&mut existing.usages, &file.usages);
             extend_unique_usages(&mut existing.usages, file.usages);
+            drop_stable_signals_the_compiler_raised(
+                &mut existing.security_signals,
+                &file.security_signals,
+            );
             extend_unique_security_signals(&mut existing.security_signals, file.security_signals);
             merge_crypto_evidence(&mut existing.crypto, file.crypto);
         } else {
@@ -1532,6 +1487,59 @@ fn merge_compiler_declarations(target: &mut Vec<Declaration>, incoming: Vec<Decl
             None => target.push(declaration),
         }
     }
+}
+
+/// The compiler backend records every dependency macro invocation it walked
+/// through as a `macro-call` usage at the call site the stable backend
+/// recorded it from. The two backends id evidence by different schemes, so
+/// the stable entry of an invocation the compiler also recorded is removed
+/// before the compiler's, which carries the expansion's origin, is added.
+fn drop_stable_macro_calls_the_compiler_recorded(
+    target: &mut Vec<LibraryUsage>,
+    compiler: &[LibraryUsage],
+) {
+    let site = |usage: &LibraryUsage| {
+        (
+            usage.name.clone(),
+            usage.position.filename.clone(),
+            usage.position.line,
+            usage.position.column,
+        )
+    };
+    let recorded: HashSet<_> = compiler
+        .iter()
+        .filter(|usage| usage.kind == "macro-call")
+        .map(site)
+        .collect();
+    if recorded.is_empty() {
+        return;
+    }
+    target.retain(|usage| !(usage.kind == "macro-call" && recorded.contains(&site(usage))));
+}
+
+/// The same unsafe block at one position arrives once from each backend
+/// under different ids. The compiler's entry is the richer one, carrying the
+/// expansion origin, so the stable entry of a signal the compiler also raised
+/// is removed before the compiler's is added. Signals only one backend raised
+/// are kept.
+fn drop_stable_signals_the_compiler_raised(
+    target: &mut Vec<SecuritySignal>,
+    compiler: &[SecuritySignal],
+) {
+    let site = |signal: &SecuritySignal| {
+        (
+            signal.category.clone(),
+            signal.description.clone(),
+            signal.file_path.clone(),
+            signal.position.line,
+            signal.position.column,
+        )
+    };
+    let raised: HashSet<_> = compiler.iter().map(site).collect();
+    if raised.is_empty() {
+        return;
+    }
+    target.retain(|signal| !raised.contains(&site(signal)));
 }
 
 fn extend_unique_usages(target: &mut Vec<LibraryUsage>, incoming: Vec<LibraryUsage>) {

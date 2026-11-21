@@ -1313,7 +1313,7 @@ impl<'tcx> BodyVisitor<'tcx, '_> {
                 .iter()
                 .any(|existing| existing.id == macro_usage_id)
             {
-                self.usages.push(LibraryUsage {
+                let macro_usage = LibraryUsage {
                     id: macro_usage_id,
                     kind: "macro-call".to_string(),
                     name: macro_name.clone(),
@@ -1323,7 +1323,9 @@ impl<'tcx> BodyVisitor<'tcx, '_> {
                     position: position.clone(),
                     properties: IndexMap::new(),
                     expanded_from: expanded_from.clone(),
-                });
+                };
+                self.usages.push(macro_usage.clone());
+                self.file_entry(&file_path).usages.push(macro_usage);
                 self.macro_calls.push(MacroCallRecord {
                     caller_decl_id: self.caller_decl.id.clone(),
                     macro_path: macro_name.trim_end_matches('!').to_string(),
