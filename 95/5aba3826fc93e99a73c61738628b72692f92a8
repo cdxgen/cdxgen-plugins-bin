@@ -1,0 +1,32 @@
+thirdparty/rusi/crates/rusi-core/src/lib.rs
+  s_33b453a4a419f0::t_2731c80684009b 17213-17214,17217-17263
+  s_33b453a4a419f0::t_cd5613cfcada38 2048-2049,2188-2190,2664,2977-2993,3068,6011-6042,6125-6127
+  s_33b453a4a419f0::t_ae4de3b05bb02d 3298,3300-3310,3934,5980-6010
+  s_33b453a4a419f0::t_19693b9610bba0 3281-3283,3318,17195-17212,17216
+  s_33b453a4a419f0::t_2263b31075e13f 3087,3090,3102,3109-3111,3280,3284-3297,3299,3311-3317,3319-3359,3727,3809
+  s_33b453a4a419f0::t_bf03d2001d3944 17215
+thirdparty/rusi/fixtures/macro-zoo-app/src/lib.rs
+  s_33b453a4a419f0::t_19693b9610bba0 159-196
+thirdparty/rusi/crates/rusi-core/src/macro_expand/mod.rs
+  s_33b453a4a419f0::t_ae4de3b05bb02d 32-33
+thirdparty/rusi/docs/ANALYSIS_ARCHITECTURE.md
+  s_33b453a4a419f0::t_58965c17d383cb 244-249
+thirdparty/rusi/scripts/eval/golden/macro-zoo-app.stable.digest.json
+  s_33b453a4a419f0::t_58965c17d383cb 2-5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "955aba3826fc93e99a73c61738628b72692f92a8",
+  "prompts": {},
+  "sessions": {
+    "s_33b453a4a419f0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "106e5fb3-64f8-470a-81b6-58b72db4ce09",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
