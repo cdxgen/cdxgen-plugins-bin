@@ -544,6 +544,10 @@ impl Budget {
         Self { remaining: steps }
     }
 
+    pub(super) fn remaining(&self) -> usize {
+        self.remaining
+    }
+
     fn spend(&mut self, steps: usize) -> Result<(), MatchError> {
         if self.remaining < steps {
             self.remaining = 0;

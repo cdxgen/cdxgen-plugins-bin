@@ -424,6 +424,8 @@ pub(crate) struct MacroScopeTable {
     crates: BTreeMap<String, CrateMacros>,
     /// Crate names (underscores) in the workspace's resolve graph.
     dependency_crates: HashSet<String>,
+    /// Expansion work spent by the whole analysis.
+    ledger: super::WorkLedger,
 }
 
 /// The name an import binds: its alias, or the last segment of its path.
@@ -575,6 +577,11 @@ impl MacroScopeTable {
             .get(&reference.crate_path)?
             .definitions
             .get(reference.index)
+    }
+
+    /// The analysis-wide expansion work ledger.
+    pub(crate) fn ledger(&self) -> &super::WorkLedger {
+        &self.ledger
     }
 
     /// How many levels of nested expansion the crate allows. rustc stops at

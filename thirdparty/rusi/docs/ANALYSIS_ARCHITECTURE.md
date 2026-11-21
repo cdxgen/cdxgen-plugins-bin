@@ -249,9 +249,12 @@ per-file expansion number, so two invocations of one macro never merge.
 
 Four bounds keep an expansion finite, each with its own `macro` diagnostic: a nesting
 depth of 128 expansions (rustc's default, raised to the crate's
-`#![recursion_limit]` up to 256), a budget of one million transcribed tokens for everything one
+`#![recursion_limit]` up to 256), a budget of 50,000 transcribed tokens for everything one
 hand-written invocation produces (nested and sibling expansions together), 16,384
-iterations of one repetition, and a step budget of one million for the matcher. Source
+iterations of one repetition, and a step budget of 250,000 for the matcher. Two
+further ceilings cap the work of many invocations together, each reported once:
+500,000 per source file and 2,000,000 per analysis (tokens produced plus a tenth of
+the matcher steps), so copies of one hostile macro cannot add up. Source
 that nests groups more than 64 deep is not read. No input is meant to make the module
 panic: it avoids `unwrap`, `expect`, direct identifier construction and unchecked
 indexing on data that comes from the source.

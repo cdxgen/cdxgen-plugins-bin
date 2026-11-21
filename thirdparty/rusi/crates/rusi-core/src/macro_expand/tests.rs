@@ -396,9 +396,11 @@ fn repetition_iteration_cap_is_reported() {
     assert_eq!(result.err(), Some(ExpandError::IterationLimit));
     let within = tokens_of(MAX_REPETITION_ITERATIONS - 10, "a");
     assert!(expand(&def, "krate", tokens(&within), "1").is_ok());
-    // A repetition that runs nearly to its cap costs well under a fifth of the
-    // default budget.
-    assert!(expand_with_budget(&def, "krate", tokens(&within), "1", MAX_MATCH_STEPS / 5).is_ok());
+    // A repetition that runs nearly to its cap fits the default budget.
+    let steps = expand_with_budget(&def, "krate", tokens(&within), "1", MAX_MATCH_STEPS)
+        .expect("fits the default budget")
+        .steps;
+    assert!(steps < MAX_MATCH_STEPS, "{steps}");
 }
 
 #[test]

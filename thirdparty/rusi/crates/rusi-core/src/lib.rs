@@ -2180,6 +2180,9 @@ struct SourceCollector {
     /// Tokens produced so far by the outermost expansion being visited and
     /// everything nested in it, against `MAX_EXPANSION_TOKENS`.
     expansion_tokens: usize,
+    /// Expansion work (tokens produced plus a tenth of the matcher steps)
+    /// spent in this file.
+    file_work: usize,
 }
 
 /// An expansion being visited: what to stamp on the evidence it produces.
@@ -2652,6 +2655,7 @@ impl SourceCollector {
             expansion_stack: Vec::new(),
             expansion_counter: 0,
             expansion_tokens: 0,
+            file_work: 0,
         }
     }
 
@@ -2813,7 +2817,7 @@ impl SourceCollector {
         // items, and a dependency macro called with no arguments is still a
         // call into that crate.
         let site = self.invocation_site(mac);
-        let diagnostics_before = self.macro_diagnostics.len();
+        let mut explained = false;
         match self.macro_table.resolve_invocation(
             &self.file_ctx.crate_path,
             &self.file_ctx.module_path,
@@ -2823,10 +2827,13 @@ impl SourceCollector {
             &self.use_records,
         ) {
             macro_expand::InvocationTarget::Workspace { reference } => {
-                if let Some(definition) = self.macro_table.definition(&reference).cloned()
-                    && self.expand_workspace_macro(mac, &definition, &reference)
-                {
-                    return;
+                if let Some(definition) = self.macro_table.definition(&reference).cloned() {
+                    if self.expand_workspace_macro(mac, &definition, &reference) {
+                        return;
+                    }
+                    // Refused: the reason is a diagnostic, or was already
+                    // given for an earlier invocation under the same limit.
+                    explained = true;
                 }
             }
             macro_expand::InvocationTarget::Dependency { path, .. } => {
@@ -2840,10 +2847,10 @@ impl SourceCollector {
             }
             macro_expand::InvocationTarget::Std | macro_expand::InvocationTarget::Unresolved => {}
         }
-        // An expansion that was refused has said why. The generic "bodies were
-        // not analyzed" note for the same invocation would repeat it, and
-        // contradict it for a cause such as a limit, so it is left out.
-        let explained = self.macro_diagnostics.len() > diagnostics_before;
+        // An expansion that was refused has said why (once per cause). The
+        // generic "bodies were not analyzed" note for the same invocation
+        // would repeat it, and contradict it for a cause such as a limit, so
+        // it is left out.
         if tokens.is_empty() {
             return;
         }
@@ -2953,6 +2960,14 @@ impl SourceCollector {
             );
             return false;
         }
+        // Work already spent in this file or in the analysis stops every
+        // later invocation before it costs anything; the diagnostic was
+        // emitted when the ceiling was reached.
+        if self.file_work > macro_expand::MAX_FILE_EXPANSION_WORK
+            || self.macro_table.ledger().exhausted()
+        {
+            return false;
+        }
         self.expansion_counter += 1;
         let expansion = match macro_expand::expand(
             definition,
@@ -2962,6 +2977,9 @@ impl SourceCollector {
         ) {
             Ok(expansion) => expansion,
             Err(error) => {
+                if error == macro_expand::ExpandError::StepBudget {
+                    self.charge_expansion_work(mac, macro_expand::MAX_MATCH_STEPS / 10);
+                }
                 let message = match error {
                     macro_expand::ExpandError::NoRuleMatches => {
                         format!("no rule of `{written_path}!` matched the invocation tokens")
@@ -2993,6 +3011,7 @@ impl SourceCollector {
             }
         };
         self.hygiene_renamed |= expansion.renamed;
+        let expansion_steps = expansion.steps;
         let expanded = expansion.tokens;
         // The budget covers everything one hand-written invocation produces,
         // nested and sibling expansions alike, so a macro that invokes itself
@@ -3017,6 +3036,9 @@ impl SourceCollector {
                     macro_expand::MAX_EXPANSION_TOKENS
                 ),
             );
+            return false;
+        }
+        if !self.charge_expansion_work(mac, produced.saturating_add(expansion_steps / 10)) {
             return false;
         }
         let frame = ExpansionFrame {
@@ -3193,6 +3215,43 @@ impl SourceCollector {
         }
         for value in &values {
             syn::visit::visit_expr(self, value);
+        }
+        true
+    }
+
+    /// Adds expansion work to this file's total and to the analysis's, and
+    /// says so once when either ceiling is passed. Returns whether the
+    /// expansion may still be walked.
+    fn charge_expansion_work(&mut self, mac: &syn::Macro, work: usize) -> bool {
+        let written_path = path_to_string(&mac.path);
+        let was_within_file = self.file_work <= macro_expand::MAX_FILE_EXPANSION_WORK;
+        self.file_work = self.file_work.saturating_add(work);
+        let within_analysis = self.macro_table.ledger().charge(work);
+        if self.file_work > macro_expand::MAX_FILE_EXPANSION_WORK {
+            if was_within_file {
+                self.push_macro_diagnostic(
+                    mac,
+                    format!(
+                        "the macro expansions in this file passed the work budget {} at \
+                         `{written_path}!`; later invocations in the file are not expanded",
+                        macro_expand::MAX_FILE_EXPANSION_WORK
+                    ),
+                );
+            }
+            return false;
+        }
+        if !within_analysis {
+            if self.macro_table.ledger().report_once() {
+                self.push_macro_diagnostic(
+                    mac,
+                    format!(
+                        "the macro expansions of the analysis passed the work budget {} at \
+                         `{written_path}!`; later invocations in any file are not expanded",
+                        macro_expand::MAX_ANALYSIS_EXPANSION_WORK
+                    ),
+                );
+            }
+            return false;
         }
         true
     }
@@ -16654,8 +16713,8 @@ mod tree {
     fn macro_expansion_budget_and_unmatched_rules_are_reported() {
         // A muncher with no base case that keeps its input small recurses
         // until the depth limit; the stop is a diagnostic naming the macro,
-        // never a silent gap. One that doubles its input every level hits
-        // the repetition iteration limit first, reported the same way.
+        // never a silent gap. One that doubles its input every level reaches
+        // the token budget, reported the same way.
         let root = fixture_crate(
             "macro-budget",
             r#"
@@ -16684,13 +16743,9 @@ pub fn echo() -> u32 { echo_forever!(x) }
                 .iter()
                 .any(|diagnostic| diagnostic.kind == "macro"
                     && diagnostic.message.contains("spin_forever!")
-                    && diagnostic.message.contains("iteration limit")),
-            "expected an iteration-limit diagnostic, got: {:?}",
-            report
-                .diagnostics
-                .iter()
-                .map(|diagnostic| &diagnostic.message)
-                .collect::<Vec<_>>()
+                    && diagnostic.message.contains("token budget")),
+            "expected a token-budget diagnostic, got: {:?}",
+            macro_diagnostics(&report)
         );
         assert!(
             report
@@ -17315,7 +17370,7 @@ pub fn total() -> usize {{ cnt!({long}) }}
             "macro-depth-ceiling",
             &format!(
                 "#![recursion_limit = \"100000\"]\n{COUNTING_MUNCHER}\npub fn total() -> usize {{ cnt!({}) }}\n",
-                "a ".repeat(400)
+                "a ".repeat(300)
             ),
         );
         let messages = macro_diagnostics(&static_report(&absurd));
@@ -17328,6 +17383,112 @@ pub fn total() -> usize {{ cnt!({long}) }}
         for root in [without, raised, absurd] {
             let _ = fs::remove_dir_all(&root);
         }
+    }
+
+    const DOUBLING: &str =
+        "macro_rules! dbl { () => {}; (x $($r:tt)*) => { dbl!($($r)*); dbl!($($r)*); } }\n";
+
+    fn work_budget_messages(report: &rusi_schema::Report, scope: &str) -> usize {
+        macro_diagnostics(report)
+            .iter()
+            .filter(|message| message.contains("work budget") && message.contains(scope))
+            .count()
+    }
+
+    #[test]
+    fn one_hostile_invocation_costs_little() {
+        let root = fixture_crate(
+            "macro-one-hostile",
+            &format!("{DOUBLING}dbl!({});\n", "x ".repeat(32)),
+        );
+        let started = std::time::Instant::now();
+        let report = static_report(&root);
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed < std::time::Duration::from_secs(2),
+            "one invocation took {elapsed:?}"
+        );
+        let messages = macro_diagnostics(&report);
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("token budget"))
+        );
+        // The refusal is the only note about the macro.
+        assert!(
+            !messages
+                .iter()
+                .any(|message| message.contains("bodies were not analyzed")),
+            "{messages:?}"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn many_hostile_invocations_in_one_file_stop_at_the_file_budget() {
+        let mut source = String::from(DOUBLING);
+        for _ in 0..300 {
+            source.push_str(&format!("dbl!({});\n", "x ".repeat(32)));
+        }
+        let root = fixture_crate("macro-many-hostile", &source);
+        let started = std::time::Instant::now();
+        let report = static_report(&root);
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed < std::time::Duration::from_secs(15),
+            "300 invocations took {elapsed:?}"
+        );
+        assert_eq!(work_budget_messages(&report, "in this file"), 1);
+        assert!(macro_diagnostics(&report).len() < 40);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn hostile_invocations_across_many_files_stop_at_the_analysis_budget() {
+        let root = fixture_crate("macro-many-files", DOUBLING);
+        let mut lib = String::from(DOUBLING);
+        for index in 0..40 {
+            lib.push_str(&format!("#[macro_use]\nmod m{index};\n"));
+        }
+        // The macro is defined in lib.rs before every `mod`, so each module
+        // file sees it.
+        fs::write(root.join("src").join("lib.rs"), lib).expect("write lib.rs");
+        for index in 0..40 {
+            let mut module = String::new();
+            for _ in 0..3 {
+                module.push_str(&format!("dbl!({});\n", "x ".repeat(32)));
+            }
+            fs::write(root.join("src").join(format!("m{index}.rs")), module).expect("write module");
+        }
+        let started = std::time::Instant::now();
+        let report = static_report(&root);
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed < std::time::Duration::from_secs(15),
+            "120 invocations across 40 files took {elapsed:?}"
+        );
+        assert_eq!(work_budget_messages(&report, "of the analysis"), 1);
+        assert_eq!(work_budget_messages(&report, "in this file"), 0);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_repetition_past_the_iteration_cap_is_reported() {
+        let root = fixture_crate(
+            "macro-iteration-cap",
+            &format!(
+                "macro_rules! swallow {{ ($($t:tt)*) => {{ pub fn gen() {{}} }}; }}\nswallow!({});\n",
+                "a ".repeat(17_000)
+            ),
+        );
+        let messages = macro_diagnostics(&static_report(&root));
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("swallow!") && message.contains("iteration limit")),
+            "{messages:?}"
+        );
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

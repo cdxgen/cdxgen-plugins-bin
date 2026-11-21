@@ -48,10 +48,29 @@ pub(crate) const MAX_RECURSION_LIMIT: usize = 256;
 
 /// Ceiling on the tokens one hand-written invocation may produce, summed
 /// across every nested and sibling expansion. Depth alone does not bound a
-/// macro that doubles its input per level; one million tokens is several
-/// megabytes of token trees, far above any hand-written macro's output and
-/// small enough to fail fast on exponential growth.
-pub(crate) const MAX_EXPANSION_TOKENS: usize = 1_000_000;
+/// macro that doubles its input per level. The largest invocation in the small
+/// corpus and the fixture produces under 1,700 tokens, and expanding, parsing
+/// and walking 50,000 tokens takes under 100 ms, so one invocation of a hostile
+/// macro stays near that while real macros have a factor of 30 to spare. A
+/// counting muncher over n tokens produces about n squared over 2 tokens in
+/// all, so 50,000 also covers the 256 levels the deepest allowed recursion
+/// limit permits.
+pub(crate) const MAX_EXPANSION_TOKENS: usize = 50_000;
+
+/// Ceiling on the expansion work in one source file, and in the whole
+/// analysis. Work is the tokens an expansion produces plus a tenth of the
+/// matcher steps it used. A hostile macro costs one invocation budget per
+/// copy, so the per-invocation bound alone lets many copies add up to minutes.
+/// The whole small corpus and the fixture together spend under 4,000 tokens
+/// and 700 steps, a counting muncher at the deepest allowed recursion limit
+/// about 85,000, so the file ceiling leaves real code a factor of several
+/// hundred over the corpus and room for several of those, and the analysis
+/// ceiling stops the worst case at about four seconds of work whatever the
+/// number of copies or files. Which invocations the analysis-wide ceiling cuts
+/// off depends on the order the files are analysed in, which only matters once
+/// it is reached.
+pub(crate) const MAX_FILE_EXPANSION_WORK: usize = 500_000;
+pub(crate) const MAX_ANALYSIS_EXPANSION_WORK: usize = 2_000_000;
 
 /// How many iterations one repetition may take in a match. rustc has no such
 /// cap; the matcher's work grows with every iteration, so a cap keeps an
@@ -62,12 +81,11 @@ pub(crate) const MAX_REPETITION_ITERATIONS: usize = 16_384;
 /// The step budget of one expansion. Every thread advance, every epsilon move
 /// and every fragment parse (weighted by the tokens it reads) costs steps, and
 /// the budget is shared by all the rules of the invocation. The most any
-/// macro in the small corpus and the fixture uses is under 200 steps, and a
-/// repetition that runs to its iteration cap costs about 130,000, so one
-/// million leaves a legitimate match room for several such repetitions while
-/// a matcher and input that rustc would reject are stopped within a few
-/// milliseconds.
-pub(crate) const MAX_MATCH_STEPS: usize = 1_000_000;
+/// macro in the small corpus and the fixture used was 178 steps, and a
+/// repetition that runs to its iteration cap costs under 200,000, so 250,000
+/// leaves a legitimate match its worst case while a matcher and input that
+/// rustc would reject are stopped within tens of milliseconds.
+pub(crate) const MAX_MATCH_STEPS: usize = 250_000;
 
 /// Nesting of groups the module reads, in definitions and in invocations.
 /// Source that compiles nests far less; the bound keeps recursive reads of
@@ -155,6 +173,8 @@ pub(crate) struct Expansion {
     /// Whether hygiene renamed any binding, so the report needs its suffixes
     /// removed.
     pub(crate) renamed: bool,
+    /// Steps of the budget the expansion used.
+    pub(crate) steps: usize,
 }
 
 /// Expands `input` against `definition`'s rules in order and returns the first
@@ -214,7 +234,11 @@ pub(crate) fn expand_with_budget(
                 let renamed = hygiene::apply(&mut template, invocation);
                 let tokens = transcriber::transcribe(&template, &bindings, crate_name)
                     .map_err(ExpandError::Transcribe)?;
-                return Ok(Expansion { tokens, renamed });
+                return Ok(Expansion {
+                    tokens,
+                    renamed,
+                    steps: max_steps.saturating_sub(budget.remaining()),
+                });
             }
         }
     }
@@ -231,3 +255,42 @@ pub(crate) fn expand_with_budget(
 mod scope_tests;
 #[cfg(test)]
 mod tests;
+
+/// Expansion work spent so far in one analysis, shared by every thread that
+/// analyses a file.
+#[derive(Debug, Default)]
+pub(crate) struct WorkLedger {
+    spent: std::sync::atomic::AtomicUsize,
+    reported: std::sync::atomic::AtomicBool,
+}
+
+impl Clone for WorkLedger {
+    fn clone(&self) -> Self {
+        use std::sync::atomic::Ordering::Relaxed;
+        Self {
+            spent: std::sync::atomic::AtomicUsize::new(self.spent.load(Relaxed)),
+            reported: std::sync::atomic::AtomicBool::new(self.reported.load(Relaxed)),
+        }
+    }
+}
+
+impl WorkLedger {
+    pub(crate) fn exhausted(&self) -> bool {
+        self.spent.load(std::sync::atomic::Ordering::Relaxed) > MAX_ANALYSIS_EXPANSION_WORK
+    }
+
+    /// Adds `work` and returns whether the analysis is still within its ceiling.
+    pub(crate) fn charge(&self, work: usize) -> bool {
+        let before = self
+            .spent
+            .fetch_add(work, std::sync::atomic::Ordering::Relaxed);
+        before.saturating_add(work) <= MAX_ANALYSIS_EXPANSION_WORK
+    }
+
+    /// True for the first caller only, so the ceiling is reported once.
+    pub(crate) fn report_once(&self) -> bool {
+        !self
+            .reported
+            .swap(true, std::sync::atomic::Ordering::Relaxed)
+    }
+}

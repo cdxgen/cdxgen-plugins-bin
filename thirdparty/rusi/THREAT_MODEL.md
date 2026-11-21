@@ -71,7 +71,7 @@ Possible attacker goals include:
 - inducing false negatives through dynamic behavior, reflection-like macro expansion, or unsupported language patterns
 - a `macro_rules!` definition or invocation built to crash or stall the stable backend's macro expander
 
-The stable backend expands the workspace's `macro_rules!` macros itself, so each expansion is bounded: 128 levels of nesting (more where the crate sets `#![recursion_limit]`, up to 256), one million transcribed tokens per hand-written invocation, 16,384 iterations of one repetition, and one million matcher steps. Reaching a bound, or an invocation rustc would reject as ambiguous, is reported as a `macro` diagnostic naming the macro, and the analysis goes on. The expander is written to avoid panicking constructs on input that comes from the analyzed source.
+The stable backend expands the workspace's `macro_rules!` macros itself, so each expansion is bounded: 128 levels of nesting (more where the crate sets `#![recursion_limit]`, up to 256), 50,000 transcribed tokens per hand-written invocation, 16,384 iterations of one repetition, and 250,000 matcher steps, with ceilings of 500,000 units of expansion work per file and 2,000,000 per analysis so that many copies of a hostile macro cannot add up. Reaching a bound, or an invocation rustc would reject as ambiguous, is reported as a `macro` diagnostic naming the macro, and the analysis goes on. The expander is written to avoid panicking constructs on input that comes from the analyzed source.
 
 ## Main risks
 
