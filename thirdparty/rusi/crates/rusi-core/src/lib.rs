@@ -17626,6 +17626,15 @@ pub fn total() -> usize {{ cnt!({long}) }}
     const DOUBLING: &str =
         "macro_rules! dbl { () => {}; (x $($r:tt)*) => { dbl!($($r)*); dbl!($($r)*); } }\n";
 
+    /// Wall-clock ceiling for the expansion-budget tests. The budgets bound
+    /// the work deterministically and the diagnostics assert that; the time
+    /// check only catches a hang, so an unoptimised build on a shared runner
+    /// gets ten times the release ceiling.
+    fn expansion_time_ceiling(release_secs: u64) -> std::time::Duration {
+        let factor = if cfg!(debug_assertions) { 10 } else { 1 };
+        std::time::Duration::from_secs(release_secs * factor)
+    }
+
     fn work_budget_messages(report: &rusi_schema::Report, scope: &str) -> usize {
         macro_diagnostics(report)
             .iter()
@@ -17643,7 +17652,7 @@ pub fn total() -> usize {{ cnt!({long}) }}
         let report = static_report(&root);
         let elapsed = started.elapsed();
         assert!(
-            elapsed < std::time::Duration::from_secs(2),
+            elapsed < expansion_time_ceiling(2),
             "one invocation took {elapsed:?}"
         );
         let messages = macro_diagnostics(&report);
@@ -17673,7 +17682,7 @@ pub fn total() -> usize {{ cnt!({long}) }}
         let report = static_report(&root);
         let elapsed = started.elapsed();
         assert!(
-            elapsed < std::time::Duration::from_secs(15),
+            elapsed < expansion_time_ceiling(15),
             "300 invocations took {elapsed:?}"
         );
         assert_eq!(work_budget_messages(&report, "in this file"), 1);
@@ -17702,7 +17711,7 @@ pub fn total() -> usize {{ cnt!({long}) }}
         let report = static_report(&root);
         let elapsed = started.elapsed();
         assert!(
-            elapsed < std::time::Duration::from_secs(15),
+            elapsed < expansion_time_ceiling(15),
             "120 invocations across 40 files took {elapsed:?}"
         );
         assert_eq!(work_budget_messages(&report, "of the analysis"), 1);
