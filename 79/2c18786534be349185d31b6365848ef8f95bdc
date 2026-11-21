@@ -1,0 +1,22 @@
+thirdparty/rusi/crates/rusi-core/src/import_resolution.rs
+  s_33b453a4a419f0::t_0654dcf7af601e 197,206,222,250-262,264-267
+  s_33b453a4a419f0::t_aa0a94851b78ea 136-138,147,149-151,160-163,186-188,198,263
+  s_33b453a4a419f0::t_8489adfd46fbba 268,456-539
+  s_33b453a4a419f0::t_f21d767737ab84 269
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "792c18786534be349185d31b6365848ef8f95bdc",
+  "prompts": {},
+  "sessions": {
+    "s_33b453a4a419f0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "106e5fb3-64f8-470a-81b6-58b72db4ce09",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
