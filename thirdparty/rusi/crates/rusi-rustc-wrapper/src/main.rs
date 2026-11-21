@@ -578,7 +578,7 @@ impl EmbeddedCollector {
             };
             self.functions.push(MirFunction::from_mir(
                 tcx,
-                &self.package.clone(),
+                &self.package,
                 declaration,
                 body,
                 &resolutions,

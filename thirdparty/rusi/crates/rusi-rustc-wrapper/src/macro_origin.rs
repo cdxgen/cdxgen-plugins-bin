@@ -9,6 +9,8 @@
 //! user's code, so they are not emitted; evidence inside a workspace macro's
 //! expansion is kept and names the macro.
 
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use rusi_schema::{ExpandedFrom, relative_display_path};
@@ -47,36 +49,37 @@ pub(crate) fn expansion_origin(tcx: TyCtxt<'_>, root: &Path, span: Span) -> Expa
     if backtrace.is_empty() {
         return ExpansionOrigin::default();
     }
-    let workspace_positions: Vec<usize> = backtrace
+    let is_workspace: Vec<bool> = backtrace
         .iter()
-        .enumerate()
-        .filter(|(_, expn)| expansion_is_workspace(tcx, root, expn))
-        .map(|(position, _)| position)
+        .map(|expn| expansion_is_workspace(tcx, root, expn))
         .collect();
+    let outermost_workspace = is_workspace.iter().rposition(|&workspace| workspace);
 
     // The macro a call is attributed to is the outermost dependency macro of
     // the backtrace: the one the invoking line wrote. Expansions inside it,
     // such as log's `__log!` or serde_json's `json_internal!`, are the
     // dependency's own plumbing, and std macros are not named as calls into
     // a dependency, matching the stable backend's resolution.
-    let via_macro = backtrace.iter().rev().find_map(|expn| {
-        if let ExpnKind::Macro(MacroKind::Bang, _) = expn.kind
-            && let Some(def_id) = expn.macro_def_id
-            && !expansion_is_workspace(tcx, root, expn)
-            && !is_std_crate(tcx, def_id)
-        {
-            return Some(format!("{}!", def_path_str_of(tcx, def_id)));
-        }
-        None
-    });
+    let via_macro = backtrace
+        .iter()
+        .zip(&is_workspace)
+        .rev()
+        .find_map(|(expn, &workspace)| {
+            if let ExpnKind::Macro(MacroKind::Bang, _) = expn.kind
+                && let Some(def_id) = expn.macro_def_id
+                && !workspace
+                && !is_std_crate(tcx, def_id)
+            {
+                return Some(format!("{}!", def_path_str_of(tcx, def_id)));
+            }
+            None
+        });
 
-    let expanded_from = workspace_positions
-        .last()
-        .map(|&outermost| expanded_from_for(tcx, root, span, &backtrace, outermost));
     ExpansionOrigin {
         via_macro,
-        expanded_from,
-        from_foreign_expansion_only: workspace_positions.is_empty(),
+        expanded_from: outermost_workspace
+            .map(|outermost| expanded_from_for(tcx, root, span, &backtrace, outermost)),
+        from_foreign_expansion_only: outermost_workspace.is_none(),
     }
 }
 
@@ -151,11 +154,26 @@ fn definition_span_of(tcx: TyCtxt<'_>, expn: &ExpnData) -> Span {
     expn.call_site
 }
 
+thread_local! {
+    /// Whether a macro is a workspace macro, per definition. The answer for a
+    /// foreign macro reads its definition's file from disk, and one crate
+    /// expands the same few macros many times over.
+    static WORKSPACE_MACROS: RefCell<HashMap<DefId, bool>> = RefCell::new(HashMap::new());
+}
+
 fn expansion_is_workspace(tcx: TyCtxt<'_>, root: &Path, expn: &ExpnData) -> bool {
     let Some(def_id) = expn.macro_def_id else {
         return false;
     };
-    def_id.krate == LOCAL_CRATE || macro_defined_under_root(tcx, root, def_id)
+    if def_id.krate == LOCAL_CRATE {
+        return true;
+    }
+    if let Some(cached) = WORKSPACE_MACROS.with(|cache| cache.borrow().get(&def_id).copied()) {
+        return cached;
+    }
+    let workspace = macro_defined_under_root(tcx, root, def_id);
+    WORKSPACE_MACROS.with(|cache| cache.borrow_mut().insert(def_id, workspace));
+    workspace
 }
 
 /// Whether the macro is one of the standard library's. The stable backend
@@ -178,7 +196,7 @@ fn macro_defined_under_root(tcx: TyCtxt<'_>, root: &Path, def_id: DefId) -> bool
     let Some(path) = candidate_file_path(tcx, span) else {
         return false;
     };
-    path_is_under_root(root, &path)
+    crate::path_is_under_root(root, &path)
 }
 
 /// rustc's path of a macro, named the way the report names macros:
@@ -212,12 +230,4 @@ fn line_at(tcx: TyCtxt<'_>, span: Span) -> Option<usize> {
 /// back to the full path for a file outside it.
 fn file_display_path(tcx: TyCtxt<'_>, root: &Path, span: Span) -> Option<String> {
     candidate_file_path(tcx, span).map(|path| relative_display_path(root, &path))
-}
-
-fn canonical_path(path: &Path) -> PathBuf {
-    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
-}
-
-fn path_is_under_root(root: &Path, path: &Path) -> bool {
-    canonical_path(path).starts_with(canonical_path(root))
 }
