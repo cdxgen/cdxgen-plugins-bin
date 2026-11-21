@@ -1,0 +1,19 @@
+thirdparty/rusi/crates/rusi-core/src/lib.rs
+  s_313a3332a63f47::t_56d7d2d7f2a71d 1145-1163,1169-1171,1196-1198
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0c5c791c32cef4992affdb1b3fb0a93262de6ec0",
+  "prompts": {},
+  "sessions": {
+    "s_313a3332a63f47": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_c5dc46c0-216e-4d08-a8b5-9496b92c2580",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
