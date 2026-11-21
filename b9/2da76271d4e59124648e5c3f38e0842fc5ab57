@@ -1,0 +1,45 @@
+thirdparty/rusi/fixtures/macro-zoo-app/src/outer/mod.rs
+  s_33b453a4a419f0::t_10ee9ccfd67b4e 1-4
+thirdparty/rusi/fixtures/macro-zoo-app/src/lib.rs
+  s_33b453a4a419f0::t_10ee9ccfd67b4e 1-93,95-97,103-162
+  s_33b453a4a419f0::t_88cd2de06ef17f 94,98-102
+thirdparty/rusi/fixtures/macro-zoo-app/src/outer/inner.rs
+  s_33b453a4a419f0::t_10ee9ccfd67b4e 1-4,6-7
+  s_33b453a4a419f0::t_88cd2de06ef17f 5
+thirdparty/rusi/fixtures/macro-zoo-app/src/shadow.rs
+  s_33b453a4a419f0::t_10ee9ccfd67b4e 1-23
+thirdparty/rusi/corpus.toml
+  s_33b453a4a419f0::t_3b1000f6b6f164 122-127
+thirdparty/rusi/fixtures/macro-zoo-app/Cargo.lock
+  s_33b453a4a419f0::t_3c20483e6f47e1 1-119
+thirdparty/rusi/fixtures/macro-zoo-app/Cargo.toml
+  s_33b453a4a419f0::t_9ed925e5a691bc 1-11
+thirdparty/rusi/fixtures/macro-zoo-app/src/helper.rs
+  s_33b453a4a419f0::t_7addcf7dfc8483 1-3
+thirdparty/rusi/fixtures/macro-zoo-app/src/hoisted.rs
+  s_33b453a4a419f0::t_9f43cb5c664f83 1-8
+thirdparty/rusi/fixtures/macro-zoo-app/src/macros/make_units.rs
+  s_33b453a4a419f0::t_f6e312a843a567 1-26
+thirdparty/rusi/fixtures/macro-zoo-app/src/macros/mod.rs
+  s_33b453a4a419f0::t_2029a0552cb0d2 1-5
+thirdparty/rusi/fixtures/macro-zoo-app/src/macros/path_scoped.rs
+  s_33b453a4a419f0::t_397d0ed7a5cb2f 1-10
+thirdparty/rusi/fixtures/macro-zoo-app/src/textual.rs
+  s_33b453a4a419f0::t_b7d01d14aebef5 1-5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b92da76271d4e59124648e5c3f38e0842fc5ab57",
+  "prompts": {},
+  "sessions": {
+    "s_33b453a4a419f0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "106e5fb3-64f8-470a-81b6-58b72db4ce09",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
