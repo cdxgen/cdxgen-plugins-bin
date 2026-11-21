@@ -945,11 +945,15 @@ fn cli_cryptos_command_filters_to_crypto_flows_and_paths() -> Result<()> {
 
 /// Run one fixture through one backend and return its call graph.
 fn analyze_with_backend(fixture: &str, backend: &str) -> Result<Report> {
+    analyze_with_backend_at(&fixture_path(fixture), backend)
+}
+
+fn analyze_with_backend_at(dir: &std::path::Path, backend: &str) -> Result<Report> {
     let binary = std::env::var("CARGO_BIN_EXE_rusi")?;
     let mut args = vec![
         "analyze".to_string(),
         "--dir".to_string(),
-        fixture_path(fixture).to_string_lossy().to_string(),
+        dir.to_string_lossy().to_string(),
         "--backend".to_string(),
         backend.to_string(),
         "--callgraph".to_string(),
@@ -975,7 +979,8 @@ fn analyze_with_backend(fixture: &str, backend: &str) -> Result<Report> {
     let output = Command::new(&binary).args(&args).output()?;
     assert!(
         output.status.success(),
-        "{fixture}/{backend} cli stderr: {}",
+        "{}/{backend} cli stderr: {}",
+        dir.display(),
         String::from_utf8_lossy(&output.stderr)
     );
     Ok(serde_json::from_slice(&output.stdout)?)
@@ -1394,6 +1399,77 @@ fn compiler_mode_drops_stale_macro_note_for_analysed_files() -> Result<()> {
     Ok(())
 }
 
+/// A copy of `macro-zoo-app` in a temporary directory, with `extra` appended
+/// to `src/lib.rs`, for tests that need the fixture plus one more function.
+fn copy_macro_zoo(label: &str, extra: &str) -> Result<PathBuf> {
+    let fixture = fixture_path("macro-zoo-app");
+    let copy = std::env::temp_dir().join(format!(
+        "rusi-macro-zoo-{label}-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock is valid")
+            .as_nanos()
+    ));
+    fs::create_dir_all(copy.join("src"))?;
+    for file in ["Cargo.toml", "Cargo.lock"] {
+        fs::copy(fixture.join(file), copy.join(file))?;
+    }
+    for entry in fs::read_dir(fixture.join("src"))? {
+        let entry = entry?;
+        let target = copy.join("src").join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            fs::create_dir_all(&target)?;
+            for nested in fs::read_dir(entry.path())? {
+                let nested = nested?;
+                fs::copy(nested.path(), target.join(nested.file_name()))?;
+            }
+        } else {
+            fs::copy(entry.path(), target)?;
+        }
+    }
+    let mut lib = fs::read_to_string(fixture.join("src/lib.rs"))?;
+    lib.push_str(extra);
+    fs::write(copy.join("src/lib.rs"), lib)?;
+    Ok(copy)
+}
+
+#[test]
+#[ignore = "compiler backend: needs the rustc-dev and rust-src components and runs nested cargo. Run: RUSTC_BOOTSTRAP=1 cargo test -- --ignored --test-threads=1"]
+fn compiler_mode_keeps_unsafe_blocks_written_as_dependency_macro_arguments() -> Result<()> {
+    // Tokens passed to a dependency macro keep the invoking file's spans, so
+    // an `unsafe` block the user writes as an argument is the user's code
+    // even though the macro's expansion holds it, and its signal stays.
+    let copy = copy_macro_zoo(
+        "arguments",
+        "\npub fn unsafe_in_macro_arguments(p: *const u32) -> Vec<u32> {\n    info!(\"value {}\", unsafe { *p });\n    vec![unsafe { *p }]\n}\n",
+    )?;
+    let lib_lines = fs::read_to_string(copy.join("src/lib.rs"))?.lines().count();
+    let report = analyze_with_backend_at(&copy, "compiler");
+    let _ = fs::remove_dir_all(&copy);
+    let report = report?;
+    if !embedded_compiler_ran(
+        &report,
+        "compiler_mode_keeps_unsafe_blocks_written_as_dependency_macro_arguments",
+    ) {
+        return Ok(());
+    }
+    // The appended function ends the file: `}` is its last line, and the
+    // `info!` and `vec!` lines are the two before the closing tail.
+    let argument_lines = [lib_lines - 2, lib_lines - 1];
+    for line in argument_lines {
+        assert!(
+            report.security_signals.iter().any(|signal| {
+                signal.description == "unsafe block detected"
+                    && signal.file_path == "src/lib.rs"
+                    && signal.position.line == line
+                    && signal.expanded_from.is_none()
+            }),
+            "the unsafe block written as a macro argument on line {line} is reported"
+        );
+    }
+    Ok(())
+}
+
 #[test]
 #[ignore = "compiler backend: needs the rustc-dev and rust-src components and runs nested cargo. Run: RUSTC_BOOTSTRAP=1 cargo test -- --ignored --test-threads=1"]
 fn compiler_mode_keeps_macro_note_when_the_compiler_run_fails() -> Result<()> {
@@ -1401,41 +1477,10 @@ fn compiler_mode_keeps_macro_note_when_the_compiler_run_fails() -> Result<()> {
     // the stable note about its macro bodies stays: the report's macro-level
     // blind spot is real there.
     let binary = std::env::var("CARGO_BIN_EXE_rusi")?;
-    let broken = std::env::temp_dir().join(format!(
-        "rusi-macro-zoo-broken-{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("system clock is valid")
-            .as_nanos()
-    ));
-    fs::create_dir_all(broken.join("src"))?;
-    fs::copy(
-        fixture_path("macro-zoo-app").join("Cargo.toml"),
-        broken.join("Cargo.toml"),
+    let broken = copy_macro_zoo(
+        "broken",
+        "\nfn broken() {\n    let x: u32 = \"not a number\";\n}\n",
     )?;
-    fs::copy(
-        fixture_path("macro-zoo-app").join("Cargo.lock"),
-        broken.join("Cargo.lock"),
-    )?;
-    let mut lib = fs::read_to_string(fixture_path("macro-zoo-app").join("src/lib.rs"))?;
-    lib.push_str("\nfn broken() {\n    let x: u32 = \"not a number\";\n}\n");
-    fs::write(broken.join("src/lib.rs"), lib)?;
-    for path in ["helper.rs", "hoisted.rs", "shadow.rs", "textual.rs"] {
-        fs::copy(
-            fixture_path("macro-zoo-app").join("src").join(path),
-            broken.join("src").join(path),
-        )?;
-    }
-    for module in ["macros", "outer"] {
-        fs::create_dir_all(broken.join("src").join(module))?;
-        for entry in fs::read_dir(fixture_path("macro-zoo-app").join("src").join(module))? {
-            let entry = entry?;
-            fs::copy(
-                entry.path(),
-                broken.join("src").join(module).join(entry.file_name()),
-            )?;
-        }
-    }
 
     let output = Command::new(&binary)
         .args([

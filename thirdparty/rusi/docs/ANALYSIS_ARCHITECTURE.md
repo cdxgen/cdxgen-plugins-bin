@@ -437,6 +437,13 @@ not to the analyzed code, and is not emitted. This is what removes the
 "compiler-generated unsafe block" that a `log::info!` invocation used to raise
 against the user's line. A signal inside a workspace macro's expansion is kept,
 because the workspace's own macro caused the code to exist.
+Tokens the user passes to a macro keep their own spans, so an `unsafe` block
+written as an argument to `info!` or `vec!` is still reported. The rule covers
+attribute and derive macros too: when a dependency's attribute macro rewrites a
+workspace function, such as `#[tracing::instrument]` on an `async fn`, the
+coroutine it builds is the macro's code, and the "async coroutine modeled" note
+for that function is not emitted, while the user's statements inside it keep
+their signals.
 
 Second, origin. Evidence a workspace macro generated carries `expanded_from`, the
 same field the stable backend fills: the outermost workspace macro of the span's
