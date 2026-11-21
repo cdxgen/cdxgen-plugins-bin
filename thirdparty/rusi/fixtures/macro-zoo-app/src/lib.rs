@@ -28,6 +28,7 @@ use crate::macros::make_units;
 use anyhow::bail;
 use log::info;
 use log::warn as w;
+use maplit::hashmap;
 
 // Path-based scope: the full-path form of `path_scoped!`, which the same
 // macro also serves through `use crate::macros::path_scoped;` (not used
@@ -197,4 +198,42 @@ pub fn macro_source_bound_by_statement() -> std::io::Result<std::process::Output
 pub fn hygiene_flow() -> std::io::Result<()> {
     let x = std::env::var("MACRO_ZOO_HYGIENE").unwrap();
     guard_with_local!(x)
+}
+
+/// An `unsafe` block a workspace macro writes in its transcriber. The signal
+/// for it comes from the macro's expansion and names the macro, not the
+/// invoking line.
+macro_rules! checked_slot {
+    ($v:expr) => {
+        unsafe { std::ptr::read($v as *const u32) }
+    };
+}
+
+pub fn slot_value(v: u32) -> u32 {
+    checked_slot!(v)
+}
+
+/// A dependency macro whose body is a mapping, not Rust statements: the
+/// stable backend reports its body as unanalyzed, the compiler backend
+/// expands it, so the stale note must not survive compiler mode.
+pub fn zone_map() -> std::collections::HashMap<String, u32> {
+    let zone = std::env::var("MACRO_ZOO_ZONE").unwrap();
+    let length = zone.len() as u32;
+    hashmap! { zone => length }
+}
+
+/// The path form of the same dependency macro.
+pub fn pair_map() -> std::collections::HashMap<&'static str, u32> {
+    maplit::hashmap! { "primary" => 1, "backup" => 2 }
+}
+
+/// An `unsafe` block written by hand beside a dependency macro call: the
+/// block is the user's own code, so its signal stays and carries no macro
+/// origin even though the call next to it was expanded.
+pub fn hand_written_unsafe_beside_macro() -> usize {
+    info!("counting");
+    let text = String::from("checked");
+    let length = unsafe { std::ptr::read(&text as *const String) }.len();
+    std::mem::forget(text);
+    length
 }
