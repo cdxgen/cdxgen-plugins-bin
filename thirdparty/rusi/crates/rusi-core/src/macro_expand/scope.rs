@@ -400,6 +400,18 @@ pub(crate) struct MacroScopeTable {
     dependency_crates: HashSet<String>,
 }
 
+/// The name an import binds: its alias, or the last segment of its path.
+fn local_name(record: &UseRecord) -> String {
+    record.alias.clone().unwrap_or_else(|| {
+        record
+            .path
+            .rsplit("::")
+            .next()
+            .unwrap_or_default()
+            .to_string()
+    })
+}
+
 pub(crate) fn join_module(crate_name: &str, module_path: &[String]) -> String {
     let mut segments = vec![crate_name.to_string()];
     segments.extend(module_path.iter().cloned());
@@ -487,10 +499,7 @@ impl MacroScopeTable {
                 }
                 continue;
             }
-            let local = record
-                .alias
-                .clone()
-                .unwrap_or_else(|| record.path.rsplit("::").next().unwrap_or("").to_string());
+            let local = local_name(record);
             if local == "_" {
                 continue;
             }
@@ -617,14 +626,10 @@ impl MacroScopeTable {
         }
         // `use serde_json as sj;` followed by `sj::json!`.
         if depth == 0
-            && let Some(record) = use_records.iter().rev().find(|record| {
-                !record.is_glob
-                    && record
-                        .alias
-                        .as_deref()
-                        .unwrap_or_else(|| record.path.rsplit("::").next().unwrap_or_default())
-                        == first
-            })
+            && let Some(record) = use_records
+                .iter()
+                .rev()
+                .find(|record| !record.is_glob && local_name(record) == first)
         {
             let head: Vec<String> = record.path.split("::").map(str::to_string).collect();
             let mut expanded: Vec<&str> = head.iter().map(String::as_str).collect();
@@ -658,11 +663,7 @@ impl MacroScopeTable {
         // A `use` that imports the macro from a dependency crate, under the
         // imported name or its alias.
         for record in use_records.iter().rev() {
-            let local = record
-                .alias
-                .clone()
-                .unwrap_or_else(|| record.path.rsplit("::").next().unwrap_or("").to_string());
-            if local != name || record.is_glob {
+            if local_name(record) != name || record.is_glob {
                 continue;
             }
             let head = record.path.split("::").next().unwrap_or_default();
