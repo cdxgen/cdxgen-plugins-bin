@@ -459,10 +459,17 @@ edge the stable backend records, once per call site, so both backends report the
 same macro-level calls; on the macro-zoo-app fixture the two sets agree exactly.
 Where they merge, the compiler's entry replaces the stable one at the same call
 site, and a signal both backends raise at one position is reported once from the
-compiler's. One difference remains and is deliberate: a stable `macro-call` whose
+compiler's. Two differences remain and are deliberate. A stable `macro-call` whose
 name the stable backend could not resolve carries its candidate list under
 `properties.candidates` and no purl, while the compiler names the macro from the
-expansion data, so the two entries carry different names and both are kept.
+expansion data, so the two entries carry different names and both are kept. And
+the compiler reports calls the stable backend cannot see at all: macros invoked
+inside the body of a dependency macro the stable backend leaves unanalyzed, such
+as a `tracing::span!` inside a `tokio::select!` arm, and macros a procedural
+macro's expansion makes, such as the `clap::value_parser!` calls a
+`#[derive(Parser)]` generates. Both sets are macro-level calls the report is
+better for having, so the compiler's entries are kept rather than reconciled
+away.
 
 Finally, diagnostics. In compiler mode the stable analysis still runs, and a file
 whose macro bodies it could not recover contributed its "bodies were not analyzed"
