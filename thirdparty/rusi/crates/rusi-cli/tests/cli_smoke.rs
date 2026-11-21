@@ -1100,3 +1100,378 @@ fn compiler_backend_names_no_trait_outside_vtable_dispatch() -> Result<()> {
     );
     Ok(())
 }
+
+/// Like [`analyze_with_backend`], but with data flow enabled, for assertions
+/// on data-flow nodes.
+fn analyze_with_backend_and_dataflow(fixture: &str, backend: &str) -> Result<Report> {
+    let binary = std::env::var("CARGO_BIN_EXE_rusi")?;
+    let mut args = vec![
+        "analyze".to_string(),
+        "--dir".to_string(),
+        fixture_path(fixture).to_string_lossy().to_string(),
+        "--backend".to_string(),
+        backend.to_string(),
+        "--callgraph".to_string(),
+        "static".to_string(),
+        "--dataflow".to_string(),
+        "security".to_string(),
+    ];
+    if let Some(toolchain) = std::env::var("RUSI_TEST_TOOLCHAIN")
+        .ok()
+        .filter(|toolchain| !toolchain.is_empty())
+    {
+        args.push("--toolchain".to_string());
+        args.push(toolchain);
+    }
+    let output = Command::new(&binary).args(&args).output()?;
+    assert!(
+        output.status.success(),
+        "{fixture}/{backend} cli stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Ok(serde_json::from_slice(&output.stdout)?)
+}
+
+/// The macro invocation sites one report records: the macro's path with its
+/// trailing `!`, and the line it was invoked on.
+fn macro_call_sites(report: &Report) -> Vec<(String, usize)> {
+    let mut sites: Vec<(String, usize)> = report
+        .usages
+        .iter()
+        .filter(|usage| usage.kind == "macro-call")
+        .map(|usage| (usage.name.clone(), usage.position.line))
+        .collect();
+    sites.sort();
+    sites
+}
+
+#[test]
+#[ignore = "compiler backend: needs the rustc-dev and rust-src components and runs nested cargo. Run: RUSTC_BOOTSTRAP=1 cargo test -- --ignored --test-threads=1"]
+fn compiler_mode_reports_no_signal_from_dependency_expansions() -> Result<()> {
+    // Every compiler-generated unsafe block in this fixture comes out of a
+    // dependency macro (`format!`, `println!`, `dbg!`), so none of them may
+    // be reported against the user's lines. The `unsafe` block the
+    // workspace's own `checked_slot!` transcriber writes is kept and names
+    // the macro, and the block written by hand beside an `info!` call is
+    // kept with no macro origin at all.
+    let report = analyze_with_backend("macro-zoo-app", "compiler")?;
+    if !embedded_compiler_ran(
+        &report,
+        "compiler_mode_reports_no_signal_from_dependency_expansions",
+    ) {
+        return Ok(());
+    }
+    assert!(
+        !report
+            .security_signals
+            .iter()
+            .any(|signal| signal.description.contains("compiler-generated")),
+        "signals raised inside dependency expansions must not be reported"
+    );
+    let hand_written = report
+        .security_signals
+        .iter()
+        .filter(|signal| {
+            signal.category == "unsafe-code"
+                && signal.description == "unsafe block detected"
+                && signal.expanded_from.is_none()
+        })
+        .count();
+    assert_eq!(
+        hand_written, 1,
+        "the hand-written unsafe block beside the macro call is the one signal with no origin"
+    );
+    assert!(
+        report.security_signals.iter().any(|signal| {
+            signal.category == "unsafe-code"
+                && signal
+                    .expanded_from
+                    .as_ref()
+                    .is_some_and(|origin| origin.macro_path == "macro_zoo_app::checked_slot")
+        }),
+        "the unsafe block written in checked_slot!'s transcriber is reported and names the macro"
+    );
+    Ok(())
+}
+
+#[test]
+#[ignore = "compiler backend: needs the rustc-dev and rust-src components and runs nested cargo. Run: RUSTC_BOOTSTRAP=1 cargo test -- --ignored --test-threads=1"]
+fn compiler_mode_fills_expanded_from_for_workspace_generated_code() -> Result<()> {
+    // `Seconds::danger` is a method the `make_units!` macro generated: its
+    // declaration and the data-flow nodes of its slice name the macro, while
+    // the position stays at the invocation site. A hand-written function has
+    // no origin, and neither does code a dependency macro produced.
+    let report = analyze_with_backend_and_dataflow("macro-zoo-app", "compiler")?;
+    if !embedded_compiler_ran(
+        &report,
+        "compiler_mode_fills_expanded_from_for_workspace_generated_code",
+    ) {
+        return Ok(());
+    }
+    let danger = report
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name == "macro_zoo_app::Seconds::danger")
+        .expect("generated method declared");
+    let origin = danger
+        .expanded_from
+        .as_ref()
+        .expect("generated method carries its macro origin");
+    assert_eq!(origin.macro_path, "macro_zoo_app::macros::make_units::make_units");
+    assert_eq!(origin.file_path, "src/macros/make_units.rs");
+    assert_eq!(danger.file_path, "src/lib.rs");
+
+    let data_flow = report.data_flow.expect("dataflow present");
+    let danger_nodes = data_flow
+        .nodes
+        .iter()
+        .filter(|node| node.function == "macro_zoo_app::Seconds::danger")
+        .collect::<Vec<_>>();
+    assert!(
+        !danger_nodes.is_empty(),
+        "the generated method contributes data-flow nodes"
+    );
+    for node in danger_nodes {
+        assert_eq!(
+            node.expanded_from.as_ref().map(|origin| origin.macro_path.as_str()),
+            Some("macro_zoo_app::macros::make_units::make_units"),
+            "every node of the slice inside the generated method names the macro"
+        );
+    }
+
+    let run = report
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name == "macro_zoo_app::run")
+        .expect("hand-written function declared");
+    assert!(
+        run.expanded_from.is_none(),
+        "a hand-written function carries no macro origin"
+    );
+    // A dependency macro's helper is not workspace code either: it names no
+    // workspace macro as its origin.
+    assert!(
+        report
+            .usages
+            .iter()
+            .filter(|usage| usage.name.ends_with("log::__private_api::log"))
+            .all(|usage| usage.expanded_from.is_none()),
+        "calls made by a dependency macro's expansion carry no workspace origin"
+    );
+    Ok(())
+}
+
+#[test]
+#[ignore = "compiler backend: needs the rustc-dev and rust-src components and runs nested cargo. Run: RUSTC_BOOTSTRAP=1 cargo test -- --ignored --test-threads=1"]
+fn compiler_mode_names_dependency_macro_helpers_and_matches_stable_macro_calls() -> Result<()> {
+    // The helper call a dependency macro's expansion makes carries the macro
+    // the user invoked, so `log::__private_api::log` reads as `log::info!`.
+    // The macro-level calls the two backends report must agree: the same
+    // `macro-call` usages and the same `macro` edges, or one backend is
+    // hiding or inventing invocations.
+    let compiler = analyze_with_backend("macro-zoo-app", "compiler")?;
+    if !embedded_compiler_ran(&compiler, "compiler_mode_names_dependency_macro_helpers") {
+        return Ok(());
+    }
+    let stable = analyze_with_backend("macro-zoo-app", "stable")?;
+
+    for (helper, macro_name) in [
+        ("log::__private_api::log", "log::info!"),
+        ("anyhow::__private::format_err", "anyhow::bail!"),
+    ] {
+        let usage = compiler
+            .usages
+            .iter()
+            .find(|usage| usage.name.ends_with(helper))
+            .unwrap_or_else(|| panic!("compiler report names the {helper} helper"));
+        assert_eq!(
+            usage.properties.get("viaMacro").map(String::as_str),
+            Some(macro_name),
+            "the {helper} helper names the macro that made it"
+        );
+    }
+    // The negative case: a call written by hand, or one a workspace macro
+    // wrote, names no dependency macro.
+    let command_calls = compiler
+        .usages
+        .iter()
+        .filter(|usage| usage.name.starts_with("std::process::Command::new"))
+        .count();
+    assert!(command_calls > 0, "fixture has hand-written and macro-written Command::new calls");
+    assert!(
+        compiler
+            .usages
+            .iter()
+            .filter(|usage| usage.name.starts_with("std::process::Command::new"))
+            .all(|usage| !usage.properties.contains_key("viaMacro")),
+        "calls not made through a dependency macro carry no viaMacro"
+    );
+
+    let compiler_sites = macro_call_sites(&compiler);
+    assert!(
+        compiler_sites.iter().any(|(name, _)| name == "log::info!"),
+        "compiler records the info! call"
+    );
+    assert_eq!(
+        compiler_sites, macro_call_sites(&stable),
+        "both backends record the same macro-call sites (name and line) on macro-zoo-app; \
+         a difference must be explained in the docs"
+    );
+
+    let macro_edges = |report: &Report| -> Vec<(String, usize)> {
+        let mut edges: Vec<(String, usize)> = report
+            .call_graph
+            .as_ref()
+            .expect("call graph")
+            .edges
+            .iter()
+            .filter(|edge| edge.call_type == "macro")
+            .map(|edge| {
+                (
+                    edge.callee_text.clone().unwrap_or_default(),
+                    edge.line,
+                )
+            })
+            .collect();
+        edges.sort();
+        edges
+    };
+    assert_eq!(
+        macro_edges(&compiler),
+        macro_edges(&stable),
+        "both backends record the same macro edges"
+    );
+    let edge_purls: Vec<&str> = compiler
+        .call_graph
+        .as_ref()
+        .expect("call graph")
+        .edges
+        .iter()
+        .filter(|edge| edge.call_type == "macro" && edge.callee_text.as_deref() == Some("log::info"))
+        .map(|edge| edge.target_purl.as_str())
+        .collect();
+    assert!(
+        edge_purls.iter().all(|purl| purl.starts_with("pkg:cargo/log")),
+        "the macro edge names the dependency's purl: {edge_purls:?}"
+    );
+    Ok(())
+}
+
+#[test]
+#[ignore = "compiler backend: needs the rustc-dev and rust-src components and runs nested cargo. Run: RUSTC_BOOTSTRAP=1 cargo test -- --ignored --test-threads=1"]
+fn compiler_mode_drops_stale_macro_note_for_analysed_files() -> Result<()> {
+    // The stable backend cannot recover `maplit::hashmap!`'s body and says
+    // so. The compiler backend expands it, so in compiler mode the report
+    // holds the calls of that body and the stable note would deny exactly
+    // what the report shows.
+    let compiler = analyze_with_backend("macro-zoo-app", "compiler")?;
+    if !embedded_compiler_ran(&compiler, "compiler_mode_drops_stale_macro_note") {
+        return Ok(());
+    }
+    assert!(
+        !compiler
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("bodies were not analyzed")),
+        "compiler mode reports no stable note about bodies it analysed"
+    );
+
+    let stable = analyze_with_backend("macro-zoo-app", "stable")?;
+    assert!(
+        stable
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic
+                .message
+                .contains("maplit::hashmap! bodies were not analyzed")),
+        "stable mode still reports the body it could not recover"
+    );
+    Ok(())
+}
+
+#[test]
+#[ignore = "compiler backend: needs the rustc-dev and rust-src components and runs nested cargo. Run: RUSTC_BOOTSTRAP=1 cargo test -- --ignored --test-threads=1"]
+fn compiler_mode_keeps_macro_note_when_the_compiler_run_fails() -> Result<()> {
+    // A crate the compiler run fails on contributes no compiler evidence, so
+    // the stable note about its macro bodies stays: the report's macro-level
+    // blind spot is real there.
+    let binary = std::env::var("CARGO_BIN_EXE_rusi")?;
+    let broken = std::env::temp_dir().join(format!(
+        "rusi-macro-zoo-broken-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock is valid")
+            .as_nanos()
+    ));
+    fs::create_dir_all(broken.join("src"))?;
+    fs::copy(
+        fixture_path("macro-zoo-app").join("Cargo.toml"),
+        broken.join("Cargo.toml"),
+    )?;
+    fs::copy(
+        fixture_path("macro-zoo-app").join("Cargo.lock"),
+        broken.join("Cargo.lock"),
+    )?;
+    let mut lib = fs::read_to_string(fixture_path("macro-zoo-app").join("src/lib.rs"))?;
+    lib.push_str("\nfn broken() {\n    let x: u32 = \"not a number\";\n}\n");
+    fs::write(broken.join("src/lib.rs"), lib)?;
+    for (path, module) in [
+        ("helper.rs", "helper"),
+        ("hoisted.rs", "hoisted"),
+        ("shadow.rs", "shadow"),
+        ("textual.rs", "textual"),
+    ] {
+        fs::copy(
+            fixture_path("macro-zoo-app").join("src").join(path),
+            broken.join("src").join(path),
+        )?;
+    }
+    for module in ["macros", "outer"] {
+        fs::create_dir_all(broken.join("src").join(module))?;
+        for entry in fs::read_dir(fixture_path("macro-zoo-app").join("src").join(module))? {
+            let entry = entry?;
+            fs::copy(
+                entry.path(),
+                broken.join("src").join(module).join(entry.file_name()),
+            )?;
+        }
+    }
+
+    let output = Command::new(&binary)
+        .args([
+            "analyze",
+            "--dir",
+            broken.to_string_lossy().as_ref(),
+            "--backend",
+            "compiler",
+            "--callgraph",
+            "static",
+            "--dataflow",
+            "none",
+        ])
+        .output()?;
+    let _ = fs::remove_dir_all(&broken);
+    assert!(
+        output.status.success(),
+        "a failed compiler run is reported, not fatal: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: Report = serde_json::from_slice(&output.stdout)?;
+    assert!(
+        report
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.kind == "backend-error"),
+        "the failed compiler run is reported as a backend error"
+    );
+    assert!(
+        report
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic
+                .message
+                .contains("maplit::hashmap! bodies were not analyzed")),
+        "the note about bodies the report does not hold is kept"
+    );
+    Ok(())
+}

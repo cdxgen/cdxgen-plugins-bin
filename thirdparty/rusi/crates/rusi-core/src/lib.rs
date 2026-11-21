@@ -1316,6 +1316,33 @@ fn analyze_on_this_thread(
                 )))
         });
         extend_unique_usages(&mut report.usages, payload.usages);
+        // The two backends name a signal by different id schemes, so the same
+        // unsafe block at one position arrives twice: once from each. The
+        // compiler's entry is the richer one, carrying the expansion origin,
+        // so the stable entry of a signal the compiler also raised is
+        // replaced by it. Signals only one backend raised are kept.
+        let compiler_signals: HashSet<(&str, &str, &str, usize, usize)> = payload
+            .security_signals
+            .iter()
+            .map(|signal| {
+                (
+                    signal.category.as_str(),
+                    signal.description.as_str(),
+                    signal.file_path.as_str(),
+                    signal.position.line,
+                    signal.position.column,
+                )
+            })
+            .collect();
+        report.security_signals.retain(|signal| {
+            !compiler_signals.contains(&(
+                signal.category.as_str(),
+                signal.description.as_str(),
+                signal.file_path.as_str(),
+                signal.position.line,
+                signal.position.column,
+            ))
+        });
         extend_unique_security_signals(&mut report.security_signals, payload.security_signals);
         merge_crypto_evidence(&mut report.crypto, payload.crypto);
         report.call_graph = if options.call_graph_mode != "none" {
@@ -13838,7 +13865,7 @@ mod tests {
 
     use rusi_schema::{
         CallGraph, CryptoComponent, CryptoEvidence, DataFlowPattern, DataFlowPatternSet,
-        Declaration, Diagnostic, FileEvidence, Position, SecuritySignal,
+        Declaration, Diagnostic, FileEvidence, LibraryUsage, Position, SecuritySignal,
     };
 
     use super::{
@@ -18452,6 +18479,156 @@ pub fn total() -> usize {{ cnt!({long}) }}
         );
         assert!(report.call_graph.is_some());
         assert!(report.data_flow.is_some());
+    }
+
+    fn compiler_options_for(dir: PathBuf) -> AnalyzeOptionsInput {
+        AnalyzeOptionsInput {
+            include_dependencies: false,
+            max_call_candidates: crate::DEFAULT_MAX_CALL_CANDIDATES,
+            dir,
+            backend: BACKEND_COMPILER.to_string(),
+            analysis_scope: AnalysisScope::Default,
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "security".to_string(),
+            custom_data_flow_patterns: None,
+            include_tests: false,
+            debug: false,
+        }
+    }
+
+    #[test]
+    fn compiler_coverage_replaces_the_stable_macro_call_and_drops_its_note() {
+        // Stable analysis alone cannot recover `maplit::hashmap!`'s body: it
+        // records the `macro-call` usage and reports the body as unanalyzed.
+        // The compiler payload covers the same file and records the same
+        // call, so the report must carry one entry for it and no note about
+        // a blind spot the compiler filled.
+        let stable_only = analyze_with_optional_compiler(
+            compiler_options_for(fixture_path("macro-zoo-app")),
+            None,
+        )
+        .expect("stable analysis succeeds");
+        let stable_call = stable_only
+            .usages
+            .iter()
+            .find(|usage| usage.kind == "macro-call" && usage.name == "maplit::hashmap!")
+            .expect("stable records the hashmap! call")
+            .clone();
+        assert!(
+            stable_only.diagnostics.iter().any(|diagnostic| {
+                diagnostic
+                    .message
+                    .contains("maplit::hashmap! bodies were not analyzed")
+            }),
+            "stable analysis alone reports the body it could not recover"
+        );
+
+        let compiler_call = LibraryUsage {
+            // A different id scheme from the stable backend's, at the same
+            // call site: this is what makes ids alone insufficient to merge.
+            id: "usage-compiler-maplit".to_string(),
+            ..stable_call.clone()
+        };
+        let payload = CompilerBackendPayload {
+            files: vec![FileEvidence {
+                path: "src/lib.rs".to_string(),
+                package_name: "macro-zoo-app".to_string(),
+                package_path: "macro-zoo-app".to_string(),
+                purl: String::new(),
+                imports: Vec::new(),
+                declarations: Vec::new(),
+                usages: Vec::new(),
+                security_signals: Vec::new(),
+                crypto: None,
+            }],
+            usages: vec![compiler_call],
+            ..CompilerBackendPayload::default()
+        };
+        let merged = analyze_with_optional_compiler(
+            compiler_options_for(fixture_path("macro-zoo-app")),
+            Some(payload),
+        )
+        .expect("analysis succeeds");
+        assert!(
+            !merged.diagnostics.iter().any(|diagnostic| {
+                diagnostic
+                    .message
+                    .contains("bodies were not analyzed")
+            }),
+            "no note about bodies the compiler analysed"
+        );
+        let calls = merged
+            .usages
+            .iter()
+            .filter(|usage| {
+                usage.kind == "macro-call"
+                    && usage.name == "maplit::hashmap!"
+                    && usage.position.line == stable_call.position.line
+            })
+            .count();
+        assert_eq!(calls, 1, "one macro-call entry survives the merge");
+    }
+
+    #[test]
+    fn a_file_the_compiler_run_missed_keeps_its_macro_note() {
+        // A compiler payload whose files list is empty is a run that produced
+        // no evidence, for example one whose crate failed to compile. The
+        // stable note about the bodies the report does not hold stays.
+        let merged = analyze_with_optional_compiler(
+            compiler_options_for(fixture_path("macro-zoo-app")),
+            Some(CompilerBackendPayload::default()),
+        )
+        .expect("analysis succeeds");
+        assert!(
+            merged.diagnostics.iter().any(|diagnostic| {
+                diagnostic
+                    .message
+                    .contains("maplit::hashmap! bodies were not analyzed")
+            }),
+            "the note about an unreached file is kept"
+        );
+    }
+
+    #[test]
+    fn a_compiler_signal_replaces_the_stable_signal_at_one_position() {
+        // The two backends id the same unsafe block differently, so the
+        // merged report would otherwise carry the block twice.
+        let stable_only = analyze_with_optional_compiler(
+            compiler_options_for(fixture_path("macro-zoo-app")),
+            None,
+        )
+        .expect("stable analysis succeeds");
+        let hand_written = stable_only
+            .security_signals
+            .iter()
+            .find(|signal| {
+                signal.description == "unsafe block detected" && signal.expanded_from.is_none()
+            })
+            .expect("stable reports the hand-written unsafe block")
+            .clone();
+        let payload = CompilerBackendPayload {
+            security_signals: vec![SecuritySignal {
+                id: "signal-compiler-hand-written".to_string(),
+                ..hand_written.clone()
+            }],
+            ..CompilerBackendPayload::default()
+        };
+        let merged = analyze_with_optional_compiler(
+            compiler_options_for(fixture_path("macro-zoo-app")),
+            Some(payload),
+        )
+        .expect("analysis succeeds");
+        let at_position = merged
+            .security_signals
+            .iter()
+            .filter(|signal| {
+                signal.description == hand_written.description
+                    && signal.file_path == hand_written.file_path
+                    && signal.position.line == hand_written.position.line
+                    && signal.position.column == hand_written.position.column
+            })
+            .count();
+        assert_eq!(at_position, 1, "the block is reported once");
     }
 
     #[test]
