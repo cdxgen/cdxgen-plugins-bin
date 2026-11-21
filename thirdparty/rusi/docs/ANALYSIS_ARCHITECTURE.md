@@ -121,11 +121,17 @@ dedicated higher order edge kind.
 The design rule throughout is that a real local call is never rerouted to a synthetic
 external node just because it is ambiguous. Over-approximation with a confidence label is
 preferred to silent loss, because a security reviewer can filter a low confidence edge
-but cannot recover an edge that was never emitted. The one honest limitation of the
-stable backend is that it is syntax driven, so calls that live inside macro expansions
-other than a small set of recognized ones, and calls through function pointers stored in
-data, are not visible to it. These are exactly the cases the compiler backend exists to
-cover.
+but cannot recover an edge that was never emitted. For declarative macros the stable
+backend runs its own expander: a pre-pass collects every `macro_rules!` definition in the
+analyzed crates with its scoping (textual, path-based through `use`, exported at the
+crate root, hoisted by `#[macro_use] mod`), each workspace invocation is matched and
+transcribed, and the result is walked like hand-written code, with every item it
+produces stamped `expanded_from` and positioned at the invocation site. Calls to
+dependency macros become `macro-call` usages and `macro` edges that name the owning
+crate. The one honest limitation that remains is that it is syntax driven, so calls that
+live inside dependency macro expansions (their source is only read under `--deps`),
+inside procedural macros, and through function pointers stored in data, are not visible
+to it. These are exactly the cases the compiler backend exists to cover.
 
 ### 3.3 The taint model
 
@@ -198,6 +204,78 @@ argument is actually passed by mutable reference, rather than smearing taint acr
 argument of every multi argument call. Channel send and receive are modeled per channel,
 keyed on the channel binding, rather than through a single global slot, so that two
 independent channels do not cross contaminate.
+
+### 3.5 Declarative macros
+
+The stable backend expands the `macro_rules!` macros of the analyzed workspace itself.
+The code lives in `crates/rusi-core/src/macro_expand/`, one file per concern.
+
+`scope.rs` runs before any file is analyzed. It collects every definition with its
+position and the module declarations, `use` items and `extern crate` items that decide
+where each one is visible, and it answers one question: what does the macro path written
+at this position mean? Textual scope follows the Rust Reference: a definition is visible
+from its position to the end of its module and in child modules declared after it, never
+past the block that holds it, and a later definition of the same name shadows an earlier
+one by line and column. `#[macro_use]` on a `mod` item extends that scope past the item,
+through every level that carries it. Path-based scope comes from `#[macro_export]` (an
+item of the crate root, whatever module defines it) and from `use` items, which are
+followed to a fixed point through globs, aliases, `self::`, `super::`, `crate::` and the
+exported macros of other workspace crates. `#[macro_use] extern crate c;` of a workspace
+crate expands `c`'s macros; of a dependency, it attributes the call to the dependency, or
+records the candidates when more than one such crate could supply the name. Each
+definition becomes a `kind: "macro"` declaration.
+
+`matcher.rs` follows rustc's matcher: the pattern is compiled to a list of positions, all
+live positions advance over the invocation one token at a time, and a fragment specifier
+is parsed (with `syn`) only when exactly one position waits for it. Two positions waiting
+for a fragment, or one waiting for a fragment next to one waiting for a literal token, is
+the local ambiguity rustc rejects, so rusi reports it instead of guessing. A token is
+what rustc reads as one token: `+=`, `::`, `=>` and `'a` are single tokens for `tt`, for
+separators and for literal tokens in a pattern. `transcriber.rs` substitutes the bindings,
+keeps a multi-token `expr` binding grouped so `$e * 2` does not re-associate, and rewrites
+`$crate` to `crate`, or to the defining crate's name when the invocation is in another
+crate. `hygiene.rs` gives each binding the transcriber writes (`let`, `if let`,
+`while let`, `for`, closure parameters, `match` arms, tuple and struct patterns, inline
+format arguments) a suffix that is unique to the invocation, so it cannot alias a caller
+variable of the same name; names after `::` or `.`, struct fields and keys, macro names,
+item names and types are not renamed, and the suffix is removed from the report before it
+is returned.
+
+The result is parsed for the invocation's position (statements inside a function, items
+outside one, otherwise an expression) and walked by the same collector as hand-written
+code. Everything it produces is positioned at the invocation site and carries
+`expanded_from`; evidence ids and closure names include the invocation site and a
+per-file expansion number, so two invocations of one macro never merge.
+
+Four bounds keep an expansion finite, each with its own `macro` diagnostic: a nesting
+depth of 64 expansions, a budget of one million transcribed tokens for everything one
+hand-written invocation produces (nested and sibling expansions together), 16,384
+iterations of one repetition, and a step budget of one million for the matcher. Source
+that nests groups more than 64 deep is not read. No input is meant to make the module
+panic: it avoids `unwrap`, `expect`, direct identifier construction and unchecked
+indexing on data that comes from the source.
+
+Where it differs from rustc, rusi accepts more and never invents flows:
+
+- Fragments are parsed with `syn`, so the accepted grammar can differ at the edges, and a
+  fragment that does not parse makes the rule not match where rustc stops with an error.
+  `pat` follows the edition of the defining crate; `expr_2021` reads as `expr`.
+- Matchers rustc would reject when the macro is defined (follow-set and ambiguity rules)
+  are not checked up front. An ambiguity is reported when an invocation reaches it.
+  `$(x),?` is accepted.
+- Only `expr` bindings are kept grouped; `ty`, `pat`, `path` and the other fragments are
+  spliced as plain tokens.
+- Hygiene is recognized from tokens, so it relies on the conventions rustc lints for:
+  bindings are `snake_case`, and constructors and types start with a capital letter. It
+  does not follow block scopes (a name renamed once is renamed in the whole template),
+  does not rename inside nested `fn` items, attributes or `use` items, and does not model
+  labels and lifetimes.
+- A macro defined by a transcriber is not declared or put in scope. A `use` inside a
+  block does not import macros. A glob import from a dependency (`use log::*;`) leaves a
+  bare macro name unresolved. Dependency macros, procedural macros and `macro` 2.0 items
+  are not expanded.
+- Source nested thousands of groups deep can overflow the stack inside `syn` before the
+  expander sees it, on any input rusi reads.
 
 ## 4. The compiler backend
 
@@ -454,9 +532,11 @@ run.
 
 ## 8. Scope and honest limitations
 
-The stable backend is syntax and type hint driven. It does not see through most macro
-expansions and it cannot resolve calls through function pointers held in data. It is a
-fast approximation and it is labeled as such.
+The stable backend is syntax and type hint driven. It expands workspace `macro_rules!`
+invocations itself, so code those macros generate is visible; it does not expand
+dependency macros, procedural macros, or `macro` 2.0 items, and it cannot resolve calls
+through function pointers held in data. It is a fast approximation and it is labeled as
+such.
 
 The compiler backend is bounded by what a Cargo check exposes. It analyzes the crates
 built from the analysis root, and it can only see dependency MIR where the compiler makes
