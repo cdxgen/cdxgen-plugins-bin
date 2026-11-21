@@ -119,6 +119,12 @@ path = "fixtures/deep-nesting-app"
 capabilities = ["deep-nesting", "stack-depth"]
 expected_flows = "expected.jsonl"
 
+[[fixtures]]
+slug = "macro-zoo-app"
+tier = "fixtures"
+path = "fixtures/macro-zoo-app"
+capabilities = ["macro_rules", "scoping", "hygiene", "dependency-macros"]
+
 # ---------------------------------------------------------------------------
 # Small tier - cloned once, cached, run on every change.
 # ---------------------------------------------------------------------------

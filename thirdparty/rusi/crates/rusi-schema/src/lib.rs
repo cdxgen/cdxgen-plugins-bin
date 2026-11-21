@@ -241,6 +241,24 @@ pub struct Position {
     pub column: usize,
 }
 
+/// The macro expansion a piece of evidence was produced from.
+///
+/// Emitted only on evidence that comes out of a macro expansion, so its
+/// absence means "written by hand". `position` on the carrying item stays at
+/// the invocation site; these fields name the definition behind it.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct ExpandedFrom {
+    /// The macro's canonical path (`crate::module::name`), matching the
+    /// `kind: "macro"` declaration's `qualified_name`.
+    #[serde(rename = "macro")]
+    pub macro_path: String,
+    /// File of the `macro_rules!` definition, or of the transcriber token
+    /// when the backend knows it.
+    pub file_path: String,
+    /// 1-based line within `file_path`.
+    pub line: usize,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct ToolInfo {
     pub name: String,
@@ -317,6 +335,10 @@ pub struct Declaration {
     /// it to report a finding as reachable only under a given feature or target.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cfg_gate: Option<String>,
+    /// Present when the declaration was produced by a macro expansion.
+    /// `position` stays at the invocation site.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expanded_from: Option<ExpandedFrom>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -329,6 +351,10 @@ pub struct LibraryUsage {
     pub enclosing_declaration: Option<String>,
     pub position: Position,
     pub properties: IndexMap<String, String>,
+    /// Present when the usage was produced by a macro expansion. `position`
+    /// stays at the invocation site.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expanded_from: Option<ExpandedFrom>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -411,6 +437,10 @@ pub struct SecuritySignal {
     /// `headers` (`forwarded`, `x-forwarded` or `all`).
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub properties: IndexMap<String, String>,
+    /// Present when the signal was produced by a macro expansion. `position`
+    /// stays at the invocation site.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expanded_from: Option<ExpandedFrom>,
 }
 
 /// One parameter to an HTTP endpoint, extracted from the handler's
@@ -588,6 +618,19 @@ pub struct CallGraphEdge {
     /// everything the stable backend models with the typed fields above.
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub properties: IndexMap<String, String>,
+    /// Purl of the macro's crate, set on `macro` call-type edges so a
+    /// consumer can attribute a dependency macro call without joining to the
+    /// target node. Empty (and omitted) everywhere else.
+    #[serde(
+        rename = "targetPurl",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub target_purl: String,
+    /// Present when the call site was produced by a macro expansion.
+    /// `line`/`column` stay at the invocation site.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expanded_from: Option<ExpandedFrom>,
 }
 
 impl CallGraph {
@@ -704,6 +747,10 @@ pub struct DataFlowNode {
     pub parameter_index: Option<usize>,
     pub type_name: Option<String>,
     pub properties: IndexMap<String, String>,
+    /// Present when the node was produced by a macro expansion. `position`
+    /// stays at the invocation site.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expanded_from: Option<ExpandedFrom>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]

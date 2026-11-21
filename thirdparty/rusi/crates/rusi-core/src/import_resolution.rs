@@ -133,6 +133,9 @@ fn leaf_path(prefix: &str, ident: &str) -> Option<String> {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ItemTable {
     modules: HashMap<String, BTreeSet<String>>,
+    /// Paths of the declarations that are modules. `modules` also holds the
+    /// owner of every method and enum variant, which are not modules.
+    declared_modules: BTreeSet<String>,
 }
 
 impl ItemTable {
@@ -141,7 +144,11 @@ impl ItemTable {
     /// is everything but the last segment.
     pub(crate) fn from_declarations(declarations: &[Declaration]) -> Self {
         let mut modules: HashMap<String, BTreeSet<String>> = HashMap::new();
+        let mut declared_modules = BTreeSet::new();
         for declaration in declarations {
+            if declaration.kind == "module" {
+                declared_modules.insert(declaration.qualified_name.clone());
+            }
             let Some((module, name)) = declaration.qualified_name.rsplit_once("::") else {
                 continue;
             };
@@ -150,7 +157,10 @@ impl ItemTable {
                 .or_default()
                 .insert(name.to_string());
         }
-        Self { modules }
+        Self {
+            modules,
+            declared_modules,
+        }
     }
 
     fn names(&self, module: &str) -> Option<&BTreeSet<String>> {
@@ -173,6 +183,9 @@ pub(crate) struct ImportResolution {
     /// Module paths declared in this package, so a call written against a
     /// sibling module (`service::entry`, needing no `use`) resolves too.
     known_modules: BTreeSet<String>,
+    /// Modules that were declared with `mod`, as opposed to the owners of
+    /// methods and enum variants that `known_modules` also lists.
+    declared_modules: BTreeSet<String>,
 }
 
 impl ImportResolution {
@@ -181,6 +194,8 @@ impl ImportResolution {
             crate_name: crate_name.to_string(),
             ..Self::default()
         };
+        resolution.known_modules = items.modules.keys().cloned().collect();
+        resolution.declared_modules = items.declared_modules.clone();
 
         // Named imports first: a glob must never shadow an explicit import.
         for record in records.iter().filter(|record| !record.is_glob) {
@@ -188,6 +203,7 @@ impl ImportResolution {
             let Some(canonical) = resolution.normalize(&module_key, &record.path) else {
                 continue;
             };
+            let canonical = resolution.absolutize(&module_key, canonical);
             let local_name = match &record.alias {
                 Some(alias) => alias.clone(),
                 None => last_segment(&record.path).to_string(),
@@ -203,6 +219,7 @@ impl ImportResolution {
                 resolution.unexpanded_globs.insert(record.path.clone());
                 continue;
             };
+            let target = resolution.absolutize(&module_key, target);
             match items.names(&target) {
                 Some(names) => {
                     for name in names {
@@ -226,9 +243,28 @@ impl ImportResolution {
             }
         }
 
-        resolution.known_modules = items.modules.keys().cloned().collect();
         resolution.collapse_reexports(items);
         resolution
+    }
+
+    /// Roots a path whose first segment names a module declared inside the
+    /// importing module. `use child::*;` and `pub(crate) use child::name;`
+    /// are written relative to the importer, so without this step the target
+    /// `child` reads as an external crate and the glob is reported as
+    /// unexpandable.
+    fn absolutize(&self, module_key: &str, normalized: String) -> String {
+        let Some(first) = normalized.split("::").next() else {
+            return normalized;
+        };
+        if first.is_empty() || first == self.crate_name {
+            return normalized;
+        }
+        let rooted = format!("{module_key}::{first}");
+        if self.declared_modules.contains(&rooted) {
+            format!("{module_key}::{normalized}")
+        } else {
+            normalized
+        }
     }
 
     /// Follows `pub use` chains to a fixed point: if a canonical path names
@@ -414,6 +450,90 @@ mod tests {
                 .resolve_path(&["handlers".to_string()], "run_command")
                 .as_deref(),
             Some("app::sinks::run_command")
+        );
+    }
+
+    fn module_declaration(qualified_name: &str) -> Declaration {
+        Declaration {
+            kind: "module".to_string(),
+            qualified_name: qualified_name.to_string(),
+            ..Declaration::default()
+        }
+    }
+
+    #[test]
+    fn a_glob_of_a_child_module_resolves_inside_the_importing_module() {
+        // `mod helper_a; pub(crate) use helper_a::*;` in `app::macros`.
+        let items = ItemTable::from_declarations(&[
+            module_declaration("app::macros"),
+            module_declaration("app::macros::helper_a"),
+            declaration("app::macros::helper_a::made"),
+        ]);
+        let records = use_records(&["macros"], "pub(crate) use helper_a::*;");
+        let resolution = ImportResolution::build("app", &items, &records);
+
+        assert_eq!(
+            resolution
+                .resolve_path(&["macros".to_string()], "made")
+                .as_deref(),
+            Some("app::macros::helper_a::made")
+        );
+        assert_eq!(resolution.unexpanded_globs().count(), 0);
+    }
+
+    #[test]
+    fn a_named_import_of_a_child_module_resolves_inside_the_importing_module() {
+        let items = ItemTable::from_declarations(&[
+            module_declaration("app::macros"),
+            module_declaration("app::macros::helper_a"),
+            declaration("app::macros::helper_a::made"),
+        ]);
+        let records = use_records(&["macros"], "pub(crate) use helper_a::made;");
+        let resolution = ImportResolution::build("app", &items, &records);
+
+        assert_eq!(
+            resolution
+                .resolve_path(&["macros".to_string()], "made")
+                .as_deref(),
+            Some("app::macros::helper_a::made")
+        );
+    }
+
+    #[test]
+    fn an_external_crate_with_a_module_name_is_not_rooted_in_the_importer() {
+        // No `helper_a` module is declared in `app::macros`, so the path stays
+        // an external crate's and its glob is reported, not expanded.
+        let items = ItemTable::from_declarations(&[module_declaration("app::macros")]);
+        let records = use_records(&["macros"], "use helper_a::*;");
+        let resolution = ImportResolution::build("app", &items, &records);
+
+        assert_eq!(
+            resolution.unexpanded_globs().collect::<Vec<_>>(),
+            vec!["helper_a::*"]
+        );
+    }
+
+    #[test]
+    fn the_owner_of_an_enum_variant_is_not_read_as_a_module() {
+        // `use Command::*;` names an enum in the importing module. Treating it
+        // as a module would resolve its variants as module items and change
+        // how a bound value is typed.
+        let items = ItemTable::from_declarations(&[
+            module_declaration("app::cmd"),
+            Declaration {
+                kind: "enum".to_string(),
+                qualified_name: "app::cmd::Command".to_string(),
+                ..Declaration::default()
+            },
+            declaration("app::cmd::Command::Get"),
+        ]);
+        let records = use_records(&["cmd"], "use Command::*;");
+        let resolution = ImportResolution::build("app", &items, &records);
+
+        assert!(
+            resolution
+                .resolve_path(&["cmd".to_string()], "Get")
+                .is_none()
         );
     }
 

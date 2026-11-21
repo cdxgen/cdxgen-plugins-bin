@@ -6,7 +6,7 @@ use std::process::Command;
 use anyhow::{Context, Result};
 use cargo_metadata::{Metadata, MetadataCommand, Package};
 use indexmap::IndexMap;
-use proc_macro2::Span;
+use proc_macro2::{Span, TokenTree};
 use quote::ToTokens;
 use rusi_schema::fixpoint::{
     Dependents, KeyedTable, TrackedReads, WaveWorklist, callee_first_order, join_map, join_set,
@@ -34,6 +34,7 @@ mod api_discovery;
 mod cfg;
 mod endpoint_auth;
 mod import_resolution;
+mod macro_expand;
 mod modeling;
 mod module_tree;
 
@@ -192,6 +193,11 @@ struct SimplifiedCall {
     /// (`map`/`for_each`/`spawn`/...). The resolver labels these
     /// `HigherOrder` so consumers can filter combinator-driven edges.
     is_higher_order: bool,
+    /// True for a dependency macro invocation, whose edge carries the
+    /// `macro` call type and the crate's purl.
+    is_macro_call: bool,
+    /// Present when the call site was produced by a macro expansion.
+    expanded_from: Option<rusi_schema::ExpandedFrom>,
 }
 
 /// A `static` item's initializer, kept apart from function bodies because it
@@ -245,6 +251,9 @@ struct FunctionRecord {
     /// function does nothing", so summarizing it would conclude that taint stops
     /// there and silently drop real flows through it.
     has_body: bool,
+    /// Present when the whole function was produced by a macro expansion;
+    /// stamped onto the record's data-flow nodes.
+    expanded_from: Option<rusi_schema::ExpandedFrom>,
 }
 
 #[derive(Debug, Clone)]
@@ -853,6 +862,12 @@ struct AnalyzedFile {
     field_element_types: HashMap<String, String>,
     /// Macro paths in this file whose bodies could not be recovered as Rust.
     unanalyzed_macros: BTreeSet<String>,
+    /// Per-invocation macro findings (no rule matched, budget reached) that
+    /// name the exact site, unlike the aggregated `unanalyzed_macros`.
+    macro_diagnostics: Vec<Diagnostic>,
+    /// Whether any expansion in the file renamed a binding, so the report
+    /// holds renaming suffixes that must be removed before it is returned.
+    hygiene_renamed: bool,
     static_initializers: Vec<StaticInitializer>,
 }
 
@@ -1048,6 +1063,12 @@ fn analyze_on_this_thread(
         options.debug,
         format_args!("pass=stable-file-analysis files={}", analysis_tasks.len()),
     );
+    let macro_table = std::sync::Arc::new(build_macro_table(
+        &metadata,
+        &analysis_root,
+        options.debug,
+        &analysis_tasks,
+    ));
     let mut parse_diagnostics = parallel_map_collect(&analysis_tasks, |task| {
         match analyze_file(
             &task.package_ctx,
@@ -1057,6 +1078,7 @@ fn analyze_on_this_thread(
             &task.crate_path,
             &task.evaluator,
             task.collect_bodies,
+            &macro_table,
         ) {
             Ok(file) => {
                 debug_log(
@@ -1147,6 +1169,13 @@ fn analyze_on_this_thread(
             position: None,
         });
     }
+
+    for analyzed in &analyzed_files {
+        diagnostics.extend(analyzed.macro_diagnostics.iter().cloned());
+    }
+    let hygiene_renamed = analyzed_files
+        .iter()
+        .any(|analyzed| analyzed.hygiene_renamed);
 
     // Type names declared in the analyzed code, so a method missing from one of
     // them can be read as leaving the analyzed code rather than as unknown.
@@ -1276,7 +1305,20 @@ fn analyze_on_this_thread(
     debug_log(options.debug, format_args!("pass=stats"));
     report.stats = compute_stats(&report);
     debug_log(options.debug, format_args!("pass=done"));
+    if hygiene_renamed {
+        report = strip_hygiene_suffixes(&report)?;
+    }
     Ok(report)
+}
+
+/// Removes the suffixes macro hygiene gave to bindings written in a
+/// transcriber, so no report field shows a name the source did not write.
+/// The suffix only ever follows identifier characters, so removing it from
+/// the serialized text keeps the JSON valid.
+fn strip_hygiene_suffixes(report: &Report) -> Result<Report> {
+    let text = serde_json::to_string(report)?;
+    let stripped = macro_expand::strip_suffixes(&text);
+    Ok(serde_json::from_str(&stripped)?)
 }
 
 fn debug_log(enabled: bool, args: std::fmt::Arguments<'_>) {
@@ -1910,6 +1952,89 @@ fn canonical_path(path: &Path) -> PathBuf {
     fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
+/// Collects every `macro_rules!` definition in the analyzed files and builds
+/// the scope table the file analysis resolves invocations against. The
+/// pre-pass parses each file once more; the definitions it needs (rules,
+/// scoping, `use` records) are collected before any file is analyzed,
+/// because a macro defined in one file is in scope in another.
+fn build_macro_table(
+    metadata: &Metadata,
+    root: &Path,
+    debug: bool,
+    tasks: &[FileAnalysisTask],
+) -> macro_expand::MacroScopeTable {
+    debug_log(
+        debug,
+        format_args!("pass=macro-prepass files={}", tasks.len()),
+    );
+    // `pat` accepts a top-level or-pattern from edition 2021 on.
+    let edition_2021: HashMap<&str, bool> = metadata
+        .packages
+        .iter()
+        .map(|package| {
+            (
+                package.name.as_str(),
+                !matches!(package.edition.as_str(), "2015" | "2018"),
+            )
+        })
+        .collect();
+    let prepasses = parallel_map_collect(tasks, |task| {
+        let source = fs::read_to_string(&task.path).unwrap_or_default();
+        let relative_file_path = relative_display_path(root, &task.path);
+        macro_expand::prepass_file(
+            &source,
+            &task.module_path,
+            &relative_file_path,
+            &task.evaluator,
+            edition_2021
+                .get(task.package_ctx.package_name.as_str())
+                .copied()
+                .unwrap_or(true),
+        )
+    });
+    let mut by_crate: HashMap<String, Vec<macro_expand::MacroFilePrepass>> = HashMap::new();
+    let mut module_keys: HashMap<String, BTreeSet<String>> = HashMap::new();
+    for (task, prepass) in tasks.iter().zip(prepasses) {
+        let mut key = task.crate_path.clone();
+        for segment in &task.module_path {
+            key.push_str("::");
+            key.push_str(segment);
+        }
+        module_keys
+            .entry(task.crate_path.clone())
+            .or_default()
+            .insert(key);
+        by_crate
+            .entry(task.crate_path.clone())
+            .or_default()
+            .push(prepass);
+    }
+    let entries: Vec<macro_expand::CratePrepass> = by_crate
+        .into_iter()
+        .map(|(crate_path, prepasses)| {
+            let module_keys = module_keys.remove(&crate_path).unwrap_or_default();
+            macro_expand::CratePrepass {
+                crate_path,
+                prepasses,
+                module_keys,
+            }
+        })
+        .collect();
+    // Every package in the resolved graph answers by crate name; the
+    // analyzed crates are checked first at resolution time, so including
+    // their names here costs nothing.
+    let dependency_crates: HashSet<String> = metadata
+        .packages
+        .iter()
+        .map(|package| package.name.replace('-', "_"))
+        .collect();
+    macro_expand::MacroScopeTable::build(entries, dependency_crates)
+}
+
+// The per-file inputs are all distinct facts (package, path, module, cfg
+// environment, tier, macro table); grouping them would trade one lint for a
+// struct that only ever travels whole.
+#[allow(clippy::too_many_arguments)]
 fn analyze_file(
     package_ctx: &PackageContext,
     root: &Path,
@@ -1918,7 +2043,10 @@ fn analyze_file(
     crate_path: &str,
     evaluator: &CfgEvaluator,
     collect_bodies: bool,
+    macro_table: &std::sync::Arc<macro_expand::MacroScopeTable>,
 ) -> Result<AnalyzedFile> {
+    EXPANDED_VALUES.with(|values| values.borrow_mut().clear());
+    EXPANSION_SEQUENCE.with(|sequence| sequence.set(0));
     let source = fs::read_to_string(file_path)
         .with_context(|| format!("failed to read {}", file_path.display()))?;
     let syntax = syn::parse_file(&source)
@@ -1932,7 +2060,12 @@ fn analyze_file(
         module_path: module_path.to_vec(),
     };
 
-    let mut collector = SourceCollector::new(file_ctx.clone(), evaluator.clone(), collect_bodies);
+    let mut collector = SourceCollector::new(
+        file_ctx.clone(),
+        evaluator.clone(),
+        collect_bodies,
+        macro_table.clone(),
+    );
     collector.visit_file(&syntax);
 
     // The per-file `imports`/`declarations`/`usages`/`security_signals` are
@@ -1968,6 +2101,8 @@ fn analyze_file(
         field_types: collector.field_types,
         field_element_types: collector.field_element_types,
         unanalyzed_macros: collector.unanalyzed_macros,
+        macro_diagnostics: collector.macro_diagnostics,
+        hygiene_renamed: collector.hygiene_renamed,
         static_initializers: collector.static_initializers,
     })
 }
@@ -2015,6 +2150,8 @@ struct SourceCollector {
     /// Macro invocations whose token stream could not be recovered as Rust, so
     /// the gap is reported instead of silently swallowed.
     unanalyzed_macros: BTreeSet<String>,
+    macro_diagnostics: Vec<Diagnostic>,
+    hygiene_renamed: bool,
     static_initializers: Vec<StaticInitializer>,
     /// Whether to record function bodies (operations and direct calls).
     ///
@@ -2034,6 +2171,40 @@ struct SourceCollector {
     /// enabled items are visited, so this describes evidence that is real but
     /// conditional.
     cfg_gates: Vec<String>,
+    /// Workspace macro definitions and their scoping, collected by the
+    /// pre-pass before this collector runs.
+    macro_table: std::sync::Arc<macro_expand::MacroScopeTable>,
+    /// One frame per macro expansion being visited, innermost last.
+    expansion_stack: Vec<ExpansionFrame>,
+    /// Source of the per-invocation suffix that keeps transcriber-literal
+    /// bindings apart across two invocations of the same macro.
+    expansion_counter: usize,
+    /// Tokens produced so far by the outermost expansion being visited and
+    /// everything nested in it, against `MAX_EXPANSION_TOKENS`.
+    expansion_tokens: usize,
+    /// Expansion work (tokens produced plus a tenth of the matcher steps)
+    /// spent in this file.
+    file_work: usize,
+    /// Expansions made ahead of the walk, to give an expression-position
+    /// invocation a value; the walk takes them instead of expanding again.
+    expansion_cache: HashMap<(usize, usize, usize, u64), (macro_expand::Expansion, usize)>,
+}
+
+/// An expansion being visited: what to stamp on the evidence it produces.
+#[derive(Debug, Clone)]
+struct ExpansionFrame {
+    expanded_from: rusi_schema::ExpandedFrom,
+    /// The invocation site, which stays the position of everything the
+    /// expansion produces (transcribed tokens carry no real positions).
+    position: Position,
+    /// The raw start of the outermost hand-written invocation, which macro
+    /// paths inside the expansion resolve against.
+    site: macro_expand::Pos,
+    /// Per-file sequence number of this expansion. Transcribed tokens get
+    /// their line and column from the transcriber text, so two invocations
+    /// of one macro repeat them; this number keeps their evidence ids and
+    /// closure names apart.
+    sequence: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -2383,7 +2554,7 @@ impl SourceCollector {
                 &[
                     &self.file_ctx.relative_file_path,
                     "trusted-proxy-config",
-                    &span_key(span),
+                    &self.evidence_span_key(span),
                 ],
             ),
             category: "trusted-proxy-config".to_string(),
@@ -2395,9 +2566,10 @@ impl SourceCollector {
             package_path: self.file_ctx.package_path.clone(),
             purl: String::new(),
             file_path: self.file_ctx.relative_file_path.clone(),
-            position: position_from_span(&self.file_ctx.relative_file_path, span),
+            position: self.evidence_position(span),
             cfg_gate: self.current_cfg_gate(),
             properties,
+            expanded_from: self.current_expanded_from(),
         });
     }
 
@@ -2456,7 +2628,12 @@ impl SourceCollector {
         syn::visit::visit_expr_for_loop(self, node);
     }
 
-    fn new(file_ctx: FileContext, evaluator: CfgEvaluator, collect_bodies: bool) -> Self {
+    fn new(
+        file_ctx: FileContext,
+        evaluator: CfgEvaluator,
+        collect_bodies: bool,
+        macro_table: std::sync::Arc<macro_expand::MacroScopeTable>,
+    ) -> Self {
         Self {
             file_ctx,
             collect_bodies,
@@ -2476,7 +2653,85 @@ impl SourceCollector {
             field_types: HashMap::new(),
             field_element_types: HashMap::new(),
             unanalyzed_macros: BTreeSet::new(),
+            macro_diagnostics: Vec::new(),
+            hygiene_renamed: false,
             static_initializers: Vec::new(),
+            macro_table,
+            expansion_stack: Vec::new(),
+            expansion_counter: 0,
+            expansion_tokens: 0,
+            file_work: 0,
+            expansion_cache: HashMap::new(),
+        }
+    }
+
+    /// Moves the evidence of a function that an expansion produced to the
+    /// invocation site. The tokens of an expansion carry positions from the
+    /// transcriber text, which every invocation of one macro repeats and which
+    /// lie in no real file, so no operation or call keeps them.
+    fn stamp_expansion(&self, frame: &mut FunctionFrame) {
+        let Some(expansion) = self.current_expansion() else {
+            return;
+        };
+        for call in &mut frame.direct_calls {
+            call.position = expansion.position.clone();
+            if call.expanded_from.is_none() {
+                call.expanded_from = Some(expansion.expanded_from.clone());
+            }
+        }
+        for operation in &mut frame.operations {
+            override_operation_position(operation, &expansion.position);
+        }
+    }
+
+    /// The innermost expansion being visited, if any.
+    fn current_expansion(&self) -> Option<&ExpansionFrame> {
+        self.expansion_stack.last()
+    }
+
+    /// What `expanded_from` evidence from this position carries. Absent for
+    /// hand-written code.
+    fn current_expanded_from(&self) -> Option<rusi_schema::ExpandedFrom> {
+        self.current_expansion()
+            .map(|frame| frame.expanded_from.clone())
+    }
+
+    /// The position evidence from this position carries: the innermost
+    /// expansion's invocation site, or the token's own span.
+    fn evidence_position(&self, span: Span) -> Position {
+        match self.current_expansion() {
+            Some(frame) => frame.position.clone(),
+            None => position_from_span(&self.file_ctx.relative_file_path, span),
+        }
+    }
+
+    /// The identity key for evidence at this position. Inside an expansion
+    /// it combines the invocation site, the expansion's sequence number and
+    /// the token's own span, so two calls of one name inside one expansion,
+    /// and the same transcriber token in two invocations, stay distinct.
+    fn evidence_span_key(&self, span: Span) -> String {
+        match self.current_expansion() {
+            Some(frame) => format!(
+                "{}:{}#{}:{}",
+                frame.position.line,
+                frame.position.column,
+                frame.sequence,
+                span_key(span)
+            ),
+            None => span_key(span),
+        }
+    }
+
+    /// The symbol name of a closure, unique within the module even when the
+    /// closure comes from a transcriber that several invocations share.
+    fn closure_name(&self, span: Span) -> String {
+        let name = closure_symbol_name(span);
+        match self.current_expansion() {
+            Some(frame) => format!(
+                "{name}_in_{}_{}_{}",
+                frame.position.line, frame.position.column, frame.sequence
+            ),
+            None => name,
         }
     }
 
@@ -2517,8 +2772,9 @@ impl SourceCollector {
             file_path: self.file_ctx.relative_file_path.clone(),
             signature,
             receiver,
-            position: position_from_span(&self.file_ctx.relative_file_path, span),
+            position: self.evidence_position(span),
             cfg_gate: self.current_cfg_gate(),
+            expanded_from: self.current_expanded_from(),
         };
         self.declarations.push(declaration.clone());
         declaration
@@ -2526,25 +2782,30 @@ impl SourceCollector {
 
     /// Recovers the Rust inside a macro invocation and visits it.
     ///
-    /// This is **not** macro expansion: no matcher is run and no transcriber is
-    /// applied. It parses the invocation's token stream as Rust and walks
-    /// whatever comes out, which is what makes the calls inside `write!`,
-    /// `println!`, `assert!`, `vec![]`, and `lazy_static!` visible at all —
-    /// previously every one of them was invisible to the call graph, so a sink
-    /// reached only through a macro argument produced no evidence.
+    /// A workspace `macro_rules!` invocation whose path the pre-pass table
+    /// resolves is expanded first: rules are matched in order, the first
+    /// match is transcribed, and the result is parsed and walked, so
+    /// declarations, calls, and flows inside the macro come out as if
+    /// written by hand, stamped with `expanded_from` and positioned at the
+    /// invocation site. A dependency macro invocation becomes a
+    /// `macro-call` usage and a `macro` call-graph edge; a `serde_json::json!`
+    /// body additionally has its value expressions walked, because a
+    /// tainted value reaching one must keep its flow.
     ///
-    /// The recovery is deliberately conservative:
+    /// Everything else keeps the conservative recovery this method has always
+    /// had, which is what makes the calls inside `write!`, `println!`,
+    /// `assert!`, `vec![]`, and `lazy_static!` visible at all:
     ///
-    /// * `macro_rules!` definitions are skipped. A definition body is a matcher
-    ///   and a transcriber, not code that runs at that location, so walking it
-    ///   would attribute calls to the defining module that never happen there.
-    /// * Anything that does not parse is recorded in `unanalyzed_macros` rather
-    ///   than guessed at, so the blind spot is reported.
+    /// * `macro_rules!` definitions are skipped, and now emit a `macro`
+    ///   declaration instead. A definition body is a matcher and a
+    ///   transcriber, not code that runs at that location.
+    /// * Anything that does not parse is recorded in `unanalyzed_macros`
+    ///   rather than guessed at, so the blind spot is reported.
     fn visit_macro_body(&mut self, mac: &syn::Macro) {
         let path = path_to_string(&mac.path);
-        // A `macro_rules!` body is a template, not code in this position.
+        // A `macro_rules!` body is a template, not code in this position;
+        // item-position definitions were declared by `visit_item_macro`.
         if path == "macro_rules" {
-            self.unanalyzed_macros.insert(format!("{path}!"));
             return;
         }
         // A `write!`/`writeln!` in statement position, or under a chained
@@ -2558,6 +2819,44 @@ impl SourceCollector {
             frame.record_operation(Operation::Expr(expr));
         }
         let tokens = mac.tokens.clone();
+        // Resolution comes before the empty-body check: `m!()` can expand to
+        // items, and a dependency macro called with no arguments is still a
+        // call into that crate.
+        let site = self.invocation_site(mac);
+        let mut explained = false;
+        match self.macro_table.resolve_invocation(
+            &self.file_ctx.crate_path,
+            &self.file_ctx.module_path,
+            &self.file_ctx.relative_file_path,
+            site,
+            &path,
+            &self.use_records,
+        ) {
+            macro_expand::InvocationTarget::Workspace { reference } => {
+                if let Some(definition) = self.macro_table.definition(&reference).cloned() {
+                    if self.expand_workspace_macro(mac, &definition, &reference) {
+                        return;
+                    }
+                    // Refused: the reason is a diagnostic, or was already
+                    // given for an earlier invocation under the same limit.
+                    explained = true;
+                }
+            }
+            macro_expand::InvocationTarget::Dependency { path, .. } => {
+                self.record_dependency_macro_call(&path, mac);
+                if path == "serde_json::json" && self.visit_json_macro_body(&tokens) {
+                    return;
+                }
+            }
+            macro_expand::InvocationTarget::Ambiguous { candidates } => {
+                self.record_ambiguous_macro_call(mac, &path, &candidates);
+            }
+            macro_expand::InvocationTarget::Std | macro_expand::InvocationTarget::Unresolved => {}
+        }
+        // An expansion that was refused has said why (once per cause). The
+        // generic "bodies were not analyzed" note for the same invocation
+        // would repeat it, and contradict it for a cause such as a limit, so
+        // it is left out.
         if tokens.is_empty() {
             return;
         }
@@ -2592,7 +2891,493 @@ impl SourceCollector {
             }
             return;
         }
-        self.unanalyzed_macros.insert(format!("{path}!"));
+        if !explained {
+            self.unanalyzed_macros.insert(format!("{path}!"));
+        }
+    }
+
+    /// Emits the `macro` declaration for a `macro_rules!` definition the
+    /// pre-pass collected. The definition body itself is never walked.
+    fn declare_macro_rules(&mut self, name: Option<&proc_macro2::Ident>, mac: &syn::Macro) {
+        let Some(name) = name else {
+            return;
+        };
+        let Some((definition, qualified_name)) = self.macro_table.find_definition(
+            &self.file_ctx.crate_path,
+            &self.file_ctx.module_path,
+            &self.file_ctx.relative_file_path,
+            &name.to_string(),
+            (name.span().start().line.max(1), name.span().start().column),
+        ) else {
+            return;
+        };
+        let signature = definition.signature();
+        let declaration = Declaration {
+            // Two definitions of one name in one module (the later shadows
+            // the earlier) differ only by position, so it is part of the id.
+            id: stable_id(
+                "decl",
+                &[
+                    &self.file_ctx.package_path,
+                    &qualified_name,
+                    &signature,
+                    &format!(
+                        "{}:{}",
+                        name.span().start().line,
+                        name.span().start().column
+                    ),
+                ],
+            ),
+            name: name.to_string(),
+            canonical_name: rusi_schema::canonical_name(&qualified_name),
+            qualified_name,
+            kind: "macro".to_string(),
+            package_path: self.file_ctx.package_path.clone(),
+            purl: String::new(),
+            file_path: self.file_ctx.relative_file_path.clone(),
+            signature,
+            receiver: None,
+            position: self.evidence_position(mac.path.span()),
+            cfg_gate: self.current_cfg_gate(),
+            expanded_from: self.current_expanded_from(),
+        };
+        self.declarations.push(declaration);
+    }
+
+    /// Expands one workspace macro invocation and visits the result. Returns
+    /// false when nothing could be produced, so the caller falls back to the
+    /// argument recovery.
+    fn expand_workspace_macro(
+        &mut self,
+        mac: &syn::Macro,
+        definition: &macro_expand::MacroDefinition,
+        reference: &macro_expand::MacroRef,
+    ) -> bool {
+        let written_path = path_to_string(&mac.path);
+        let crate_name = self.macro_table.crate_name_of(&reference.crate_path);
+        let depth_limit = self.macro_table.recursion_limit(&self.file_ctx.crate_path);
+        if self.expansion_stack.len() >= depth_limit {
+            self.push_macro_diagnostic(
+                mac,
+                format!(
+                    "expansion of `{written_path}!` was stopped at the depth limit {depth_limit}; \
+                     nested expansions beyond it are not in the report"
+                ),
+            );
+            return false;
+        }
+        // Work already spent in this file or in the analysis stops every
+        // later invocation before it costs anything; the diagnostic was
+        // emitted when the ceiling was reached.
+        if self.file_work > macro_expand::MAX_FILE_EXPANSION_WORK
+            || self.macro_table.ledger().exhausted()
+        {
+            return false;
+        }
+        let key = expansion_value_key(mac, self.current_expansion_sequence());
+        let (outcome, sequence) = match self.expansion_cache.remove(&key) {
+            Some((expansion, sequence)) => (Ok(expansion), sequence),
+            None => {
+                self.expansion_counter += 1;
+                (
+                    macro_expand::expand(
+                        definition,
+                        &crate_name,
+                        mac.tokens.clone(),
+                        &self.expansion_counter.to_string(),
+                    ),
+                    self.expansion_counter,
+                )
+            }
+        };
+        let expansion = match outcome {
+            Ok(expansion) => expansion,
+            Err(error) => {
+                if error == macro_expand::ExpandError::StepBudget {
+                    self.charge_expansion_work(mac, macro_expand::MAX_MATCH_STEPS / 10);
+                }
+                let message = match error {
+                    macro_expand::ExpandError::NoRuleMatches => {
+                        format!("no rule of `{written_path}!` matched the invocation tokens")
+                    }
+                    macro_expand::ExpandError::Ambiguous => format!(
+                        "the invocation of `{written_path}!` is locally ambiguous (more than one way to match it), which rustc rejects; it is not expanded"
+                    ),
+                    macro_expand::ExpandError::StepBudget => format!(
+                        "matching the invocation of `{written_path}!` passed the step budget {}; the invocation is not expanded",
+                        macro_expand::MAX_MATCH_STEPS
+                    ),
+                    macro_expand::ExpandError::IterationLimit => format!(
+                        "a repetition of `{written_path}!` passed the iteration limit {}; the \
+                         invocation is not expanded",
+                        macro_expand::MAX_REPETITION_ITERATIONS
+                    ),
+                    macro_expand::ExpandError::Malformed(reason) => {
+                        format!("the definition of `{written_path}!` could not be read: {reason}")
+                    }
+                    macro_expand::ExpandError::TooDeep => format!(
+                        "the invocation of `{written_path}!` nests deeper than the expander reads"
+                    ),
+                    macro_expand::ExpandError::Transcribe(reason) => {
+                        format!("transcription of `{written_path}!` failed: {reason}")
+                    }
+                };
+                self.push_macro_diagnostic(mac, message);
+                return false;
+            }
+        };
+        self.hygiene_renamed |= expansion.renamed;
+        let expansion_steps = expansion.steps;
+        let expanded = expansion.tokens;
+        // The budget covers everything one hand-written invocation produces,
+        // nested and sibling expansions alike, so a macro that invokes itself
+        // twice per level cannot grow without bound under the depth limit.
+        if self.expansion_stack.is_empty() {
+            self.expansion_tokens = 0;
+        }
+        let produced = count_tokens(&expanded);
+        if self.expansion_tokens.saturating_add(produced) > macro_expand::MAX_EXPANSION_TOKENS {
+            // One diagnostic per hand-written invocation: every later
+            // attempt under the same root fails here without another one.
+            let first = self.expansion_tokens <= macro_expand::MAX_EXPANSION_TOKENS;
+            self.expansion_tokens = usize::MAX;
+            if !first {
+                return false;
+            }
+            self.push_macro_diagnostic(
+                mac,
+                format!(
+                    "expansion of `{written_path}!` passed the token budget {}; later \
+                     expansions of this invocation are not in the report",
+                    macro_expand::MAX_EXPANSION_TOKENS
+                ),
+            );
+            return false;
+        }
+        if !self.charge_expansion_work(mac, produced.saturating_add(expansion_steps / 10)) {
+            return false;
+        }
+        let frame = ExpansionFrame {
+            expanded_from: rusi_schema::ExpandedFrom {
+                macro_path: definition.canonical_path(&crate_name),
+                file_path: definition.file_path.clone(),
+                line: definition.line,
+            },
+            position: self.evidence_position(mac.path.span()),
+            site: self.invocation_site(mac),
+            sequence,
+        };
+        self.expansion_tokens = self.expansion_tokens.saturating_add(produced);
+        // Items, statements, or an expression. Inside a function body the
+        // statements shape comes first, because that is what the position
+        // accepts; at module level only items are possible.
+        let mut handled = false;
+        let watermark_calls = self
+            .current_function
+            .as_ref()
+            .map(|frame| frame.direct_calls.len())
+            .unwrap_or(0);
+        let watermark_operations = self
+            .current_function
+            .as_ref()
+            .map(|frame| frame.operations.len())
+            .unwrap_or(0);
+        let in_function = self.current_function.is_some();
+        self.expansion_stack.push(frame);
+        self.sync_expansion_sequence();
+        let as_block = || syn::parse2::<syn::Block>(quote::quote! { { #expanded } });
+        if in_function && let Ok(block) = as_block() {
+            self.prescan_expression_macros(&block);
+            syn::visit::visit_block(self, &block);
+            handled = true;
+        } else if let Ok(file) = syn::parse2::<syn::File>(expanded.clone()) {
+            for item in &file.items {
+                // The collector's own `visit_item` is the single choke point
+                // for cfg gates and item declarations, so the expansion's
+                // items go through it exactly like hand-written ones.
+                self.visit_item(item);
+            }
+            handled = true;
+        } else if let Ok(block) = as_block() {
+            self.prescan_expression_macros(&block);
+            syn::visit::visit_block(self, &block);
+            handled = true;
+        } else if let Ok(expression) = syn::parse2::<Expr>(expanded.clone()) {
+            syn::visit::visit_expr(self, &expression);
+            handled = true;
+        }
+        let popped = self.expansion_stack.pop();
+        self.sync_expansion_sequence();
+        let Some(frame) = popped else {
+            return false;
+        };
+        if !handled {
+            self.push_macro_diagnostic(
+                mac,
+                format!(
+                    "expansion of `{written_path}!` did not parse as items, statements, or an \
+                     expression; its contents are not in the report"
+                ),
+            );
+            return false;
+        }
+        // Everything the enclosing function recorded during the expansion
+        // belongs to the invocation site. Operations built by the span-only
+        // helpers still carry transcriber positions, so they are moved here;
+        // a call recorded inside a nested expansion keeps that inner origin.
+        if let Some(function) = self.current_function.as_mut() {
+            for call in &mut function.direct_calls[watermark_calls..] {
+                call.position = frame.position.clone();
+                if call.expanded_from.is_none() {
+                    call.expanded_from = Some(frame.expanded_from.clone());
+                }
+            }
+            for operation in &mut function.operations[watermark_operations..] {
+                override_operation_position(operation, &frame.position);
+            }
+        }
+        true
+    }
+
+    /// Records a dependency macro invocation: the `macro-call` usage plus the
+    /// call-graph edge target the stable call graph builder turns into a
+    /// `macro` edge.
+    fn record_dependency_macro_call(&mut self, resolved_path: &str, mac: &syn::Macro) {
+        let name = format!("{resolved_path}!");
+        let usage_id = stable_id(
+            "usage",
+            &[
+                &self.file_ctx.relative_file_path,
+                &name,
+                &self.evidence_span_key(mac.path.span()),
+            ],
+        );
+        let (position, expanded_from) = (
+            self.evidence_position(mac.path.span()),
+            self.current_expanded_from(),
+        );
+        self.usages.push(LibraryUsage {
+            id: usage_id,
+            kind: "macro-call".to_string(),
+            name,
+            package_path: self.file_ctx.package_path.clone(),
+            purl: String::new(),
+            enclosing_declaration: self.current_declaration_id(),
+            position,
+            properties: IndexMap::new(),
+            expanded_from,
+        });
+        let (call_position, call_expanded_from) = (
+            self.evidence_position(mac.path.span()),
+            self.current_expanded_from(),
+        );
+        if let Some(frame) = self.current_function.as_mut() {
+            frame.record_call(SimplifiedCall {
+                callee_text: resolved_path.to_string(),
+                position: call_position,
+                receiver_text: None,
+                receiver_expr: None,
+                method_name: None,
+                is_higher_order: false,
+                is_macro_call: true,
+                expanded_from: call_expanded_from,
+            });
+        }
+    }
+
+    /// Records a bare invocation that more than one `#[macro_use] extern
+    /// crate` could supply: the candidates are named, the target is not
+    /// guessed, and no purl is attributed.
+    fn record_ambiguous_macro_call(
+        &mut self,
+        mac: &syn::Macro,
+        written_path: &str,
+        candidates: &[String],
+    ) {
+        let name = format!("{written_path}!");
+        let usage_id = stable_id(
+            "usage",
+            &[
+                &self.file_ctx.relative_file_path,
+                &name,
+                &self.evidence_span_key(mac.path.span()),
+            ],
+        );
+        let mut properties = IndexMap::new();
+        properties.insert(
+            "candidates".to_string(),
+            candidates
+                .iter()
+                .map(|candidate| format!("{candidate}!"))
+                .collect::<Vec<_>>()
+                .join(", "),
+        );
+        self.usages.push(LibraryUsage {
+            id: usage_id,
+            kind: "macro-call".to_string(),
+            name,
+            package_path: self.file_ctx.package_path.clone(),
+            purl: String::new(),
+            enclosing_declaration: self.current_declaration_id(),
+            position: self.evidence_position(mac.path.span()),
+            properties,
+            expanded_from: self.current_expanded_from(),
+        });
+    }
+
+    /// Walks the value expressions inside a `serde_json::json!` body, which
+    /// is not Rust. Returns false when the body does not read as JSON with
+    /// Rust value expressions, so the caller can fall back to recovery.
+    fn visit_json_macro_body(&mut self, tokens: &proc_macro2::TokenStream) -> bool {
+        let mut values = Vec::new();
+        let trees: Vec<TokenTree> = tokens.clone().into_iter().collect();
+        if !collect_json_values(&trees, &mut values) {
+            return false;
+        }
+        for value in &values {
+            syn::visit::visit_expr(self, value);
+        }
+        true
+    }
+
+    /// Adds expansion work to this file's total and to the analysis's, and
+    /// says so once when either ceiling is passed. Returns whether the
+    /// expansion may still be walked.
+    fn charge_expansion_work(&mut self, mac: &syn::Macro, work: usize) -> bool {
+        let written_path = path_to_string(&mac.path);
+        let was_within_file = self.file_work <= macro_expand::MAX_FILE_EXPANSION_WORK;
+        self.file_work = self.file_work.saturating_add(work);
+        let within_analysis = self.macro_table.ledger().charge(work);
+        if self.file_work > macro_expand::MAX_FILE_EXPANSION_WORK {
+            if was_within_file {
+                self.push_macro_diagnostic(
+                    mac,
+                    format!(
+                        "the macro expansions in this file passed the work budget {} at \
+                         `{written_path}!`; later invocations in the file are not expanded",
+                        macro_expand::MAX_FILE_EXPANSION_WORK
+                    ),
+                );
+            }
+            return false;
+        }
+        if !within_analysis {
+            if self.macro_table.ledger().report_once() {
+                self.push_macro_diagnostic(
+                    mac,
+                    format!(
+                        "the macro expansions of the analysis passed the work budget {} at \
+                         `{written_path}!`; later invocations in any file are not expanded",
+                        macro_expand::MAX_ANALYSIS_EXPANSION_WORK
+                    ),
+                );
+            }
+            return false;
+        }
+        true
+    }
+
+    fn current_expansion_sequence(&self) -> usize {
+        self.expansion_stack
+            .last()
+            .map_or(0, |frame| frame.sequence)
+    }
+
+    fn sync_expansion_sequence(&self) {
+        EXPANSION_SEQUENCE.with(|sequence| sequence.set(self.current_expansion_sequence()));
+    }
+
+    /// Expands the workspace macro invocations in expression position inside
+    /// `block` ahead of the walk, and leaves each one's value for
+    /// `simple_expr`. The walk records a statement's assignment before it
+    /// reaches the macro inside it, so without this a value read inside a
+    /// macro (`let v = get!();`) reaches the data-flow pass as unknown. The
+    /// expansion itself is kept and used by the walk, so nothing is expanded
+    /// twice.
+    fn prescan_expression_macros(&mut self, block: &syn::Block) {
+        let mut finder = MacroFinder::default();
+        finder.visit_block(block);
+        for found in finder.found {
+            self.prescan_macro(&found);
+        }
+    }
+
+    /// The same for an initializer expression, such as a `static`'s.
+    fn prescan_expression_macros_in(&mut self, expr: &Expr) {
+        let mut finder = MacroFinder::default();
+        finder.visit_expr(expr);
+        for found in finder.found {
+            self.prescan_macro(&found);
+        }
+    }
+
+    fn prescan_macro(&mut self, mac: &syn::Macro) {
+        let path = path_to_string(&mac.path);
+        if path == "macro_rules"
+            || self.expansion_stack.len()
+                >= self.macro_table.recursion_limit(&self.file_ctx.crate_path)
+            || self.file_work > macro_expand::MAX_FILE_EXPANSION_WORK
+            || self.macro_table.ledger().exhausted()
+        {
+            return;
+        }
+        let site = self.invocation_site(mac);
+        let macro_expand::InvocationTarget::Workspace { reference } =
+            self.macro_table.resolve_invocation(
+                &self.file_ctx.crate_path,
+                &self.file_ctx.module_path,
+                &self.file_ctx.relative_file_path,
+                site,
+                &path,
+                &self.use_records,
+            )
+        else {
+            return;
+        };
+        let Some(definition) = self.macro_table.definition(&reference).cloned() else {
+            return;
+        };
+        let crate_name = self.macro_table.crate_name_of(&reference.crate_path);
+        self.expansion_counter += 1;
+        let sequence = self.expansion_counter;
+        let Ok(expansion) = macro_expand::expand(
+            &definition,
+            &crate_name,
+            mac.tokens.clone(),
+            &sequence.to_string(),
+        ) else {
+            return;
+        };
+        let key = expansion_value_key(mac, self.current_expansion_sequence());
+        if let Ok(expression) = syn::parse2::<Expr>(expansion.tokens.clone()) {
+            let mut value = simple_expr(&expression);
+            override_expr_position(&mut value, &self.evidence_position(mac.path.span()));
+            EXPANDED_VALUES.with(|values| values.borrow_mut().insert(key, value));
+        }
+        self.expansion_cache.insert(key, (expansion, sequence));
+    }
+
+    /// The position a macro path resolves against: the outermost hand-written
+    /// invocation when inside an expansion (transcribed tokens carry no real
+    /// positions), the path's own start otherwise.
+    fn invocation_site(&self, mac: &syn::Macro) -> macro_expand::Pos {
+        match self.expansion_stack.first() {
+            Some(frame) => frame.site,
+            None => {
+                let start = mac.path.span().start();
+                (start.line.max(1), start.column)
+            }
+        }
+    }
+
+    fn push_macro_diagnostic(&mut self, mac: &syn::Macro, message: String) {
+        self.macro_diagnostics.push(Diagnostic {
+            kind: "macro".to_string(),
+            message,
+            package_path: Some(self.file_ctx.package_path.clone()),
+            file_path: Some(self.file_ctx.relative_file_path.clone()),
+            position: Some(self.evidence_position(mac.path.span())),
+        });
     }
 
     /// The conjunction of the `#[cfg(...)]` gates currently in scope.
@@ -2632,7 +3417,7 @@ impl SourceCollector {
             family: family.to_string(),
             package_path: self.file_ctx.package_path.clone(),
             file_path: file_path.clone(),
-            position: position_from_span(&file_path, span),
+            position: self.evidence_position(span),
             properties,
         };
         if !self
@@ -2648,14 +3433,14 @@ impl SourceCollector {
     fn push_crypto_component(&mut self, rule: &StableCryptoRule, span: Span, evidence: &str) {
         self.push_crypto_library(rule.provider, rule.kind, span, evidence);
         let file_path = self.file_ctx.relative_file_path.clone();
-        let position = position_from_span(&file_path, span);
+        let position = self.evidence_position(span);
         let mut properties = IndexMap::new();
         properties.insert("evidence".to_string(), evidence.to_string());
         properties.insert("confidence".to_string(), "medium".to_string());
         let component = CryptoComponent {
             id: stable_id(
                 "crypto-component",
-                &[rule.symbol, &file_path, &span_key(span)],
+                &[rule.symbol, &file_path, &self.evidence_span_key(span)],
             ),
             kind: rule.kind.to_string(),
             algorithm: rule.algorithm.to_string(),
@@ -2677,7 +3462,10 @@ impl SourceCollector {
         }
         if let Some((category, severity, summary)) = rule.finding {
             let finding = CryptoFinding {
-                id: stable_id("crypto-finding", &[category, rule.symbol, &span_key(span)]),
+                id: stable_id(
+                    "crypto-finding",
+                    &[category, rule.symbol, &self.evidence_span_key(span)],
+                ),
                 category: category.to_string(),
                 severity: severity.to_string(),
                 confidence: "medium".to_string(),
@@ -2706,7 +3494,7 @@ impl SourceCollector {
         let material = CryptoMaterial {
             id: stable_id(
                 "crypto-material",
-                &[kind, name, &file_path, &span_key(span)],
+                &[kind, name, &file_path, &self.evidence_span_key(span)],
             ),
             kind: kind.to_string(),
             name: name.to_string(),
@@ -2714,7 +3502,7 @@ impl SourceCollector {
             file_path: file_path.clone(),
             function: self.current_function_name(),
             confidence: "medium".to_string(),
-            position: position_from_span(&file_path, span),
+            position: self.evidence_position(span),
             properties: IndexMap::new(),
         };
         if !self
@@ -2734,9 +3522,9 @@ impl SourceCollector {
     /// the closure records the visitor collects for them.
     fn initializer_expr(&self, expr: &Expr) -> SimpleExpr {
         let closure_call = |closure: &ExprClosure| SimpleExpr::Call {
-            callee: qualify_name(&self.file_ctx, None, &closure_symbol_name(closure.span())),
+            callee: qualify_name(&self.file_ctx, None, &self.closure_name(closure.span())),
             args: Vec::new(),
-            position: position_from_span(&self.file_ctx.relative_file_path, closure.span()),
+            position: self.evidence_position(closure.span()),
         };
         let arg_expr = |arg: &Expr| match arg {
             Expr::Closure(closure) => closure_call(closure),
@@ -2746,13 +3534,13 @@ impl SourceCollector {
             Expr::Call(call) => SimpleExpr::Call {
                 callee: callee_text_from_expr(&call.func),
                 args: call.args.iter().map(arg_expr).collect(),
-                position: position_from_span(&self.file_ctx.relative_file_path, call.func.span()),
+                position: self.evidence_position(call.func.span()),
             },
             Expr::MethodCall(call) => SimpleExpr::MethodCall {
                 receiver: Box::new(self.initializer_expr(&call.receiver)),
                 method: call.method.to_string(),
                 args: call.args.iter().map(arg_expr).collect(),
-                position: position_from_span(&self.file_ctx.relative_file_path, call.method.span()),
+                position: self.evidence_position(call.method.span()),
             },
             other => simple_expr(other),
         }
@@ -2783,7 +3571,7 @@ impl SourceCollector {
         closure: &ExprClosure,
         source_category: Option<&str>,
     ) -> String {
-        let name = closure_symbol_name(closure.span());
+        let name = self.closure_name(closure.span());
         let declaration = self.push_declaration(
             &name,
             "closure",
@@ -2792,7 +3580,8 @@ impl SourceCollector {
             closure.span(),
         );
         let id = declaration.id.clone();
-        let position = position_from_span(&self.file_ctx.relative_file_path, closure.span());
+        let position = self.evidence_position(closure.span());
+        let closure_expanded_from = self.current_expanded_from();
         if let Some(parent) = self.current_function.as_mut() {
             parent.record_call(SimplifiedCall {
                 callee_text: declaration.qualified_name.clone(),
@@ -2801,6 +3590,8 @@ impl SourceCollector {
                 receiver_expr: None,
                 method_name: None,
                 is_higher_order: true,
+                is_macro_call: false,
+                expanded_from: closure_expanded_from,
             });
         }
 
@@ -2834,6 +3625,7 @@ impl SourceCollector {
             finished.operations.push(Operation::Return(tail_expr));
         }
         finished.apply_bound_closures();
+        self.stamp_expansion(&mut finished);
         let param_types = closure_parameter_types(closure);
         self.functions.push(FunctionRecord {
             declaration,
@@ -2857,6 +3649,7 @@ impl SourceCollector {
             declared_element_types: finished.declared_element_types.clone(),
             loop_iterables: finished.loop_iterables.clone(),
             has_body: self.collect_bodies,
+            expanded_from: self.current_expanded_from(),
         });
         self.current_function = previous;
         id
@@ -2912,6 +3705,7 @@ impl<'ast> Visit<'ast> for SourceCollector {
                 position: declaration.position.clone(),
                 cfg_gate: self.current_cfg_gate(),
                 properties: IndexMap::new(),
+                expanded_from: self.current_expanded_from(),
             });
         }
 
@@ -2930,12 +3724,14 @@ impl<'ast> Visit<'ast> for SourceCollector {
             collect_bodies: self.collect_bodies,
             bound_closures: Vec::new(),
         });
+        self.prescan_expression_macros(&node.block);
         syn::visit::visit_block(self, &node.block);
         let mut finished = self.current_function.take().expect("function frame exists");
         if let Some(tail_expr) = block_tail_expr(&node.block) {
             finished.operations.push(Operation::Return(tail_expr));
         }
         finished.apply_bound_closures();
+        self.stamp_expansion(&mut finished);
         let param_types = function_parameter_types(&node.sig);
         self.functions.push(FunctionRecord {
             declaration,
@@ -2958,6 +3754,7 @@ impl<'ast> Visit<'ast> for SourceCollector {
             declared_element_types: finished.declared_element_types.clone(),
             loop_iterables: finished.loop_iterables.clone(),
             has_body: self.collect_bodies,
+            expanded_from: self.current_expanded_from(),
         });
         self.current_function = previous;
     }
@@ -3009,12 +3806,14 @@ impl<'ast> Visit<'ast> for SourceCollector {
                     collect_bodies: self.collect_bodies,
                     bound_closures: Vec::new(),
                 });
+                self.prescan_expression_macros(&method.block);
                 syn::visit::visit_block(self, &method.block);
                 let mut finished = self.current_function.take().expect("method frame exists");
                 if let Some(tail_expr) = block_tail_expr(&method.block) {
                     finished.operations.push(Operation::Return(tail_expr));
                 }
                 finished.apply_bound_closures();
+                self.stamp_expansion(&mut finished);
                 let param_types = function_parameter_types(&method.sig);
                 self.functions.push(FunctionRecord {
                     declaration,
@@ -3037,6 +3836,7 @@ impl<'ast> Visit<'ast> for SourceCollector {
                     declared_element_types: finished.declared_element_types.clone(),
                     loop_iterables: finished.loop_iterables.clone(),
                     has_body: self.collect_bodies,
+                    expanded_from: self.current_expanded_from(),
                 });
                 self.current_function = previous;
                 if method_gate.is_some() {
@@ -3131,14 +3931,12 @@ impl<'ast> Visit<'ast> for SourceCollector {
                 // so a source in it seeds the global. A closure argument
                 // (`LazyLock::new(|| ..)`) is read as a call of its record,
                 // whose return is what the global holds.
+                self.prescan_expression_macros_in(&item.expr);
                 let value = self.initializer_expr(&item.expr);
                 self.static_initializers.push(StaticInitializer {
                     name: item.ident.to_string(),
                     value,
-                    position: position_from_span(
-                        &self.file_ctx.relative_file_path,
-                        item.ident.span(),
-                    ),
+                    position: self.evidence_position(item.ident.span()),
                     package_path: self.file_ctx.package_path.clone(),
                 });
             }
@@ -3199,7 +3997,7 @@ impl<'ast> Visit<'ast> for SourceCollector {
                         &[
                             &self.file_ctx.relative_file_path,
                             "env-mutation",
-                            &span_key(node.span()),
+                            &self.evidence_span_key(node.span()),
                         ],
                     ),
                     category: "env-mutation".to_string(),
@@ -3209,9 +4007,10 @@ impl<'ast> Visit<'ast> for SourceCollector {
                     package_path: self.file_ctx.package_path.clone(),
                     purl: String::new(),
                     file_path: self.file_ctx.relative_file_path.clone(),
-                    position: position_from_span(&self.file_ctx.relative_file_path, node.span()),
+                    position: self.evidence_position(node.span()),
                     cfg_gate: self.current_cfg_gate(),
                     properties: IndexMap::new(),
+                    expanded_from: self.current_expanded_from(),
                 });
             }
         }
@@ -3220,7 +4019,7 @@ impl<'ast> Visit<'ast> for SourceCollector {
             &[
                 &self.file_ctx.relative_file_path,
                 &callee_name,
-                &span_key(node.span()),
+                &self.evidence_span_key(node.span()),
             ],
         );
         self.usages.push(LibraryUsage {
@@ -3230,25 +4029,32 @@ impl<'ast> Visit<'ast> for SourceCollector {
             package_path: self.file_ctx.package_path.clone(),
             purl: String::new(),
             enclosing_declaration: self.current_declaration_id(),
-            position: position_from_span(&self.file_ctx.relative_file_path, node.span()),
+            position: self.evidence_position(node.span()),
             properties: IndexMap::new(),
+            expanded_from: self.current_expanded_from(),
         });
 
+        let (call_position, expanded_from) = (
+            self.evidence_position(node.span()),
+            self.current_expanded_from(),
+        );
         if let Some(frame) = self.current_function.as_mut() {
             let args = node.args.iter().map(simple_expr).collect::<Vec<_>>();
             let call = SimpleExpr::Call {
                 callee: callee_name.clone(),
                 args: args.clone(),
-                position: position_from_span(&self.file_ctx.relative_file_path, node.span()),
+                position: call_position.clone(),
             };
             frame.record_operation(Operation::Expr(call.clone()));
             frame.record_call(SimplifiedCall {
                 callee_text: callee_name.clone(),
-                position: position_from_span(&self.file_ctx.relative_file_path, node.span()),
+                position: call_position.clone(),
                 receiver_text: None,
                 receiver_expr: None,
                 method_name: None,
                 is_higher_order: false,
+                is_macro_call: false,
+                expanded_from: expanded_from.clone(),
             });
         }
         syn::visit::visit_expr(self, &node.func);
@@ -3276,7 +4082,7 @@ impl<'ast> Visit<'ast> for SourceCollector {
             &[
                 &self.file_ctx.relative_file_path,
                 &callee_name,
-                &span_key(node.span()),
+                &self.evidence_span_key(node.span()),
             ],
         );
         let mut properties = IndexMap::new();
@@ -3288,8 +4094,9 @@ impl<'ast> Visit<'ast> for SourceCollector {
             package_path: self.file_ctx.package_path.clone(),
             purl: String::new(),
             enclosing_declaration: self.current_declaration_id(),
-            position: position_from_span(&self.file_ctx.relative_file_path, node.span()),
+            position: self.evidence_position(node.span()),
             properties,
+            expanded_from: self.current_expanded_from(),
         });
 
         // A lazy initializer's closure argument is recorded as a call of the
@@ -3301,13 +4108,18 @@ impl<'ast> Visit<'ast> for SourceCollector {
         let mut args = vec![simple_expr(&node.receiver)];
         args.extend(node.args.iter().map(|arg| match arg {
             Expr::Closure(closure) if lazy_initializer => SimpleExpr::Call {
-                callee: qualify_name(&self.file_ctx, None, &closure_symbol_name(closure.span())),
+                callee: qualify_name(&self.file_ctx, None, &self.closure_name(closure.span())),
                 args: Vec::new(),
-                position: position_from_span(&self.file_ctx.relative_file_path, closure.span()),
+                position: self.evidence_position(closure.span()),
             },
             Expr::Closure(closure) if closure_value => closure_value_expr(closure),
             other => simple_expr(other),
         }));
+        let (method_position, call_position, expanded_from) = (
+            self.evidence_position(node.method.span()),
+            self.evidence_position(node.span()),
+            self.current_expanded_from(),
+        );
         if let Some(frame) = self.current_function.as_mut() {
             let call = SimpleExpr::Call {
                 callee: callee_name.clone(),
@@ -3316,16 +4128,18 @@ impl<'ast> Visit<'ast> for SourceCollector {
                 // MethodCall record of the same call: the sink nodes the two
                 // records produce must share an id, or every sink fires
                 // twice — once per form.
-                position: position_from_span(&self.file_ctx.relative_file_path, node.method.span()),
+                position: method_position.clone(),
             };
             frame.record_operation(Operation::Expr(call.clone()));
             frame.record_call(SimplifiedCall {
                 callee_text: callee_name.clone(),
-                position: position_from_span(&self.file_ctx.relative_file_path, node.span()),
+                position: call_position.clone(),
                 receiver_text: Some(receiver_text.clone()),
                 receiver_expr: Some(simple_expr(&node.receiver)),
                 method_name: Some(node.method.to_string()),
                 is_higher_order: false,
+                is_macro_call: false,
+                expanded_from: expanded_from.clone(),
             });
         }
         syn::visit::visit_expr(self, &node.receiver);
@@ -3369,6 +4183,12 @@ impl<'ast> Visit<'ast> for SourceCollector {
     }
 
     fn visit_item_macro(&mut self, node: &'ast syn::ItemMacro) {
+        // A `macro_rules!` definition carries its name on the item, not in
+        // the macro's tokens.
+        if node.mac.path.is_ident("macro_rules") {
+            self.declare_macro_rules(node.ident.as_ref(), &node.mac);
+            return;
+        }
         self.visit_macro_body(&node.mac);
     }
 
@@ -3443,7 +4263,7 @@ impl<'ast> Visit<'ast> for SourceCollector {
                 &[
                     &self.file_ctx.relative_file_path,
                     "unsafe-block",
-                    &span_key(node.span()),
+                    &self.evidence_span_key(node.span()),
                 ],
             ),
             category: "unsafe-code".to_string(),
@@ -3453,9 +4273,10 @@ impl<'ast> Visit<'ast> for SourceCollector {
             package_path: self.file_ctx.package_path.clone(),
             purl: String::new(),
             file_path: self.file_ctx.relative_file_path.clone(),
-            position: position_from_span(&self.file_ctx.relative_file_path, node.span()),
+            position: self.evidence_position(node.span()),
             cfg_gate: self.current_cfg_gate(),
             properties: IndexMap::new(),
+            expanded_from: self.current_expanded_from(),
         });
         syn::visit::visit_expr_unsafe(self, node);
     }
@@ -3934,7 +4755,7 @@ fn impl_is_blanket(node: &ItemImpl) -> bool {
 }
 
 /// Attributes written on any item, for cfg evaluation.
-fn item_attrs(item: &Item) -> &[syn::Attribute] {
+pub(crate) fn item_attrs(item: &Item) -> &[syn::Attribute] {
     match item {
         Item::Const(item) => &item.attrs,
         Item::Enum(item) => &item.attrs,
@@ -4430,6 +5251,149 @@ fn inline_closure_source_category_for_method_call(
 /// valid Rust, so the body cannot be parsed as-is. Dropping that one token
 /// makes the initializer — usually where the interesting call lives, such as
 /// `Regex::new` or a client constructor — recoverable.
+/// Rewrites every position in an operation to one site. Evidence produced
+/// inside an expansion is positioned at the invocation, because transcribed
+/// tokens carry no positions of their own.
+/// Every token in a stream, counting the contents of groups, so a large body
+/// inside one pair of braces counts at its real size.
+fn count_tokens(tokens: &proc_macro2::TokenStream) -> usize {
+    // An explicit stack, because the nesting of an expansion is bounded by
+    // the input and not by this function.
+    let mut count = 0usize;
+    let mut stack = vec![tokens.clone().into_iter()];
+    while let Some(mut iter) = stack.pop() {
+        while let Some(tree) = iter.next() {
+            count += 1;
+            if let TokenTree::Group(group) = tree {
+                stack.push(iter);
+                stack.push(group.stream().into_iter());
+                break;
+            }
+        }
+    }
+    count
+}
+
+fn override_operation_position(operation: &mut Operation, position: &Position) {
+    match operation {
+        Operation::Assign { value, .. }
+        | Operation::AssignField { value, .. }
+        | Operation::AssignDeref { value, .. }
+        | Operation::Expr(value)
+        | Operation::Return(value) => override_expr_position(value, position),
+    }
+}
+
+fn override_expr_position(expr: &mut SimpleExpr, position: &Position) {
+    match expr {
+        SimpleExpr::Var(_) | SimpleExpr::Literal { .. } => {}
+        SimpleExpr::Call {
+            position: at, args, ..
+        } => {
+            *at = position.clone();
+            for arg in args {
+                override_expr_position(arg, position);
+            }
+        }
+        SimpleExpr::MethodCall {
+            receiver,
+            position: at,
+            args,
+            ..
+        } => {
+            *at = position.clone();
+            override_expr_position(receiver, position);
+            for arg in args {
+                override_expr_position(arg, position);
+            }
+        }
+        SimpleExpr::Compose(parts) => {
+            for part in parts {
+                override_expr_position(part, position);
+            }
+        }
+        SimpleExpr::Field { base, .. } => override_expr_position(base, position),
+        SimpleExpr::Reference { expr, .. } => override_expr_position(expr, position),
+        SimpleExpr::Unknown => {}
+    }
+}
+
+/// Collects the value expressions of a `serde_json::json!` body. The body is
+/// JSON with Rust expressions for values, so objects contribute their
+/// values, arrays their elements, and anything else must parse as one
+/// expression. Returns false when the body does not read that way.
+fn collect_json_values(tokens: &[TokenTree], out: &mut Vec<Expr>) -> bool {
+    match tokens.first() {
+        Some(TokenTree::Group(group)) => match group.delimiter() {
+            proc_macro2::Delimiter::Brace => {
+                let inner: Vec<TokenTree> = group.stream().into_iter().collect();
+                for entry in split_top_level_commas(&inner) {
+                    // An object entry is `"key": value`; the key is a string
+                    // literal and not Rust of its own.
+                    let value = match (entry.first(), entry.get(1)) {
+                        (Some(TokenTree::Literal(_)), Some(TokenTree::Punct(punct)))
+                            if punct.as_char() == ':' =>
+                        {
+                            &entry[2..]
+                        }
+                        _ => &entry[..],
+                    };
+                    if value.is_empty() {
+                        continue;
+                    }
+                    if !collect_json_values(value, out) {
+                        return false;
+                    }
+                }
+                true
+            }
+            proc_macro2::Delimiter::Bracket => {
+                let inner: Vec<TokenTree> = group.stream().into_iter().collect();
+                for element in split_top_level_commas(&inner) {
+                    if element.is_empty() {
+                        continue;
+                    }
+                    if !collect_json_values(&element, out) {
+                        return false;
+                    }
+                }
+                true
+            }
+            _ => collect_json_expression(tokens, out),
+        },
+        _ => collect_json_expression(tokens, out),
+    }
+}
+
+fn collect_json_expression(tokens: &[TokenTree], out: &mut Vec<Expr>) -> bool {
+    let stream: proc_macro2::TokenStream = tokens.iter().cloned().collect();
+    match syn::parse2::<Expr>(stream) {
+        Ok(expression) => {
+            out.push(expression);
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+/// Splits a token slice on commas that sit outside every group.
+fn split_top_level_commas(tokens: &[TokenTree]) -> Vec<Vec<TokenTree>> {
+    let mut parts = Vec::new();
+    let mut current = Vec::new();
+    for token in tokens {
+        match token {
+            TokenTree::Punct(punct) if punct.as_char() == ',' => {
+                parts.push(std::mem::take(&mut current));
+            }
+            other => current.push(other.clone()),
+        }
+    }
+    if !current.is_empty() {
+        parts.push(current);
+    }
+    parts
+}
+
 fn rewrite_static_ref_tokens(tokens: proc_macro2::TokenStream) -> proc_macro2::TokenStream {
     let mut output = proc_macro2::TokenStream::new();
     let mut after_static = false;
@@ -4554,6 +5518,18 @@ fn inline_format_captures(template: &str) -> Vec<String> {
 }
 
 fn parse_macro_like_call(expr: &ExprMacro) -> Option<SimpleExpr> {
+    // A `json!` value is the composite of everything inside it: a tainted
+    // value reaching the body taints the value the macro builds.
+    if path_to_string(&expr.mac.path) == "serde_json::json" {
+        let trees: Vec<TokenTree> = expr.mac.tokens.clone().into_iter().collect();
+        let mut values = Vec::new();
+        if collect_json_values(&trees, &mut values) {
+            return Some(SimpleExpr::Compose(
+                values.iter().map(simple_expr).collect(),
+            ));
+        }
+        return None;
+    }
     if expr.mac.path.is_ident("write") || expr.mac.path.is_ident("writeln") {
         return write_macro_simple_expr(
             &path_to_string(&expr.mac.path),
@@ -5001,6 +5977,69 @@ fn span_key(span: Span) -> String {
     format!("{}:{}", start.line, start.column + 1)
 }
 
+/// Finds the macro invocations in expression position inside a body, and those
+/// in the comma-separated arguments of a standard-library macro such as
+/// `format!`, which the walk reads as expressions too.
+#[derive(Default)]
+struct MacroFinder {
+    found: Vec<syn::Macro>,
+    depth: usize,
+}
+
+impl<'ast> Visit<'ast> for MacroFinder {
+    fn visit_expr_macro(&mut self, node: &'ast ExprMacro) {
+        self.found.push(node.mac.clone());
+        let path = path_to_string(&node.mac.path);
+        let is_std = path
+            .strip_prefix("std::")
+            .or_else(|| path.strip_prefix("core::"))
+            .unwrap_or(&path);
+        if self.depth < 8
+            && macro_expand::is_std_macro(is_std)
+            && let Ok(arguments) =
+                Punctuated::<Expr, Token![,]>::parse_terminated.parse2(node.mac.tokens.clone())
+        {
+            self.depth += 1;
+            for argument in &arguments {
+                self.visit_expr(argument);
+            }
+            self.depth -= 1;
+        }
+    }
+
+    fn visit_item(&mut self, _: &'ast Item) {}
+}
+
+thread_local! {
+    /// The value of an expression-position workspace macro invocation, as the
+    /// simplified expression its expansion parses to, keyed by
+    /// [`expansion_value_key`]. `simple_expr` runs on the enclosing statement
+    /// before the collector walks the invocation, so the collector expands
+    /// such invocations ahead of the statement and leaves their values here.
+    static EXPANDED_VALUES: std::cell::RefCell<HashMap<(usize, usize, usize, u64), SimpleExpr>> =
+        std::cell::RefCell::new(HashMap::new());
+    /// The sequence number of the expansion being visited, zero for
+    /// hand-written code. Part of the key, because tokens of two expansions
+    /// can share a transcriber position.
+    static EXPANSION_SEQUENCE: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Identifies one macro invocation within one file: the expansion it sits in,
+/// its start, and a hash of its tokens, since the copies of one template item
+/// that a repetition produces share a start.
+fn expansion_value_key(mac: &syn::Macro, sequence: usize) -> (usize, usize, usize, u64) {
+    use std::hash::{Hash, Hasher};
+    let start = mac.path.span().start();
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    mac.tokens.to_string().hash(&mut hasher);
+    (sequence, start.line, start.column, hasher.finish())
+}
+
+fn expanded_value(mac: &syn::Macro) -> Option<SimpleExpr> {
+    let key = expansion_value_key(mac, EXPANSION_SEQUENCE.with(std::cell::Cell::get));
+    EXPANDED_VALUES.with(|values| values.borrow().get(&key).cloned())
+}
+
 fn simple_expr(expr: &Expr) -> SimpleExpr {
     match expr {
         Expr::Path(ExprPath { path, .. }) => SimpleExpr::Var(path_to_string(path)),
@@ -5083,7 +6122,9 @@ fn simple_expr(expr: &Expr) -> SimpleExpr {
         // is the scrutinee's, and the bindings are recorded by the visitor.
         Expr::Let(syn::ExprLet { expr, .. }) => simple_expr(expr),
         Expr::Await(syn::ExprAwait { base, .. }) => simple_expr(base),
-        Expr::Macro(expr_macro) => parse_macro_like_call(expr_macro).unwrap_or(SimpleExpr::Unknown),
+        Expr::Macro(expr_macro) => expanded_value(&expr_macro.mac)
+            .or_else(|| parse_macro_like_call(expr_macro))
+            .unwrap_or(SimpleExpr::Unknown),
         Expr::Lit(lit) => SimpleExpr::Literal {
             text: match &lit.lit {
                 Lit::Str(lit_str) => lit_str.value(),
@@ -5394,13 +6435,18 @@ fn build_call_graph(
                         position: call.position.clone(),
                     });
                 }
-                diagnostics.push(Diagnostic {
-                    kind: "resolution".to_string(),
-                    message: format!("unresolved or external call target {}", call.callee_text),
-                    package_path: Some(function.package_path.clone()),
-                    file_path: Some(function.file_path.clone()),
-                    position: Some(call.position.clone()),
-                });
+                // A dependency macro's target is the macro path itself;
+                // reporting it as an unresolved call would misread a target
+                // the analyzer does know.
+                if !call.is_macro_call {
+                    diagnostics.push(Diagnostic {
+                        kind: "resolution".to_string(),
+                        message: format!("unresolved or external call target {}", call.callee_text),
+                        package_path: Some(function.package_path.clone()),
+                        file_path: Some(function.file_path.clone()),
+                        position: Some(call.position.clone()),
+                    });
+                }
                 edges.push(CallGraphEdge {
                     id: stable_id(
                         "cg-edge",
@@ -5414,7 +6460,11 @@ fn build_call_graph(
                     ),
                     source_id: function.declaration.id.clone(),
                     target_id: synthetic_id,
-                    call_type: CallProvenance::External.call_type().to_string(),
+                    call_type: if call.is_macro_call {
+                        "macro".to_string()
+                    } else {
+                        CallProvenance::External.call_type().to_string()
+                    },
                     line: call.position.line,
                     column: call.position.column,
                     callee_text: Some(call.callee_text.clone()),
@@ -5424,6 +6474,8 @@ fn build_call_graph(
                     emitted_candidate_count: None,
                     dispatch_trait: None,
                     properties: IndexMap::new(),
+                    target_purl: String::new(),
+                    expanded_from: call.expanded_from.clone(),
                 });
                 continue;
             }
@@ -5473,6 +6525,8 @@ fn build_call_graph(
                         .then_some(emitted_count),
                     dispatch_trait: candidate.dispatch_trait.clone(),
                     properties: IndexMap::new(),
+                    target_purl: String::new(),
+                    expanded_from: call.expanded_from.clone(),
                 });
             }
         }
@@ -11093,6 +12147,7 @@ impl<'a> DataFlowBuilder<'a> {
                         parameter_index: None,
                         type_name: None,
                         properties: IndexMap::new(),
+                        expanded_from: function.expanded_from.clone(),
                     };
                     self.record_node(&target_node);
                     for path in &mut taint.paths {
@@ -11568,6 +12623,7 @@ impl<'a> DataFlowBuilder<'a> {
                                 parameter_index: None,
                                 type_name: None,
                                 properties: IndexMap::new(),
+                                expanded_from: function.expanded_from.clone(),
                             };
                             self.record_node(&passthrough_node);
                             if let Some(last_step) = path.steps.last() {
@@ -11649,6 +12705,7 @@ impl<'a> DataFlowBuilder<'a> {
                                     parameter_index: Some(*param_index),
                                     type_name: None,
                                     properties: IndexMap::new(),
+                                    expanded_from: function.expanded_from.clone(),
                                 };
                                 self.record_node(&call_node);
                                 if let Some(last_step) = path.steps.last() {
@@ -11881,6 +12938,7 @@ impl<'a> DataFlowBuilder<'a> {
             parameter_index,
             type_name: None,
             properties,
+            expanded_from: function.expanded_from.clone(),
         };
         self.record_node(&node);
         TaintPath {
@@ -11929,6 +12987,7 @@ impl<'a> DataFlowBuilder<'a> {
             parameter_index: None,
             type_name: None,
             properties: IndexMap::new(),
+            expanded_from: function.expanded_from.clone(),
         };
         self.record_node(&sink_node);
 
@@ -12416,6 +13475,13 @@ fn enrich_graph_component_purls(report: &mut Report) {
         declaration.purl = resolve_package_purl(&declaration.package_path, &package_purls);
     }
     for usage in &mut report.usages {
+        // A macro-call usage whose target could not be named (more than one
+        // `#[macro_use] extern crate` could supply the name) carries its
+        // candidate list instead of a purl, so nothing attributes it to a
+        // crate it may not belong to.
+        if usage.kind == "macro-call" && usage.properties.contains_key("candidates") {
+            continue;
+        }
         usage.purl = resolve_package_purl(&usage.package_path, &package_purls);
     }
     for signal in &mut report.security_signals {
@@ -12436,7 +13502,22 @@ fn enrich_graph_component_purls(report: &mut Report) {
             }
         }
         // Edges deliberately carry no purls: both endpoints' purls live on the
-        // nodes the edge references.
+        // nodes the edge references. A `macro` edge is the one exception: it
+        // names a dependency crate's macro, and consumers attribute the call
+        // from the edge itself, so the target's purl is repeated on the edge.
+        let node_purls: HashMap<&str, &str> = call_graph
+            .nodes
+            .iter()
+            .map(|node| (node.id.as_str(), node.purl.as_str()))
+            .collect();
+        for edge in &mut call_graph.edges {
+            if edge.call_type == "macro"
+                && edge.target_purl.is_empty()
+                && let Some(purl) = node_purls.get(edge.target_id.as_str())
+            {
+                edge.target_purl = (*purl).to_string();
+            }
+        }
     }
 
     if let Some(data_flow) = &mut report.data_flow {
@@ -14883,13 +15964,27 @@ pub fn run() {}
                 .all(|edge| !graph.target_name(edge).ends_with("::danger")),
             "a macro_rules body must not become a call"
         );
-        // The blind spot is reported rather than left silent.
+        // The definition is collected as a declaration instead of being
+        // reported as an unanalyzed body.
         assert!(
+            report.declarations.iter().any(|declaration| {
+                declaration.kind == "macro"
+                    && declaration.qualified_name == "macro_rules_skip::never_here"
+            }),
+            "expected a macro declaration, got: {:?}",
             report
+                .declarations
+                .iter()
+                .map(|declaration| declaration.qualified_name.clone())
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            !report
                 .diagnostics
                 .iter()
                 .any(|diagnostic| diagnostic.kind == "macro"
-                    && diagnostic.message.contains("macro_rules!"))
+                    && diagnostic.message.contains("macro_rules!")),
+            "a collected definition is not an unanalyzed body"
         );
         let _ = fs::remove_dir_all(&root);
     }
@@ -15362,6 +16457,1285 @@ impl ComponentSection for Holder {
         for declaration in &report.declarations {
             assert_eq!(declaration.package_path, "multi_target_app");
         }
+    }
+
+    #[test]
+    fn macro_zoo_expands_workspace_macros_into_evidence() {
+        let report = analyze(AnalyzeOptionsInput {
+            dir: fixture_path("macro-zoo-app"),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "security".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        // The impl-generating macro declares its types and methods, each
+        // stamped with the definition it came from while positioned at the
+        // invocation site.
+        let struct_declaration = report
+            .declarations
+            .iter()
+            .find(|declaration| declaration.qualified_name == "macro_zoo_app::Seconds")
+            .expect("Seconds is declared");
+        assert_eq!(struct_declaration.kind, "struct");
+        assert_eq!(
+            struct_declaration
+                .expanded_from
+                .as_ref()
+                .map(|from| &from.macro_path),
+            Some(&"macro_zoo_app::macros::make_units::make_units".to_string())
+        );
+        assert_eq!(struct_declaration.position.filename, "src/lib.rs");
+        for qualified_name in [
+            "macro_zoo_app::Seconds::danger",
+            "macro_zoo_app::Seconds::to_json",
+            "macro_zoo_app::Minutes::danger",
+        ] {
+            assert!(
+                report
+                    .declarations
+                    .iter()
+                    .any(|declaration| declaration.qualified_name == qualified_name),
+                "missing {qualified_name}"
+            );
+        }
+
+        // Definitions themselves become macro declarations, under every
+        // scoping shape the fixture covers.
+        for qualified_name in [
+            "macro_zoo_app::root_tag",
+            "macro_zoo_app::hoisted::hoisted_note",
+            "macro_zoo_app::count_tts",
+            "macro_zoo_app::macros::make_units::make_units",
+            "macro_zoo_app::macros::path_scoped::path_scoped",
+            "macro_zoo_app::__exported",
+        ] {
+            assert!(
+                report
+                    .declarations
+                    .iter()
+                    .any(|declaration| declaration.kind == "macro"
+                        && declaration.qualified_name == qualified_name),
+                "missing macro declaration {qualified_name}"
+            );
+        }
+        let exported = report
+            .declarations
+            .iter()
+            .find(|declaration| declaration.qualified_name == "macro_zoo_app::__exported")
+            .expect("exported macro declared");
+        assert_eq!(
+            exported.signature,
+            "#[macro_export] macro_rules! __exported"
+        );
+
+        // The `#[macro_use]`-hoisted and textual child-module invocations
+        // resolve to workspace definitions rather than dependency guesses.
+        assert!(
+            !report.usages.iter().any(|usage| usage.kind == "macro-call"
+                && usage.name.contains("count_tts")
+                && usage.name.contains("make_units")),
+            "workspace macros must not be attributed to a dependency"
+        );
+
+        // A call into the generated impl resolves to it, and the generated
+        // methods reach each other: to_json's `$crate::helper::enc` is a
+        // static edge to the hand-written function.
+        let graph = report.call_graph.as_ref().expect("callgraph emitted");
+        let danger_edges: Vec<&rusi_schema::CallGraphEdge> = graph
+            .edges
+            .iter()
+            .filter(|edge| edge.method.as_deref() == Some("danger"))
+            .collect();
+        assert!(
+            danger_edges
+                .iter()
+                .any(|edge| graph.target_name(edge) == "macro_zoo_app::Seconds::danger"),
+            "run's s.danger() must resolve to the generated method"
+        );
+        assert!(
+            graph
+                .edges
+                .iter()
+                .any(|edge| graph.target_name(edge) == "macro_zoo_app::helper::enc"),
+            "the expanded $crate path must reach helper::enc"
+        );
+
+        // The generated danger carries the env to process-exec flow, and its
+        // nodes say which macro produced them.
+        let data_flow = report.data_flow.as_ref().expect("dataflow emitted");
+        let slice = data_flow
+            .slices
+            .iter()
+            .find(|slice| {
+                slice.rule_name == "env-to-process-exec"
+                    && slice.source_function == "macro_zoo_app::Seconds::danger"
+            })
+            .expect("env to process-exec slice inside the generated method");
+        for node_id in &slice.node_ids {
+            let node = data_flow
+                .nodes
+                .iter()
+                .find(|node| node.id == *node_id)
+                .expect("slice node exists");
+            assert_eq!(
+                node.expanded_from.as_ref().map(|from| &from.macro_path),
+                Some(&"macro_zoo_app::macros::make_units::make_units".to_string()),
+                "node {} must name its macro",
+                node.name
+            );
+        }
+    }
+
+    #[test]
+    fn macro_zoo_hygiene_keeps_the_caller_binding() {
+        let report = analyze(AnalyzeOptionsInput {
+            dir: fixture_path("macro-zoo-app"),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "security".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        // The transcriber binds its own `x` while the caller's `x` holds the
+        // env value; the write through `$v` must keep the flow. Without the
+        // rename the transcriber's literal would clobber the caller's taint.
+        let data_flow = report.data_flow.as_ref().expect("dataflow emitted");
+        assert!(
+            data_flow
+                .slices
+                .iter()
+                .any(|slice| slice.rule_name == "env-to-filesystem-write"
+                    && slice.source_function == "macro_zoo_app::hygiene_flow"),
+            "expected an env to filesystem-write slice in hygiene_flow"
+        );
+    }
+
+    #[test]
+    fn macro_zoo_dependency_macros_become_calls_and_edges() {
+        let report = analyze(AnalyzeOptionsInput {
+            dir: fixture_path("macro-zoo-app"),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "security".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        // Full path, plain import, aliased import, and the legacy
+        // `#[macro_use] extern crate`: four invocation shapes, each with the
+        // resolved path and the crate it belongs to.
+        let expected = [
+            ("serde_json::json!", "pkg:cargo/serde-json"),
+            ("anyhow::bail!", "pkg:cargo/anyhow"),
+            ("log::info!", "pkg:cargo/log"),
+            ("log::warn!", "pkg:cargo/log"),
+            ("log::trace!", "pkg:cargo/log"),
+        ];
+        for (name, _) in &expected {
+            assert!(
+                report
+                    .usages
+                    .iter()
+                    .any(|usage| usage.kind == "macro-call" && &usage.name == name),
+                "missing macro-call usage {name}"
+            );
+        }
+        let graph = report.call_graph.as_ref().expect("callgraph emitted");
+        for (name, purl) in &expected {
+            let edge = graph
+                .edges
+                .iter()
+                .find(|edge| {
+                    edge.call_type == "macro"
+                        && edge.callee_text.as_deref() == Some(name.trim_end_matches('!'))
+                })
+                .unwrap_or_else(|| panic!("missing macro edge for {name}"));
+            assert_eq!(edge.target_purl, *purl, "edge for {name}");
+        }
+
+        // std macros stay plain: no macro-call usage and no macro edge for
+        // them, their arguments keep the ordinary recovery.
+        for std_name in ["vec!", "format!", "println!"] {
+            assert!(
+                !report
+                    .usages
+                    .iter()
+                    .any(|usage| usage.kind == "macro-call" && usage.name.ends_with(std_name)),
+                "{std_name} must not become a macro-call usage"
+            );
+        }
+
+        // A tainted value reaching a `json!` body keeps its flow.
+        let data_flow = report.data_flow.as_ref().expect("dataflow emitted");
+        assert!(
+            data_flow
+                .slices
+                .iter()
+                .any(|slice| slice.rule_name == "env-to-filesystem-write"
+                    && slice.source_function == "macro_zoo_app::run"),
+            "expected the json! value flow inside run"
+        );
+    }
+
+    #[test]
+    fn macro_zoo_glob_reexports_resolve_without_workspace_diagnostic() {
+        let report = analyze(AnalyzeOptionsInput {
+            dir: fixture_path("macro-zoo-app"),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "security".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        // `mod make_units; pub(crate) use make_units::*;` in macros/mod.rs:
+        // the glob targets a child module of the importing module, not a
+        // module outside the workspace.
+        assert!(
+            !report
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.kind == "import-resolution"),
+            "child-module globs must not be reported as outside the workspace: {:?}",
+            report
+                .diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.kind == "import-resolution")
+                .map(|diagnostic| &diagnostic.message)
+                .collect::<Vec<_>>()
+        );
+        // The path-based invocation through the glob resolves to helper::enc.
+        let graph = report.call_graph.as_ref().expect("callgraph emitted");
+        assert!(
+            graph
+                .edges
+                .iter()
+                .any(|edge| graph.source_name(edge) == "macro_zoo_app::scaled"),
+            "the full-path invocation's expansion must be attributed to scaled"
+        );
+    }
+
+    #[test]
+    fn repeated_expansions_keep_their_evidence_apart() {
+        // Transcribed tokens take their line and column from the transcriber,
+        // so every invocation of `mk!` puts its closure at the same span.
+        // Each closure must still be its own node, and only the closure that
+        // spawns a process may be reached from `tainted`. `zero!()` has an
+        // empty body and must still be expanded.
+        let root = fixture_crate(
+            "macro-repeated",
+            r#"
+macro_rules! zero {
+    () => { pub fn zero_gen() {} };
+}
+zero!();
+
+macro_rules! mk {
+    ($name:ident, $body:expr) => {
+        pub fn $name(input: String) {
+            let f = |v: String| $body;
+            f(input);
+            unsafe { std::ptr::read(&0u8) };
+        }
+    };
+}
+mk!(tainted, { let _ = std::process::Command::new(v).output(); });
+mk!(clean, { drop(v); });
+"#,
+        );
+        let report = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "none".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        assert!(
+            report
+                .declarations
+                .iter()
+                .any(|declaration| declaration.qualified_name == "macro_repeated::zero_gen"),
+            "an empty-bodied invocation must expand"
+        );
+        let closures: BTreeSet<&str> = report
+            .declarations
+            .iter()
+            .filter(|declaration| declaration.kind == "closure")
+            .map(|declaration| declaration.qualified_name.as_str())
+            .collect();
+        assert_eq!(
+            closures.len(),
+            2,
+            "one closure per invocation: {closures:?}"
+        );
+
+        let call_graph = report.call_graph.as_ref().expect("static call graph");
+        let names: HashMap<&str, &str> = call_graph
+            .nodes
+            .iter()
+            .map(|node| (node.id.as_str(), node.qualified_name.as_str()))
+            .collect();
+        let callees_of = |caller: &str| -> BTreeSet<String> {
+            let closures_of_caller: BTreeSet<&str> = call_graph
+                .edges
+                .iter()
+                .filter(|edge| names[edge.source_id.as_str()] == caller)
+                .map(|edge| names[edge.target_id.as_str()])
+                .collect();
+            call_graph
+                .edges
+                .iter()
+                .filter(|edge| closures_of_caller.contains(names[edge.source_id.as_str()]))
+                .map(|edge| names[edge.target_id.as_str()].to_string())
+                .collect()
+        };
+        assert!(callees_of("macro_repeated::tainted").contains("std::process::Command::new"));
+        assert!(
+            !callees_of("macro_repeated::clean").contains("std::process::Command::new"),
+            "the clean invocation's closure must not inherit the tainted one's calls"
+        );
+
+        // Everything an expansion produced sits at its invocation site: the
+        // two `mk!(` lines, never the transcriber's own line and column.
+        let source = fs::read_to_string(root.join("src").join("lib.rs")).expect("read lib.rs");
+        let invocation_lines: BTreeSet<usize> = source
+            .lines()
+            .enumerate()
+            .filter(|(_, line)| line.starts_with("mk!("))
+            .map(|(index, _)| index + 1)
+            .collect();
+        assert_eq!(invocation_lines.len(), 2);
+        let signal_lines: BTreeSet<usize> = report
+            .security_signals
+            .iter()
+            .filter(|signal| signal.expanded_from.is_some())
+            .map(|signal| signal.position.line)
+            .collect();
+        assert_eq!(signal_lines, invocation_lines);
+        let usage_lines: BTreeSet<usize> = report
+            .usages
+            .iter()
+            .filter(|usage| usage.expanded_from.is_some())
+            .map(|usage| usage.position.line)
+            .collect();
+        assert!(
+            usage_lines.is_subset(&invocation_lines) && !usage_lines.is_empty(),
+            "{usage_lines:?} vs {invocation_lines:?}"
+        );
+
+        let ids: Vec<&str> = report
+            .usages
+            .iter()
+            .map(|usage| usage.id.as_str())
+            .chain(
+                report
+                    .security_signals
+                    .iter()
+                    .map(|signal| signal.id.as_str()),
+            )
+            .collect();
+        let unique: BTreeSet<&str> = ids.iter().copied().collect();
+        assert_eq!(
+            ids.len(),
+            unique.len(),
+            "evidence ids must be unique: {ids:?}"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn expansion_token_budget_covers_sibling_expansions() {
+        // Two recursive calls per level: each expansion is tiny, but the
+        // total doubles with every level. The budget must stop the whole
+        // tree, with one diagnostic for the hand-written invocation.
+        let root = fixture_crate(
+            "macro-doubling",
+            r#"
+macro_rules! boom {
+    () => { pub fn leaf() {} };
+    (x $($rest:tt)*) => { boom!($($rest)*); boom!($($rest)*); };
+}
+mod tree {
+    boom!(x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x);
+}
+"#,
+        );
+        let report = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "none".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+        let budget_diagnostics = report
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| {
+                diagnostic.kind == "macro" && diagnostic.message.contains("token budget")
+            })
+            .count();
+        assert_eq!(budget_diagnostics, 1);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn macro_expansion_budget_and_unmatched_rules_are_reported() {
+        // A muncher with no base case that keeps its input small recurses
+        // until the depth limit; the stop is a diagnostic naming the macro,
+        // never a silent gap. One that doubles its input every level reaches
+        // the token budget, reported the same way.
+        let root = fixture_crate(
+            "macro-budget",
+            r#"
+macro_rules! spin_forever {
+    ($($t:tt)*) => { spin_forever!($($t)* $($t)*) };
+}
+
+macro_rules! echo_forever {
+    ($t:tt) => { echo_forever!($t) };
+}
+
+pub fn spin() -> u32 { spin_forever!(a) }
+pub fn echo() -> u32 { echo_forever!(x) }
+"#,
+        );
+        let report = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "none".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+        assert!(
+            report
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.kind == "macro"
+                    && diagnostic.message.contains("spin_forever!")
+                    && diagnostic.message.contains("token budget")),
+            "expected a token-budget diagnostic, got: {:?}",
+            macro_diagnostics(&report)
+        );
+        assert!(
+            report
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.kind == "macro"
+                    && diagnostic.message.contains("echo_forever!")
+                    && diagnostic.message.contains("depth limit")),
+            "expected a depth-limit diagnostic, got: {:?}",
+            report
+                .diagnostics
+                .iter()
+                .map(|diagnostic| &diagnostic.message)
+                .collect::<Vec<_>>()
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn unmatched_workspace_macro_rule_is_reported_not_dropped() {
+        let root = fixture_crate(
+            "macro-unmatched",
+            r#"
+macro_rules! only_lit {
+    ($v:literal) => { $v };
+}
+
+pub fn take() -> u32 { only_lit!(not_a_literal) }
+"#,
+        );
+        let report = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "none".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+        assert!(
+            report
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.kind == "macro"
+                    && diagnostic.message.contains("only_lit!")
+                    && diagnostic.message.contains("no rule")),
+            "expected a no-rule diagnostic"
+        );
+        // The declaration still exists; only the invocation is a gap.
+        assert!(
+            report
+                .declarations
+                .iter()
+                .any(|declaration| declaration.qualified_name == "macro_unmatched::only_lit")
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn ambiguous_macro_use_extern_crates_record_candidates() {
+        // Two `#[macro_use] extern crate`s could each supply a bare name;
+        // the candidates are recorded and neither crate is guessed. The
+        // fixture crate has no such dependencies, so the candidates are
+        // synthetic: two path deps would need real crates, and the scoped
+        // behavior is the same with any names.
+        let root = temp_dir("macro-ambiguous");
+        fs::write(
+            root.join("Cargo.toml"),
+            "[package]\nname = \"macro-ambiguous\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[workspace]\n[dependencies]\nlog = \"0.4\"\ntracing = \"0.1\"\n",
+        )
+        .expect("write Cargo.toml");
+        fs::create_dir_all(root.join("src")).expect("create src");
+        fs::write(
+            root.join("src").join("lib.rs"),
+            r#"
+#[macro_use]
+extern crate log;
+#[macro_use]
+extern crate tracing;
+
+pub fn note() { event!("happened"); }
+"#,
+        )
+        .expect("write lib.rs");
+        let report = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "none".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+        let usage = report
+            .usages
+            .iter()
+            .find(|usage| usage.kind == "macro-call" && usage.name == "event!")
+            .expect("ambiguous usage recorded");
+        assert_eq!(
+            usage.properties.get("candidates").map(String::as_str),
+            Some("log::event!, tracing::event!")
+        );
+        assert!(
+            usage.purl.is_empty(),
+            "no purl is attributed while the target is unknown: {}",
+            usage.purl
+        );
+        let graph = report.call_graph.as_ref().expect("callgraph emitted");
+        assert!(
+            !graph
+                .edges
+                .iter()
+                .any(|edge| edge.call_type == "macro"
+                    && edge.callee_text.as_deref() == Some("event")),
+            "no edge is guessed for an ambiguous invocation"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    fn static_report(root: &std::path::Path) -> rusi_schema::Report {
+        analyze(AnalyzeOptionsInput {
+            dir: root.to_path_buf(),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "security".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds")
+    }
+
+    /// The qualified names a function calls, by the callee node of every edge
+    /// out of it.
+    fn callees_of_function(report: &rusi_schema::Report, caller: &str) -> BTreeSet<String> {
+        let graph = report.call_graph.as_ref().expect("callgraph emitted");
+        graph
+            .edges
+            .iter()
+            .filter(|edge| graph.source_name(edge) == caller)
+            .map(|edge| graph.target_name(edge).to_string())
+            .collect()
+    }
+
+    fn macro_diagnostics(report: &rusi_schema::Report) -> Vec<String> {
+        report
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.kind == "macro")
+            .map(|diagnostic| diagnostic.message.clone())
+            .collect()
+    }
+
+    #[test]
+    fn macro_zoo_declares_and_expands_every_scoping_shape() {
+        let report = static_report(&fixture_path("macro-zoo-app"));
+        let declared: Vec<&str> = report
+            .declarations
+            .iter()
+            .filter(|declaration| declaration.kind == "macro")
+            .map(|declaration| declaration.qualified_name.as_str())
+            .collect();
+        for expected in [
+            "macro_zoo_app::outer::inner::deep_note",
+            "macro_zoo_app::shadow::pick",
+            "macro_zoo_app::local_five",
+            "macro_zoo_app::getters",
+            "macro_zoo_app::call_path",
+            "macro_zoo_app::bracketed",
+            "macro_zoo_app::write_checked",
+            "macro_zoo_app::spin_forever",
+        ] {
+            assert!(declared.contains(&expected), "missing {expected}");
+        }
+        // The shadowed definition and the shadowing one are two declarations
+        // with their own ids.
+        let picks: Vec<&rusi_schema::Declaration> = report
+            .declarations
+            .iter()
+            .filter(|declaration| declaration.qualified_name == "macro_zoo_app::shadow::pick")
+            .collect();
+        assert_eq!(picks.len(), 2);
+        assert_ne!(picks[0].id, picks[1].id);
+        let ids: BTreeSet<&str> = report
+            .declarations
+            .iter()
+            .map(|declaration| declaration.id.as_str())
+            .collect();
+        assert_eq!(
+            ids.len(),
+            report.declarations.len(),
+            "declaration ids are unique"
+        );
+
+        // `#[macro_use]` through two modules: the hoisted macro expands here.
+        assert!(
+            callees_of_function(&report, "macro_zoo_app::deep")
+                .contains("macro_zoo_app::helper::enc")
+        );
+        // Shadowing by position: the first function uses the first definition
+        // (no environment read), the second the later one.
+        assert!(
+            !callees_of_function(&report, "macro_zoo_app::shadow::first").contains("std::env::var")
+        );
+        assert!(
+            callees_of_function(&report, "macro_zoo_app::shadow::second").contains("std::env::var")
+        );
+        // An optional part inside a repetition: `beta` has no return type.
+        let by_name = |name: &str| {
+            report
+                .declarations
+                .iter()
+                .find(|declaration| declaration.qualified_name == name)
+                .unwrap_or_else(|| panic!("missing {name}"))
+        };
+        assert_eq!(by_name("macro_zoo_app::alpha").kind, "function");
+        assert!(by_name("macro_zoo_app::beta").signature.contains("beta"));
+        assert!(by_name("macro_zoo_app::gamma").expanded_from.is_some());
+        // The `::`-separated repetition and the bracketed rules expand.
+        assert!(
+            callees_of_function(&report, "macro_zoo_app::extra")
+                .contains("macro_zoo_app::helper::enc")
+        );
+        assert!(
+            macro_diagnostics(&report).is_empty(),
+            "the zoo expands without macro diagnostics: {:?}",
+            macro_diagnostics(&report)
+        );
+        // `dbg!` is a standard-library macro even next to `#[macro_use]
+        // extern crate log`.
+        assert!(
+            !report
+                .usages
+                .iter()
+                .any(|usage| usage.kind == "macro-call" && usage.name.contains("dbg")),
+            "dbg! is not a dependency macro call"
+        );
+    }
+
+    #[test]
+    fn macro_zoo_expansion_evidence_sits_at_the_invocation_site() {
+        let root = fixture_path("macro-zoo-app");
+        let source = fs::read_to_string(root.join("src").join("lib.rs")).expect("read lib.rs");
+        let line_of = |needle: &str| {
+            source
+                .lines()
+                .position(|line| line.contains(needle))
+                .map(|index| index + 1)
+                .unwrap_or_else(|| panic!("{needle} not in lib.rs"))
+        };
+        let report = static_report(&root);
+        let data_flow = report.data_flow.as_ref().expect("dataflow emitted");
+        let expected = [
+            ("make_units", line_of("make_units!(Seconds")),
+            ("write_checked", line_of("write_checked!(path)")),
+        ];
+        for node in &data_flow.nodes {
+            let Some(from) = node.expanded_from.as_ref() else {
+                continue;
+            };
+            let name = from.macro_path.rsplit("::").next().unwrap_or_default();
+            if let Some((_, line)) = expected.iter().find(|(macro_name, _)| *macro_name == name) {
+                assert_eq!(
+                    node.position.line, *line,
+                    "node {} from {name} must sit at the invocation",
+                    node.name
+                );
+            }
+        }
+        for declaration in &report.declarations {
+            let Some(from) = declaration.expanded_from.as_ref() else {
+                continue;
+            };
+            let name = from.macro_path.rsplit("::").next().unwrap_or_default();
+            if let Some((_, line)) = expected.iter().find(|(macro_name, _)| *macro_name == name) {
+                assert_eq!(
+                    declaration.position.line, *line,
+                    "{}",
+                    declaration.qualified_name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_source_read_inside_a_macro_reaches_a_sink_outside_it() {
+        let report = static_report(&fixture_path("macro-zoo-app"));
+        let data_flow = report.data_flow.as_ref().expect("dataflow emitted");
+        for function in [
+            "macro_zoo_app::macro_source_let",
+            "macro_zoo_app::macro_source_argument",
+            "macro_zoo_app::macro_source_unwrapped_outside",
+            "macro_zoo_app::macro_source_bound_by_statement",
+        ] {
+            assert!(
+                data_flow
+                    .slices
+                    .iter()
+                    .any(|slice| slice.rule_name == "env-to-process-exec"
+                        && slice.source_function == function),
+                "expected an env to process-exec slice in {function}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_macro_source_reaches_a_sink_from_every_expression_position() {
+        let root = fixture_crate(
+            "macro-source-positions",
+            r#"
+use std::process::Command;
+macro_rules! src { () => { std::env::var("X").unwrap() }; }
+static CMD: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| src!());
+pub fn from_static() { let _ = Command::new("sh").arg(&*CMD).output(); }
+pub fn tail() -> String { src!() }
+pub fn from_tail() { let _ = Command::new("sh").arg(tail()).output(); }
+pub fn from_closure() { let f = || src!(); let _ = Command::new("sh").arg(f()).output(); }
+pub fn from_match() { let v = match 1 { _ => src!() }; let _ = Command::new("sh").arg(v).output(); }
+pub fn from_if() { let v = if true { src!() } else { String::new() }; let _ = Command::new("sh").arg(v).output(); }
+pub fn from_format() { let _ = Command::new("sh").arg(format!("{}", src!())).output(); }
+pub fn no_source() { let _ = Command::new("sh").arg("fixed").output(); }
+"#,
+        );
+        let report = static_report(&root);
+        let data_flow = report.data_flow.as_ref().expect("dataflow emitted");
+        for function in [
+            "from_static",
+            "from_tail",
+            "from_closure",
+            "from_match",
+            "from_if",
+            "from_format",
+        ] {
+            let qualified = format!("macro_source_positions::{function}");
+            assert!(
+                data_flow
+                    .slices
+                    .iter()
+                    .any(|slice| slice.rule_name == "env-to-process-exec"
+                        && slice.source_function == qualified),
+                "expected an env to process-exec slice in {function}"
+            );
+        }
+        assert!(
+            !data_flow
+                .slices
+                .iter()
+                .any(|slice| slice.source_function == "macro_source_positions::no_source"),
+            "a fixed argument is not a flow"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn macro_zoo_hygiene_covers_if_let_closure_and_match_bindings() {
+        let report = static_report(&fixture_path("macro-zoo-app"));
+        let data_flow = report.data_flow.as_ref().expect("dataflow emitted");
+        // The caller's `path` flows through `$v` into the write of the
+        // generated `match` arm although the template binds its own `path`,
+        // `write` and `data`.
+        assert!(
+            data_flow
+                .slices
+                .iter()
+                .any(|slice| slice.rule_name == "env-to-filesystem-write"
+                    && slice.source_function == "macro_zoo_app::checked_flow"),
+            "the caller's variable keeps its flow through the macro's own bindings"
+        );
+        let text = serde_json::to_string(&report).expect("report serializes");
+        assert!(
+            !text.contains("__rhyg") && !text.contains("__hygiene"),
+            "no renamed name appears in the report"
+        );
+    }
+
+    #[test]
+    fn a_macro_scoped_to_one_block_is_not_expanded_in_another_function() {
+        let root = fixture_crate(
+            "macro-block-scope",
+            r#"
+pub fn defines() {
+    macro_rules! run_it {
+        ($c:expr) => { std::process::Command::new($c).output().ok() };
+    }
+    run_it!("ls");
+}
+
+pub fn only_names_it() {
+    run_it!("ls");
+}
+"#,
+        );
+        let report = static_report(&root);
+        assert!(
+            callees_of_function(&report, "macro_block_scope::defines")
+                .contains("std::process::Command::new")
+        );
+        assert!(
+            !callees_of_function(&report, "macro_block_scope::only_names_it")
+                .contains("std::process::Command::new"),
+            "the block-local definition must not leak into another function"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_raw_identifier_in_a_transcriber_does_not_panic() {
+        let root = fixture_crate(
+            "macro-raw-ident",
+            r#"
+macro_rules! raw {
+    ($x:ident) => {
+        pub fn $x() -> u32 {
+            let r#type = 1;
+            let r#match = r#type + 1;
+            println!("{r#type}");
+            r#match
+        }
+    };
+}
+raw!(a);
+raw!(b);
+"#,
+        );
+        let report = static_report(&root);
+        for name in ["macro_raw_ident::a", "macro_raw_ident::b"] {
+            assert!(
+                report
+                    .declarations
+                    .iter()
+                    .any(|declaration| declaration.qualified_name == name),
+                "{name} is declared"
+            );
+        }
+        let text = serde_json::to_string(&report).expect("report serializes");
+        assert!(!text.contains("__rhyg"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn matchers_rustc_rejects_are_stopped_with_a_diagnostic_not_a_hang() {
+        let mut tokens = String::new();
+        for _ in 0..40 {
+            tokens.push_str("a ");
+        }
+        let mut long = String::new();
+        for _ in 0..400 {
+            long.push_str("a ");
+        }
+        let root = fixture_crate(
+            "macro-hostile",
+            &format!(
+                r#"
+macro_rules! exponential {{ ($($($t:tt)+)+ !) => {{}}; }}
+macro_rules! polynomial {{ ($($a:tt)* $($b:tt)* $($c:tt)* !) => {{}}; }}
+exponential!({tokens});
+polynomial!({long});
+pub fn ok() {{}}
+"#
+            ),
+        );
+        let started = std::time::Instant::now();
+        let report = static_report(&root);
+        assert!(started.elapsed() < std::time::Duration::from_secs(20));
+        let messages = macro_diagnostics(&report);
+        for name in ["exponential!", "polynomial!"] {
+            assert_eq!(
+                messages
+                    .iter()
+                    .filter(|message| message.contains(name) && message.contains("ambiguous"))
+                    .count(),
+                1,
+                "one diagnostic for {name}: {messages:?}"
+            );
+        }
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn extern_crate_macro_use_of_a_workspace_crate_expands_it() {
+        let root = temp_dir("macro-extern-workspace");
+        fs::write(
+            root.join("Cargo.toml"),
+            "[workspace]\nmembers = [\"shared\", \"app\"]\nresolver = \"2\"\n",
+        )
+        .expect("write workspace manifest");
+        for (name, extra) in [
+            ("shared", ""),
+            ("app", "shared = { path = \"../shared\" }\n"),
+        ] {
+            fs::create_dir_all(root.join(name).join("src")).expect("create member src");
+            fs::write(
+                root.join(name).join("Cargo.toml"),
+                format!(
+                    "[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[dependencies]\n{extra}"
+                ),
+            )
+            .expect("write member manifest");
+        }
+        fs::write(
+            root.join("shared").join("src").join("lib.rs"),
+            "#[macro_export]\nmacro_rules! shout {\n    ($c:expr) => { std::process::Command::new($c).output() };\n}\n",
+        )
+        .expect("write shared lib");
+        fs::write(
+            root.join("app").join("src").join("lib.rs"),
+            "#[macro_use]\nextern crate shared;\n\npub fn go() { let _ = shout!(\"ls\"); }\n",
+        )
+        .expect("write app lib");
+        let report = static_report(&root);
+        assert!(
+            callees_of_function(&report, "app::go").contains("std::process::Command::new"),
+            "the workspace crate's macro expands inside the caller"
+        );
+        assert!(
+            !report
+                .usages
+                .iter()
+                .any(|usage| usage.kind == "macro-call" && usage.name.contains("shout")),
+            "a workspace macro is not a dependency macro call"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn child_module_imports_resolve_to_the_declaring_module() {
+        let root = temp_dir("child-module-imports");
+        fs::write(
+            root.join("Cargo.toml"),
+            "[package]\nname = \"child-module-imports\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[workspace]\n",
+        )
+        .expect("write Cargo.toml");
+        fs::create_dir_all(root.join("src").join("util")).expect("create src");
+        fs::write(
+            root.join("src").join("lib.rs"),
+            "mod util;\npub fn go() { util::glob_user(); util::named_user(); }\n",
+        )
+        .expect("write lib.rs");
+        fs::write(
+            root.join("src").join("util").join("mod.rs"),
+            "mod helper_a;\nmod helper_b;\n\
+             pub(crate) use helper_a::*;\n\
+             pub(crate) use helper_b::from_b;\n\
+             pub fn glob_user() { from_a(); }\n\
+             pub fn named_user() { from_b(); }\n",
+        )
+        .expect("write util/mod.rs");
+        fs::write(
+            root.join("src").join("util").join("helper_a.rs"),
+            "pub fn from_a() {}\n",
+        )
+        .expect("write helper_a.rs");
+        fs::write(
+            root.join("src").join("util").join("helper_b.rs"),
+            "pub fn from_b() {}\n",
+        )
+        .expect("write helper_b.rs");
+        let report = static_report(&root);
+        assert!(
+            !report
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.kind == "import-resolution"),
+            "no import-resolution diagnostic: {:?}",
+            report.diagnostics
+        );
+        assert!(
+            callees_of_function(&report, "child_module_imports::util::glob_user")
+                .contains("child_module_imports::util::helper_a::from_a")
+        );
+        assert!(
+            callees_of_function(&report, "child_module_imports::util::named_user")
+                .contains("child_module_imports::util::helper_b::from_b")
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_enum_glob_in_a_function_does_not_pin_the_receiver_to_the_enum() {
+        // `use Command::*;` brings the variants into scope; the value bound by
+        // `Get(cmd)` is the payload, so `cmd.apply()` must still reach the
+        // payload types' methods and not resolve to `Command::apply` itself.
+        let root = fixture_crate(
+            "enum-glob",
+            r#"
+mod get { pub struct Get; impl Get { pub fn apply(&self) {} } }
+mod ping { pub struct Ping; impl Ping { pub fn apply(&self) {} } }
+pub use crate::get::Get;
+pub use crate::ping::Ping;
+pub enum Command { Get(Get), Ping(Ping) }
+impl Command {
+    pub fn apply(self) {
+        use Command::*;
+        match self { Get(cmd) => cmd.apply(), Ping(cmd) => cmd.apply() }
+    }
+}
+"#,
+        );
+        let report = static_report(&root);
+        let callees = callees_of_function(&report, "enum_glob::Command::apply");
+        assert!(
+            callees.contains("enum_glob::get::Get::apply"),
+            "{callees:?}"
+        );
+        assert!(
+            callees.contains("enum_glob::ping::Ping::apply"),
+            "{callees:?}"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_refused_expansion_is_reported_once_not_twice() {
+        // Every cause that refuses an expansion names itself; the generic
+        // "bodies were not analyzed" note for the same macro would repeat it.
+        let long = "a ".repeat(40);
+        let root = fixture_crate(
+            "macro-one-diagnostic",
+            &format!(
+                r#"
+macro_rules! ambiguous {{ ($($($t:tt)+)+ !) => {{}}; }}
+macro_rules! unmatched {{ (never) => {{}}; }}
+macro_rules! forever {{ ($t:tt) => {{ forever!($t) }}; }}
+ambiguous!({long});
+pub fn f() {{ unmatched!(other); let _ = forever!(x); }}
+"#
+            ),
+        );
+        let report = static_report(&root);
+        let messages = macro_diagnostics(&report);
+        for name in ["ambiguous!", "unmatched!", "forever!"] {
+            let about: Vec<&String> = messages
+                .iter()
+                .filter(|message| message.contains(name))
+                .collect();
+            assert_eq!(about.len(), 1, "one diagnostic for {name}: {messages:?}");
+            assert!(!about[0].contains("bodies were not analyzed"), "{about:?}");
+        }
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    const COUNTING_MUNCHER: &str = r#"
+macro_rules! cnt {
+    () => { 0usize };
+    ($head:tt $($rest:tt)*) => { 1usize + cnt!($($rest)*) };
+}
+"#;
+
+    #[test]
+    fn a_counting_muncher_over_a_long_list_expands_to_the_end() {
+        // One level per token: rustc's default recursion limit is 128, and a
+        // list of 100 tokens needs 101 levels.
+        let list = "a ".repeat(100);
+        let root = fixture_crate(
+            "macro-long-muncher",
+            &format!(
+                "{COUNTING_MUNCHER}
+pub fn total() -> usize {{ cnt!({list}) }}
+"
+            ),
+        );
+        let report = static_report(&root);
+        assert!(
+            macro_diagnostics(&report).is_empty(),
+            "{:?}",
+            macro_diagnostics(&report)
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_depth_limit_follows_the_crate_recursion_limit_up_to_a_ceiling() {
+        let long = "a ".repeat(200);
+        let without = fixture_crate(
+            "macro-depth-default",
+            &format!(
+                "{COUNTING_MUNCHER}
+pub fn total() -> usize {{ cnt!({long}) }}
+"
+            ),
+        );
+        let messages = macro_diagnostics(&static_report(&without));
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("depth limit 128")),
+            "{messages:?}"
+        );
+        let raised = fixture_crate(
+            "macro-depth-raised",
+            &format!(
+                "#![recursion_limit = \"256\"]\n{COUNTING_MUNCHER}\npub fn total() -> usize {{ cnt!({long}) }}\n"
+            ),
+        );
+        let raised_messages = macro_diagnostics(&static_report(&raised));
+        assert!(raised_messages.is_empty(), "{raised_messages:?}");
+        let absurd = fixture_crate(
+            "macro-depth-ceiling",
+            &format!(
+                "#![recursion_limit = \"100000\"]\n{COUNTING_MUNCHER}\npub fn total() -> usize {{ cnt!({}) }}\n",
+                "a ".repeat(300)
+            ),
+        );
+        let messages = macro_diagnostics(&static_report(&absurd));
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("depth limit 256")),
+            "{messages:?}"
+        );
+        for root in [without, raised, absurd] {
+            let _ = fs::remove_dir_all(&root);
+        }
+    }
+
+    const DOUBLING: &str =
+        "macro_rules! dbl { () => {}; (x $($r:tt)*) => { dbl!($($r)*); dbl!($($r)*); } }\n";
+
+    /// Wall-clock ceiling for the expansion-budget tests. The budgets bound
+    /// the work deterministically and the diagnostics assert that; the time
+    /// check only catches a hang, so an unoptimised build on a shared runner
+    /// gets ten times the release ceiling.
+    fn expansion_time_ceiling(release_secs: u64) -> std::time::Duration {
+        let factor = if cfg!(debug_assertions) { 10 } else { 1 };
+        std::time::Duration::from_secs(release_secs * factor)
+    }
+
+    fn work_budget_messages(report: &rusi_schema::Report, scope: &str) -> usize {
+        macro_diagnostics(report)
+            .iter()
+            .filter(|message| message.contains("work budget") && message.contains(scope))
+            .count()
+    }
+
+    #[test]
+    fn one_hostile_invocation_costs_little() {
+        let root = fixture_crate(
+            "macro-one-hostile",
+            &format!("{DOUBLING}dbl!({});\n", "x ".repeat(32)),
+        );
+        let started = std::time::Instant::now();
+        let report = static_report(&root);
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed < expansion_time_ceiling(2),
+            "one invocation took {elapsed:?}"
+        );
+        let messages = macro_diagnostics(&report);
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("token budget"))
+        );
+        // The refusal is the only note about the macro.
+        assert!(
+            !messages
+                .iter()
+                .any(|message| message.contains("bodies were not analyzed")),
+            "{messages:?}"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn many_hostile_invocations_in_one_file_stop_at_the_file_budget() {
+        let mut source = String::from(DOUBLING);
+        for _ in 0..300 {
+            source.push_str(&format!("dbl!({});\n", "x ".repeat(32)));
+        }
+        let root = fixture_crate("macro-many-hostile", &source);
+        let started = std::time::Instant::now();
+        let report = static_report(&root);
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed < expansion_time_ceiling(15),
+            "300 invocations took {elapsed:?}"
+        );
+        assert_eq!(work_budget_messages(&report, "in this file"), 1);
+        assert!(macro_diagnostics(&report).len() < 40);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn hostile_invocations_across_many_files_stop_at_the_analysis_budget() {
+        let root = fixture_crate("macro-many-files", DOUBLING);
+        let mut lib = String::from(DOUBLING);
+        for index in 0..40 {
+            lib.push_str(&format!("#[macro_use]\nmod m{index};\n"));
+        }
+        // The macro is defined in lib.rs before every `mod`, so each module
+        // file sees it.
+        fs::write(root.join("src").join("lib.rs"), lib).expect("write lib.rs");
+        for index in 0..40 {
+            let mut module = String::new();
+            for _ in 0..3 {
+                module.push_str(&format!("dbl!({});\n", "x ".repeat(32)));
+            }
+            fs::write(root.join("src").join(format!("m{index}.rs")), module).expect("write module");
+        }
+        let started = std::time::Instant::now();
+        let report = static_report(&root);
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed < expansion_time_ceiling(15),
+            "120 invocations across 40 files took {elapsed:?}"
+        );
+        assert_eq!(work_budget_messages(&report, "of the analysis"), 1);
+        assert_eq!(work_budget_messages(&report, "in this file"), 0);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_repetition_past_the_iteration_cap_is_reported() {
+        let root = fixture_crate(
+            "macro-iteration-cap",
+            &format!(
+                "macro_rules! swallow {{ ($($t:tt)*) => {{ pub fn gen() {{}} }}; }}\nswallow!({});\n",
+                "a ".repeat(17_000)
+            ),
+        );
+        let messages = macro_diagnostics(&static_report(&root));
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("swallow!") && message.contains("iteration limit")),
+            "{messages:?}"
+        );
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
@@ -16099,6 +18473,7 @@ impl ComponentSection for Holder {
                     line,
                     column: 1,
                 },
+                expanded_from: None,
             }
         }
         let mut declarations = vec![
@@ -16170,6 +18545,7 @@ impl ComponentSection for Holder {
                     line: 1,
                     column: 1,
                 },
+                expanded_from: None,
             }],
             usages: Vec::new(),
             security_signals: vec![SecuritySignal {
@@ -16187,6 +18563,7 @@ impl ComponentSection for Holder {
                     line: 9,
                     column: 1,
                 },
+                expanded_from: None,
                 properties: IndexMap::new(),
             }],
             crypto: Some(CryptoEvidence {
@@ -18614,6 +20991,7 @@ mod fixpoint_tests {
         built_in_dataflow_patterns, infer_summaries_counted, infer_type_bindings,
         join_abstract_env, loop_forest, run_operations,
     };
+    use crate::macro_expand;
 
     fn records_from(source: &str) -> Vec<FunctionRecord> {
         let syntax = syn::parse_file(source).expect("snippet parses");
@@ -18624,7 +21002,12 @@ mod fixpoint_tests {
             relative_file_path: "src/lib.rs".to_string(),
             module_path: Vec::new(),
         };
-        let mut collector = SourceCollector::new(file_ctx, CfgEvaluator::permissive(), true);
+        let mut collector = SourceCollector::new(
+            file_ctx,
+            CfgEvaluator::permissive(),
+            true,
+            std::sync::Arc::new(macro_expand::MacroScopeTable::default()),
+        );
         collector.visit_file(&syntax);
         collector.functions
     }

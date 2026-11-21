@@ -629,6 +629,8 @@ mod tests {
                     },
                 ],
                 edges: vec![CallGraphEdge {
+                    target_purl: String::new(),
+                    expanded_from: None,
                     id: "edge-1".to_string(),
                     source_id: "caller".to_string(),
                     target_id: "callee".to_string(),
