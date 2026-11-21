@@ -450,6 +450,7 @@ impl EmbeddedCollector {
                 purl: String::new(),
                 file_path: declaration.file_path.clone(),
                 position: declaration.position.clone(),
+                expanded_from: None,
             });
         }
         for impl_item_id in items.impl_items() {
@@ -949,6 +950,7 @@ impl EmbeddedCollector {
             signature: declaration_signature(tcx, def_id),
             receiver,
             position,
+            expanded_from: None,
         };
         if !self
             .declarations
@@ -978,6 +980,7 @@ impl EmbeddedCollector {
                 purl: String::new(),
                 file_path: declaration.file_path.clone(),
                 position: declaration.position.clone(),
+                expanded_from: None,
             });
         }
         Ok(declaration)
@@ -1246,6 +1249,7 @@ impl<'tcx> BodyVisitor<'tcx, '_> {
             enclosing_declaration: Some(self.caller_decl.id.clone()),
             position: position.clone(),
             properties: properties.clone(),
+            expanded_from: None,
         };
         if !self.usages.iter().any(|existing| existing.id == usage.id) {
             self.usages.push(usage.clone());
@@ -1298,6 +1302,7 @@ impl<'tcx> BodyVisitor<'tcx, '_> {
             purl: String::new(),
             file_path: file_path.clone(),
             position,
+            expanded_from: None,
         };
         if !self
             .security_signals
@@ -2700,6 +2705,8 @@ fn build_call_graph(
                             emitted_candidate_count: None,
                             dispatch_trait: call.dispatch_trait.clone(),
                             properties,
+                            target_purl: String::new(),
+                            expanded_from: None,
                         });
                 }
             }
@@ -2866,6 +2873,8 @@ fn build_call_graph(
                     emitted_candidate_count: None,
                     dispatch_trait: call.resolved.dispatch_trait.clone(),
                     properties,
+                    target_purl: String::new(),
+                    expanded_from: None,
                 });
         }
     }
@@ -3946,6 +3955,7 @@ impl<'a> DataFlowBuilder<'a> {
                                             parameter_index: Some(idx),
                                             type_name: None,
                                             properties: IndexMap::new(),
+                                            expanded_from: None,
                                         };
                                         if let Some(last_step) = path.steps.last() {
                                             let edge_id = stable_id(
@@ -4114,6 +4124,7 @@ impl<'a> DataFlowBuilder<'a> {
                 parameter_index,
                 type_name: type_name.clone(),
                 properties,
+                expanded_from: None,
             }
         };
         let node = match self.nodes.get(&node_id) {
@@ -4211,6 +4222,7 @@ impl<'a> DataFlowBuilder<'a> {
             parameter_index: Some(parameter_index),
             type_name: sink_type.clone(),
             properties,
+            expanded_from: None,
         };
 
         for path in &taint.paths {
@@ -4503,6 +4515,7 @@ fn apply_assign_concrete(function: &MirFunction, assign: &AssignAction, state: &
             parameter_index: None,
             type_name: None,
             properties: IndexMap::new(),
+            expanded_from: None,
         };
         for path in &mut taint.paths {
             if let Some(last_step) = path.steps.last() {
@@ -4567,6 +4580,7 @@ fn apply_assign_concrete(function: &MirFunction, assign: &AssignAction, state: &
                 parameter_index: None,
                 type_name: None,
                 properties: IndexMap::new(),
+                expanded_from: None,
             };
             for path in &mut field_taint.paths {
                 if let Some(last_step) = path.steps.last() {

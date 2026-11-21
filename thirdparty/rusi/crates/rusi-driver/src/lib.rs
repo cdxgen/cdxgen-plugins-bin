@@ -2141,6 +2141,7 @@ impl NativeInteropCollector {
             // The compiler backend sees post-cfg code, so anything it reports is
             // already active in the current configuration.
             cfg_gate: None,
+            expanded_from: None,
         };
         self.declarations.push(declaration.clone());
         declaration
@@ -2186,6 +2187,7 @@ impl NativeInteropCollector {
             position: position_from_span(&self.file_ctx.relative_file_path, span),
             cfg_gate: None,
             properties: IndexMap::new(),
+            expanded_from: None,
         });
     }
     /// Whether the item with these attributes is compiled for Windows only,
@@ -2347,6 +2349,7 @@ impl<'ast> Visit<'ast> for NativeInteropCollector {
                 enclosing_declaration: None,
                 position: position_from_span(&self.file_ctx.relative_file_path, node.span()),
                 properties,
+                expanded_from: None,
             });
         }
         for item in &node.items {

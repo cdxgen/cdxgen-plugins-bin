@@ -952,6 +952,8 @@ mod tests {
                 emitted_candidate_count: None,
                 dispatch_trait: None,
                 properties: Default::default(),
+                target_purl: String::new(),
+                expanded_from: None,
             }],
             diagnostics: vec![Diagnostic {
                 kind: "note".to_string(),
@@ -1001,6 +1003,7 @@ mod tests {
                     parameter_index: None,
                     type_name: Some("String".to_string()),
                     properties: Default::default(),
+                    expanded_from: None,
                 },
                 DataFlowNode {
                     id: "sink-node".to_string(),
@@ -1020,6 +1023,7 @@ mod tests {
                     parameter_index: Some(0),
                     type_name: Some("String".to_string()),
                     properties: Default::default(),
+                    expanded_from: None,
                 },
             ],
             edges: Vec::new(),
