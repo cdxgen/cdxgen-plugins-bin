@@ -177,13 +177,13 @@ This document describes the report emitted by `rusi`. Field names map directly t
 | Field                   | Type                    | Meaning                                                                                                           |
 | ----------------------- | ----------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | `id`                    | `string`                | Stable usage ID.                                                                                                  |
-| `kind`                  | `string`                | Usage category such as `call`, `method-call`, or `macro-call` (a dependency macro invocation, whose `name` is the resolved path with a trailing `!`; when more than one `#[macro_use] extern crate` could supply the name, `properties.candidates` lists them and the usage carries no purl). |
+| `kind`                  | `string`                | Usage category such as `call`, `method-call`, or `macro-call` (a dependency macro invocation, whose `name` is the resolved path with a trailing `!`; both backends record it, once per call site; when more than one `#[macro_use] extern crate` could supply the name, `properties.candidates` lists them and the usage carries no purl). |
 | `name`                  | `string`                | Captured callee or symbol name.                                                                                   |
 | `package_path`          | `string`                | Owning package path.                                                                                              |
 | `purl`                  | `string`                | PURL associated with the usage package when derivable.                                                            |
 | `enclosing_declaration` | `string \| null`        | Declaration ID containing the usage.                                                                              |
 | `position`              | `Position`              | Usage location.                                                                                                   |
-| `properties`            | `object<string,string>` | Extra metadata such as receiver text, dispatch confidence, resolved symbol, specialization key, or semantic tags. |
+| `properties`            | `object<string,string>` | Extra metadata such as receiver text, dispatch confidence, resolved symbol, specialization key, or semantic tags. The compiler backend adds `viaMacro` to a call whose code comes from a dependency bang macro's expansion: the macro the invoking line wrote (`log::info!`), while `name` stays the helper the expansion actually calls. A call written by hand, or written by a workspace macro's transcriber, carries no `viaMacro`. |
 | `expanded_from`         | `object \| null`        | Present when the usage was produced by a macro expansion. See [`ExpandedFrom`](#expandedfrom). |
 
 ### `SecuritySignal`
@@ -201,7 +201,7 @@ This document describes the report emitted by `rusi`. Field names map directly t
 | `position`     | `Position`       | Signal location.                                                                                                     |
 | `cfg_gate`     | `string \| null` | `#[cfg(...)]` predicate this signal sits behind, as written. Omitted when unconditional. See `Declaration.cfg_gate`. |
 | `properties`   | `map`            | Structured attributes a signal family attaches. The `trusted-proxy-config` signal carries `framework` and, where the code names it, `headers` (`forwarded`, `x-forwarded` or `all`). Omitted when empty. |
-| `expanded_from` | `object \| null` | Present when the signal was produced by a macro expansion. See [`ExpandedFrom`](#expandedfrom). |
+| `expanded_from` | `object \| null` | Present when the signal was produced by a macro expansion. See [`ExpandedFrom`](#expandedfrom). In compiler mode a signal whose span comes only from expansions of macros defined outside the workspace (std, core, alloc, or a dependency) is not emitted at all: the code it names is the dependency's, not the analyzed code's. A signal inside a workspace macro's expansion is kept and carries `expanded_from`. |
 
 ## Forwarded-header vocabulary
 
@@ -250,8 +250,15 @@ consumers and evidence ids do not change.
 | Field       | Type     | Meaning                                                                                                                 |
 | ----------- | -------- | ----------------------------------------------------------------------------------------------------------------------- |
 | `macro`     | `string` | The macro's canonical path: the crate root for `#[macro_export]` macros, otherwise the defining module plus the name. Matches the `kind: "macro"` declaration's `qualified_name`. |
-| `file_path` | `string` | File of the `macro_rules!` definition, or of the transcriber token when the backend knows it. The stable backend names the definition. |
+| `file_path` | `string` | File of the `macro_rules!` definition, or of the transcriber token when the backend knows it. The stable backend names the definition. The compiler backend names the transcriber token when it sits in the definition's file, and the definition for a token pasted from the invocation arguments. |
 | `line`      | `number` | 1-based line within `file_path`.                                                                                        |
+
+The compiler backend fills `expanded_from` from the span's expansion data. The macro
+named is the outermost workspace macro of the span's macro backtrace, so evidence
+nested inside a dependency macro that a workspace macro invoked still names the
+workspace macro. A workspace macro is one defined by the analyzed crate or by
+another crate under the analysis root; std, core, alloc and registry dependencies
+are outside it.
 
 ## Crypto / CBOM evidence
 
@@ -373,7 +380,7 @@ already present on the node.
 | `dispatch_trait`          | `string?` | Trait whose vtable dispatched this call, when the receiver is a trait object and the target resolved through that trait's impls. A trait object carries exactly one vtable — the principal trait's — so this names the closed set of impls the call can reach. Omitted for every other resolution shape, including blanket-impl dispatch, where the receiver selects no single trait. Both backends emit it, and both emit the bare trait name so the field joins across them: the stable backend reduces the written receiver type, the compiler backend takes the trait owning the called method from `TyCtxt`. One asymmetry remains. The compiler backend tests the receiver for `ty::Dynamic` after peeling references only, so a `Box<dyn T>` or `Arc<dyn T>` receiver is classified `trait-static` rather than `dyn-dispatch` and carries no trait, while the stable backend names it. A bare `&dyn T` receiver is named by both. |
 | `targetPurl`              | `string?` | Purl of the macro's crate, present only on `macro` call-type edges so a consumer can attribute a dependency macro call without joining to the target node. Omitted everywhere else. |
 | `expanded_from`           | `object?` | Present when the call site was produced by a macro expansion; `line`/`column` stay at the invocation site. See [`ExpandedFrom`](#expandedfrom). |
-| `properties`              | `object?` | Backend-specific extras (compiler-backend dispatch metadata). Omitted when empty.                                                                     |
+| `properties`              | `object?` | Backend-specific extras (compiler-backend dispatch metadata, and `viaMacro` on an edge whose call was made from inside a dependency macro's expansion). Omitted when empty. |
 
 **Reading an edge.** Index `call_graph.nodes` by `source_id` / `target_id`:
 
@@ -386,7 +393,8 @@ already present on the node.
 
 `call_type` values: `static`, `receiver-typed`, `trait-impl`, `static-overapprox`,
 `trait-overapprox`, `higher-order`, `external`, `macro` (a dependency macro invocation,
-whose edge carries the crate's `targetPurl`), plus compiler-backend dispatch
+whose edge carries the crate's `targetPurl`; both backends emit it, once per call
+site), plus compiler-backend dispatch
 labels (`dyn-dispatch-exact`, `trait-static-bounded`, `async-logical`, ...).
 Confidence follows from it. For the stable backend: `high` for `static`,
 `trait-impl`, and `higher-order`; `medium` for `receiver-typed`; `low`
@@ -459,6 +467,7 @@ suffix, and that suffix decides: `-exact` is `high`, `-bounded` is `medium`,
 | `parameter_index` | `number \| null`        | Parameter index when the node represents a parameter. |
 | `type_name`       | `string \| null`        | Type name when known.                                 |
 | `properties`      | `object<string,string>` | Extra node metadata.                                  |
+| `expanded_from`   | `object \| null`        | Present when the node's function was produced by a macro expansion. The compiler backend takes it from the function; `position` stays where the function was declared. See [`ExpandedFrom`](#expandedfrom). |
 
 ### `DataFlowEdge`
 

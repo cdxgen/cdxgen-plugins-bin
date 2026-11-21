@@ -288,6 +288,9 @@ Where it differs from rustc, rusi accepts more and never invents flows:
 - Source nested thousands of groups deep can overflow the stack inside `syn` before the
   expander sees it, on any input rusi reads.
 
+The compiler backend reads the crate after rustc's own expansion, so it does not use
+this module; what it reports about macros is described in section 4.7.
+
 ## 4. The compiler backend
 
 ### 4.1 Structure
@@ -415,6 +418,57 @@ itself is not analyzed, so taint through a C body is modeled rather than proven,
 is stated in the evidence confidence. Deeper cross language tracking, including parsing of
 generated bindings and of native build inputs, is identified as future work rather than
 claimed as present.
+
+### 4.7 Macro expansions
+
+The compiler backend sees the crate after rustc has expanded every macro, so code a
+macro generated is code it can analyze. rustc records, for every span an expansion
+produced, which expansion made it, which macro defines that expansion, and where the
+invocation sits. The wrapper reads that record for every span it resolves evidence
+from, and it decides three things from it.
+
+A workspace macro is one defined by the analyzed crate or by another crate under the
+analysis root. Macros of std, core, alloc, and of registry and path dependencies
+outside the root, are not workspace macros.
+
+First, signals. A security signal whose span was produced by macro expansions, and
+none of which is a workspace macro, belongs to the dependency that wrote the code,
+not to the analyzed code, and is not emitted. This is what removes the
+"compiler-generated unsafe block" that a `log::info!` invocation used to raise
+against the user's line. A signal inside a workspace macro's expansion is kept,
+because the workspace's own macro caused the code to exist.
+
+Second, origin. Evidence a workspace macro generated carries `expanded_from`, the
+same field the stable backend fills: the outermost workspace macro of the span's
+backtrace names the origin for declarations, usages, signals, call-graph edges, and
+data-flow nodes, so a method `make_units!` generated and the flows inside it point
+at the macro. The location is the transcriber token the macro wrote the code from,
+or the definition when the token was pasted from the invocation arguments.
+Positions and evidence ids stay at the call site.
+
+Third, attribution of a dependency macro's calls. A usage or edge inside a
+dependency bang macro's expansion carries a `viaMacro` property naming the macro
+the invoking line wrote (`log::info!`), taken from the outermost dependency macro
+of the backtrace; expansions the dependency makes inside it, such as log's
+`__log!`, are its own plumbing and are not named. The callee name stays the helper
+the expansion actually calls, `log::__private_api::log`. std, core and alloc
+macros are not named as dependency calls, matching the stable backend's
+resolution, and their signals are still dropped by the first rule. Each such
+invocation is also recorded as the `macro-call` usage and the `macro` call-graph
+edge the stable backend records, once per call site, so both backends report the
+same macro-level calls; on the macro-zoo-app fixture the two sets agree exactly.
+Where they merge, the compiler's entry replaces the stable one at the same call
+site, and a signal both backends raise at one position is reported once from the
+compiler's. One difference remains and is deliberate: a stable `macro-call` whose
+name the stable backend could not resolve carries its candidate list under
+`properties.candidates` and no purl, while the compiler names the macro from the
+expansion data, so the two entries carry different names and both are kept.
+
+Finally, diagnostics. In compiler mode the stable analysis still runs, and a file
+whose macro bodies it could not recover contributed its "bodies were not analyzed"
+note to the merged report even where the compiler had expanded those bodies. Notes
+about macro bodies are left out for the files the compiler payload covers, and
+kept for the files it did not reach, for example a crate whose compilation failed.
 
 ## 5. How the fixpoints converge
 
