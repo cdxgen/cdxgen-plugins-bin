@@ -280,7 +280,8 @@ Where it differs from rustc, rusi accepts more and never invents flows:
   does not follow block scopes (a name renamed once is renamed in the whole template),
   does not rename inside nested `fn` items, attributes or `use` items, and does not model
   labels and lifetimes.
-- A macro defined by a transcriber is not declared or put in scope. A `use` inside a
+- A macro defined by a transcriber is not declared or put in scope, so an invocation of
+  it (`inner_def!` producing `made!`, then `made!()`) is not expanded. A `use` inside a
   block does not import macros. A glob import from a dependency (`use log::*;`) leaves a
   bare macro name unresolved. Dependency macros, procedural macros and `macro` 2.0 items
   are not expanded.
