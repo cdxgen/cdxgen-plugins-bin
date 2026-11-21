@@ -1142,11 +1142,33 @@ fn analyze_on_this_thread(
         }
     }
 
+    // In compiler mode the compiler backend has expanded every macro of the
+    // files it analysed, so the stable backend's own blind spots there are
+    // not blind spots of the report: its notes about them would contradict
+    // the compiler evidence merged in below, and are left out for those
+    // files. A file the compiler run did not reach, for example one whose
+    // crate failed to compile, keeps its notes.
+    let compiler_covered_files: Option<HashSet<&str>> = compiler_payload.as_ref().map(|payload| {
+        payload
+            .files
+            .iter()
+            .map(|file| file.path.as_str())
+            .collect::<HashSet<_>>()
+    });
+    let file_is_compiler_covered = |file_path: &str| -> bool {
+        compiler_covered_files
+            .as_ref()
+            .is_some_and(|covered| covered.contains(file_path))
+    };
+
     // Report the macro bodies that could not be recovered as Rust, aggregated by
     // macro path: a consumer can then see exactly which blind spots this scan
     // has, instead of the evidence simply being absent.
     let mut unanalyzed_macros: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     for analyzed in &analyzed_files {
+        if file_is_compiler_covered(&analyzed.file.path) {
+            continue;
+        }
         for macro_path in &analyzed.unanalyzed_macros {
             unanalyzed_macros
                 .entry(macro_path.clone())
@@ -1171,6 +1193,9 @@ fn analyze_on_this_thread(
     }
 
     for analyzed in &analyzed_files {
+        if file_is_compiler_covered(&analyzed.file.path) {
+            continue;
+        }
         diagnostics.extend(analyzed.macro_diagnostics.iter().cloned());
     }
     let hygiene_renamed = analyzed_files
