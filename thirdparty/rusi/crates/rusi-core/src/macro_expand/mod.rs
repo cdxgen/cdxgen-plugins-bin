@@ -29,7 +29,8 @@ mod transcriber;
 pub(crate) use hygiene::strip_suffixes;
 use matcher::MatchError;
 pub(crate) use scope::{
-    CratePrepass, InvocationTarget, MacroFilePrepass, MacroRef, MacroScopeTable, Pos, prepass_file,
+    CratePrepass, InvocationTarget, MacroFilePrepass, MacroRef, MacroScopeTable, Pos, is_std_macro,
+    prepass_file,
 };
 
 use proc_macro2::{TokenStream, TokenTree};

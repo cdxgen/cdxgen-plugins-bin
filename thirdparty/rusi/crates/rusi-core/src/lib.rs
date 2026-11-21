@@ -2045,6 +2045,8 @@ fn analyze_file(
     collect_bodies: bool,
     macro_table: &std::sync::Arc<macro_expand::MacroScopeTable>,
 ) -> Result<AnalyzedFile> {
+    EXPANDED_VALUES.with(|values| values.borrow_mut().clear());
+    EXPANSION_SEQUENCE.with(|sequence| sequence.set(0));
     let source = fs::read_to_string(file_path)
         .with_context(|| format!("failed to read {}", file_path.display()))?;
     let syntax = syn::parse_file(&source)
@@ -2183,6 +2185,9 @@ struct SourceCollector {
     /// Expansion work (tokens produced plus a tenth of the matcher steps)
     /// spent in this file.
     file_work: usize,
+    /// Expansions made ahead of the walk, to give an expression-position
+    /// invocation a value; the walk takes them instead of expanding again.
+    expansion_cache: HashMap<(usize, usize, usize, u64), (macro_expand::Expansion, usize)>,
 }
 
 /// An expansion being visited: what to stamp on the evidence it produces.
@@ -2656,6 +2661,7 @@ impl SourceCollector {
             expansion_counter: 0,
             expansion_tokens: 0,
             file_work: 0,
+            expansion_cache: HashMap::new(),
         }
     }
 
@@ -2968,13 +2974,23 @@ impl SourceCollector {
         {
             return false;
         }
-        self.expansion_counter += 1;
-        let expansion = match macro_expand::expand(
-            definition,
-            &crate_name,
-            mac.tokens.clone(),
-            &self.expansion_counter.to_string(),
-        ) {
+        let key = expansion_value_key(mac, self.current_expansion_sequence());
+        let (outcome, sequence) = match self.expansion_cache.remove(&key) {
+            Some((expansion, sequence)) => (Ok(expansion), sequence),
+            None => {
+                self.expansion_counter += 1;
+                (
+                    macro_expand::expand(
+                        definition,
+                        &crate_name,
+                        mac.tokens.clone(),
+                        &self.expansion_counter.to_string(),
+                    ),
+                    self.expansion_counter,
+                )
+            }
+        };
+        let expansion = match outcome {
             Ok(expansion) => expansion,
             Err(error) => {
                 if error == macro_expand::ExpandError::StepBudget {
@@ -3049,7 +3065,7 @@ impl SourceCollector {
             },
             position: self.evidence_position(mac.path.span()),
             site: self.invocation_site(mac),
-            sequence: self.expansion_counter,
+            sequence,
         };
         self.expansion_tokens = self.expansion_tokens.saturating_add(produced);
         // Items, statements, or an expression. Inside a function body the
@@ -3068,8 +3084,10 @@ impl SourceCollector {
             .unwrap_or(0);
         let in_function = self.current_function.is_some();
         self.expansion_stack.push(frame);
+        self.sync_expansion_sequence();
         let as_block = || syn::parse2::<syn::Block>(quote::quote! { { #expanded } });
         if in_function && let Ok(block) = as_block() {
+            self.prescan_expression_macros(&block);
             syn::visit::visit_block(self, &block);
             handled = true;
         } else if let Ok(file) = syn::parse2::<syn::File>(expanded.clone()) {
@@ -3081,13 +3099,16 @@ impl SourceCollector {
             }
             handled = true;
         } else if let Ok(block) = as_block() {
+            self.prescan_expression_macros(&block);
             syn::visit::visit_block(self, &block);
             handled = true;
         } else if let Ok(expression) = syn::parse2::<Expr>(expanded.clone()) {
             syn::visit::visit_expr(self, &expression);
             handled = true;
         }
-        let Some(frame) = self.expansion_stack.pop() else {
+        let popped = self.expansion_stack.pop();
+        self.sync_expansion_sequence();
+        let Some(frame) = popped else {
             return false;
         };
         if !handled {
@@ -3254,6 +3275,86 @@ impl SourceCollector {
             return false;
         }
         true
+    }
+
+    fn current_expansion_sequence(&self) -> usize {
+        self.expansion_stack
+            .last()
+            .map_or(0, |frame| frame.sequence)
+    }
+
+    fn sync_expansion_sequence(&self) {
+        EXPANSION_SEQUENCE.with(|sequence| sequence.set(self.current_expansion_sequence()));
+    }
+
+    /// Expands the workspace macro invocations in expression position inside
+    /// `block` ahead of the walk, and leaves each one's value for
+    /// `simple_expr`. The walk records a statement's assignment before it
+    /// reaches the macro inside it, so without this a value read inside a
+    /// macro (`let v = get!();`) reaches the data-flow pass as unknown. The
+    /// expansion itself is kept and used by the walk, so nothing is expanded
+    /// twice.
+    fn prescan_expression_macros(&mut self, block: &syn::Block) {
+        let mut finder = MacroFinder::default();
+        finder.visit_block(block);
+        for found in finder.found {
+            self.prescan_macro(&found);
+        }
+    }
+
+    /// The same for an initializer expression, such as a `static`'s.
+    fn prescan_expression_macros_in(&mut self, expr: &Expr) {
+        let mut finder = MacroFinder::default();
+        finder.visit_expr(expr);
+        for found in finder.found {
+            self.prescan_macro(&found);
+        }
+    }
+
+    fn prescan_macro(&mut self, mac: &syn::Macro) {
+        let path = path_to_string(&mac.path);
+        if path == "macro_rules"
+            || self.expansion_stack.len()
+                >= self.macro_table.recursion_limit(&self.file_ctx.crate_path)
+            || self.file_work > macro_expand::MAX_FILE_EXPANSION_WORK
+            || self.macro_table.ledger().exhausted()
+        {
+            return;
+        }
+        let site = self.invocation_site(mac);
+        let macro_expand::InvocationTarget::Workspace { reference } =
+            self.macro_table.resolve_invocation(
+                &self.file_ctx.crate_path,
+                &self.file_ctx.module_path,
+                &self.file_ctx.relative_file_path,
+                site,
+                &path,
+                &self.use_records,
+            )
+        else {
+            return;
+        };
+        let Some(definition) = self.macro_table.definition(&reference).cloned() else {
+            return;
+        };
+        let crate_name = self.macro_table.crate_name_of(&reference.crate_path);
+        self.expansion_counter += 1;
+        let sequence = self.expansion_counter;
+        let Ok(expansion) = macro_expand::expand(
+            &definition,
+            &crate_name,
+            mac.tokens.clone(),
+            &sequence.to_string(),
+        ) else {
+            return;
+        };
+        let key = expansion_value_key(mac, self.current_expansion_sequence());
+        if let Ok(expression) = syn::parse2::<Expr>(expansion.tokens.clone()) {
+            let mut value = simple_expr(&expression);
+            override_expr_position(&mut value, &self.evidence_position(mac.path.span()));
+            EXPANDED_VALUES.with(|values| values.borrow_mut().insert(key, value));
+        }
+        self.expansion_cache.insert(key, (expansion, sequence));
     }
 
     /// The position a macro path resolves against: the outermost hand-written
@@ -3623,6 +3724,7 @@ impl<'ast> Visit<'ast> for SourceCollector {
             collect_bodies: self.collect_bodies,
             bound_closures: Vec::new(),
         });
+        self.prescan_expression_macros(&node.block);
         syn::visit::visit_block(self, &node.block);
         let mut finished = self.current_function.take().expect("function frame exists");
         if let Some(tail_expr) = block_tail_expr(&node.block) {
@@ -3704,6 +3806,7 @@ impl<'ast> Visit<'ast> for SourceCollector {
                     collect_bodies: self.collect_bodies,
                     bound_closures: Vec::new(),
                 });
+                self.prescan_expression_macros(&method.block);
                 syn::visit::visit_block(self, &method.block);
                 let mut finished = self.current_function.take().expect("method frame exists");
                 if let Some(tail_expr) = block_tail_expr(&method.block) {
@@ -3828,6 +3931,7 @@ impl<'ast> Visit<'ast> for SourceCollector {
                 // so a source in it seeds the global. A closure argument
                 // (`LazyLock::new(|| ..)`) is read as a call of its record,
                 // whose return is what the global holds.
+                self.prescan_expression_macros_in(&item.expr);
                 let value = self.initializer_expr(&item.expr);
                 self.static_initializers.push(StaticInitializer {
                     name: item.ident.to_string(),
@@ -5873,6 +5977,69 @@ fn span_key(span: Span) -> String {
     format!("{}:{}", start.line, start.column + 1)
 }
 
+/// Finds the macro invocations in expression position inside a body, and those
+/// in the comma-separated arguments of a standard-library macro such as
+/// `format!`, which the walk reads as expressions too.
+#[derive(Default)]
+struct MacroFinder {
+    found: Vec<syn::Macro>,
+    depth: usize,
+}
+
+impl<'ast> Visit<'ast> for MacroFinder {
+    fn visit_expr_macro(&mut self, node: &'ast ExprMacro) {
+        self.found.push(node.mac.clone());
+        let path = path_to_string(&node.mac.path);
+        let is_std = path
+            .strip_prefix("std::")
+            .or_else(|| path.strip_prefix("core::"))
+            .unwrap_or(&path);
+        if self.depth < 8
+            && macro_expand::is_std_macro(is_std)
+            && let Ok(arguments) =
+                Punctuated::<Expr, Token![,]>::parse_terminated.parse2(node.mac.tokens.clone())
+        {
+            self.depth += 1;
+            for argument in &arguments {
+                self.visit_expr(argument);
+            }
+            self.depth -= 1;
+        }
+    }
+
+    fn visit_item(&mut self, _: &'ast Item) {}
+}
+
+thread_local! {
+    /// The value of an expression-position workspace macro invocation, as the
+    /// simplified expression its expansion parses to, keyed by
+    /// [`expansion_value_key`]. `simple_expr` runs on the enclosing statement
+    /// before the collector walks the invocation, so the collector expands
+    /// such invocations ahead of the statement and leaves their values here.
+    static EXPANDED_VALUES: std::cell::RefCell<HashMap<(usize, usize, usize, u64), SimpleExpr>> =
+        std::cell::RefCell::new(HashMap::new());
+    /// The sequence number of the expansion being visited, zero for
+    /// hand-written code. Part of the key, because tokens of two expansions
+    /// can share a transcriber position.
+    static EXPANSION_SEQUENCE: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Identifies one macro invocation within one file: the expansion it sits in,
+/// its start, and a hash of its tokens, since the copies of one template item
+/// that a repetition produces share a start.
+fn expansion_value_key(mac: &syn::Macro, sequence: usize) -> (usize, usize, usize, u64) {
+    use std::hash::{Hash, Hasher};
+    let start = mac.path.span().start();
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    mac.tokens.to_string().hash(&mut hasher);
+    (sequence, start.line, start.column, hasher.finish())
+}
+
+fn expanded_value(mac: &syn::Macro) -> Option<SimpleExpr> {
+    let key = expansion_value_key(mac, EXPANSION_SEQUENCE.with(std::cell::Cell::get));
+    EXPANDED_VALUES.with(|values| values.borrow().get(&key).cloned())
+}
+
 fn simple_expr(expr: &Expr) -> SimpleExpr {
     match expr {
         Expr::Path(ExprPath { path, .. }) => SimpleExpr::Var(path_to_string(path)),
@@ -5955,7 +6122,9 @@ fn simple_expr(expr: &Expr) -> SimpleExpr {
         // is the scrutinee's, and the bindings are recorded by the visitor.
         Expr::Let(syn::ExprLet { expr, .. }) => simple_expr(expr),
         Expr::Await(syn::ExprAwait { base, .. }) => simple_expr(base),
-        Expr::Macro(expr_macro) => parse_macro_like_call(expr_macro).unwrap_or(SimpleExpr::Unknown),
+        Expr::Macro(expr_macro) => expanded_value(&expr_macro.mac)
+            .or_else(|| parse_macro_like_call(expr_macro))
+            .unwrap_or(SimpleExpr::Unknown),
         Expr::Lit(lit) => SimpleExpr::Literal {
             text: match &lit.lit {
                 Lit::Str(lit_str) => lit_str.value(),
@@ -17021,6 +17190,75 @@ pub fn note() { event!("happened"); }
                 );
             }
         }
+    }
+
+    #[test]
+    fn a_source_read_inside_a_macro_reaches_a_sink_outside_it() {
+        let report = static_report(&fixture_path("macro-zoo-app"));
+        let data_flow = report.data_flow.as_ref().expect("dataflow emitted");
+        for function in [
+            "macro_zoo_app::macro_source_let",
+            "macro_zoo_app::macro_source_argument",
+            "macro_zoo_app::macro_source_unwrapped_outside",
+            "macro_zoo_app::macro_source_bound_by_statement",
+        ] {
+            assert!(
+                data_flow
+                    .slices
+                    .iter()
+                    .any(|slice| slice.rule_name == "env-to-process-exec"
+                        && slice.source_function == function),
+                "expected an env to process-exec slice in {function}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_macro_source_reaches_a_sink_from_every_expression_position() {
+        let root = fixture_crate(
+            "macro-source-positions",
+            r#"
+use std::process::Command;
+macro_rules! src { () => { std::env::var("X").unwrap() }; }
+static CMD: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| src!());
+pub fn from_static() { let _ = Command::new("sh").arg(&*CMD).output(); }
+pub fn tail() -> String { src!() }
+pub fn from_tail() { let _ = Command::new("sh").arg(tail()).output(); }
+pub fn from_closure() { let f = || src!(); let _ = Command::new("sh").arg(f()).output(); }
+pub fn from_match() { let v = match 1 { _ => src!() }; let _ = Command::new("sh").arg(v).output(); }
+pub fn from_if() { let v = if true { src!() } else { String::new() }; let _ = Command::new("sh").arg(v).output(); }
+pub fn from_format() { let _ = Command::new("sh").arg(format!("{}", src!())).output(); }
+pub fn no_source() { let _ = Command::new("sh").arg("fixed").output(); }
+"#,
+        );
+        let report = static_report(&root);
+        let data_flow = report.data_flow.as_ref().expect("dataflow emitted");
+        for function in [
+            "from_static",
+            "from_tail",
+            "from_closure",
+            "from_match",
+            "from_if",
+            "from_format",
+        ] {
+            let qualified = format!("macro_source_positions::{function}");
+            assert!(
+                data_flow
+                    .slices
+                    .iter()
+                    .any(|slice| slice.rule_name == "env-to-process-exec"
+                        && slice.source_function == qualified),
+                "expected an env to process-exec slice in {function}"
+            );
+        }
+        assert!(
+            !data_flow
+                .slices
+                .iter()
+                .any(|slice| slice.source_function == "macro_source_positions::no_source"),
+            "a fixed argument is not a flow"
+        );
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

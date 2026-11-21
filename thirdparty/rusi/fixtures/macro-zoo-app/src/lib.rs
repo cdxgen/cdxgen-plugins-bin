@@ -156,6 +156,44 @@ pub fn extra() -> String {
     format!("{}{}{}{}", n, alpha(), bracketed![3], bracketed! { word })
 }
 
+/// A source read inside a macro while the sink is outside it: the value of an
+/// expression-position invocation, one used as an argument, one that a method
+/// outside the macro unwraps, and one bound by a statement-position expansion.
+macro_rules! read_source {
+    () => {
+        std::env::var("MACRO_ZOO_SOURCE").unwrap()
+    };
+}
+macro_rules! raw_source {
+    () => {
+        std::env::var("MACRO_ZOO_SOURCE")
+    };
+}
+macro_rules! bind_source {
+    ($v:ident) => {
+        let $v = std::env::var("MACRO_ZOO_SOURCE").unwrap();
+    };
+}
+
+pub fn macro_source_let() -> std::io::Result<std::process::Output> {
+    let v = read_source!();
+    std::process::Command::new("sh").arg(v).output()
+}
+
+pub fn macro_source_argument() -> std::io::Result<std::process::Output> {
+    std::process::Command::new("sh").arg(read_source!()).output()
+}
+
+pub fn macro_source_unwrapped_outside() -> std::io::Result<std::process::Output> {
+    let v = raw_source!().unwrap();
+    std::process::Command::new("sh").arg(v).output()
+}
+
+pub fn macro_source_bound_by_statement() -> std::io::Result<std::process::Output> {
+    bind_source!(v);
+    std::process::Command::new("sh").arg(v).output()
+}
+
 pub fn hygiene_flow() -> std::io::Result<()> {
     let x = std::env::var("MACRO_ZOO_HYGIENE").unwrap();
     guard_with_local!(x)

@@ -241,6 +241,12 @@ variable of the same name; names after `::` or `.`, struct fields and keys, macr
 item names and types are not renamed, and the suffix is removed from the report before it
 is returned.
 
+A workspace macro invoked in expression position (`let v = get!();`, an argument, a
+tail, an initializer, an argument of `format!`) is expanded before the statement around
+it is lowered, and its expansion is the value of the invocation, so a source read inside
+the macro keeps its flow into a sink outside it. The walk then reuses that expansion
+instead of expanding again.
+
 The result is parsed for the invocation's position (statements inside a function, items
 outside one, otherwise an expression) and walked by the same collector as hand-written
 code. Everything it produces is positioned at the invocation site and carries
