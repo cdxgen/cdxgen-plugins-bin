@@ -8305,6 +8305,8 @@ mod tests {
             task_boundary: false,
             native_symbol: None,
             operand_display: callee.to_string(),
+            expanded_from: None,
+            via_macro: None,
             args: args
                 .iter()
                 .map(|arg| CallArg {
