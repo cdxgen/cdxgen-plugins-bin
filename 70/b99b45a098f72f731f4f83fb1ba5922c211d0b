@@ -1,0 +1,25 @@
+thirdparty/rusi/scripts/eval/golden/anyhow.stable.digest.json
+  s_33b453a4a419f0::t_3810d69d042a33 2-3
+thirdparty/rusi/scripts/eval/golden/mini-redis.stable.digest.json
+  s_33b453a4a419f0::t_3810d69d042a33 2-3
+thirdparty/rusi/scripts/eval/golden/macro-zoo-app.stable.digest.json
+  s_33b453a4a419f0::t_3810d69d042a33 1-6
+thirdparty/rusi/scripts/eval/golden/log.stable.digest.json
+  s_33b453a4a419f0::t_3810d69d042a33 2-3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "70b99b45a098f72f731f4f83fb1ba5922c211d0b",
+  "prompts": {},
+  "sessions": {
+    "s_33b453a4a419f0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "106e5fb3-64f8-470a-81b6-58b72db4ce09",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
