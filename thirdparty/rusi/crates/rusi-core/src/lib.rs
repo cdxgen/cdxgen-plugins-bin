@@ -2813,6 +2813,7 @@ impl SourceCollector {
         // items, and a dependency macro called with no arguments is still a
         // call into that crate.
         let site = self.invocation_site(mac);
+        let diagnostics_before = self.macro_diagnostics.len();
         match self.macro_table.resolve_invocation(
             &self.file_ctx.crate_path,
             &self.file_ctx.module_path,
@@ -2839,6 +2840,10 @@ impl SourceCollector {
             }
             macro_expand::InvocationTarget::Std | macro_expand::InvocationTarget::Unresolved => {}
         }
+        // An expansion that was refused has said why. The generic "bodies were
+        // not analyzed" note for the same invocation would repeat it, and
+        // contradict it for a cause such as a limit, so it is left out.
+        let explained = self.macro_diagnostics.len() > diagnostics_before;
         if tokens.is_empty() {
             return;
         }
@@ -2873,7 +2878,9 @@ impl SourceCollector {
             }
             return;
         }
-        self.unanalyzed_macros.insert(format!("{path}!"));
+        if !explained {
+            self.unanalyzed_macros.insert(format!("{path}!"));
+        }
     }
 
     /// Emits the `macro` declaration for a `macro_rules!` definition the
@@ -17216,6 +17223,36 @@ impl Command {
             callees.contains("enum_glob::ping::Ping::apply"),
             "{callees:?}"
         );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_refused_expansion_is_reported_once_not_twice() {
+        // Every cause that refuses an expansion names itself; the generic
+        // "bodies were not analyzed" note for the same macro would repeat it.
+        let long = "a ".repeat(40);
+        let root = fixture_crate(
+            "macro-one-diagnostic",
+            &format!(
+                r#"
+macro_rules! ambiguous {{ ($($($t:tt)+)+ !) => {{}}; }}
+macro_rules! unmatched {{ (never) => {{}}; }}
+macro_rules! forever {{ ($t:tt) => {{ forever!($t) }}; }}
+ambiguous!({long});
+pub fn f() {{ unmatched!(other); let _ = forever!(x); }}
+"#
+            ),
+        );
+        let report = static_report(&root);
+        let messages = macro_diagnostics(&report);
+        for name in ["ambiguous!", "unmatched!", "forever!"] {
+            let about: Vec<&String> = messages
+                .iter()
+                .filter(|message| message.contains(name))
+                .collect();
+            assert_eq!(about.len(), 1, "one diagnostic for {name}: {messages:?}");
+            assert!(!about[0].contains("bodies were not analyzed"), "{about:?}");
+        }
         let _ = fs::remove_dir_all(&root);
     }
 
