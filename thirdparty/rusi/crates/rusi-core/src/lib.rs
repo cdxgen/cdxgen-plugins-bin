@@ -17211,9 +17211,20 @@ pub fn note() { event!("happened"); }
             callees_of_function(&report, "macro_zoo_app::extra")
                 .contains("macro_zoo_app::helper::enc")
         );
+        // Every workspace macro expands, so the only macro diagnostics left
+        // are the two notes about `hashmap!`, whose body is a mapping rather
+        // than Rust and is reported as the blind spot it is.
+        assert_eq!(
+            macro_diagnostics(&report).len(),
+            2,
+            "the zoo expands except for the maplit bodies: {:?}",
+            macro_diagnostics(&report)
+        );
         assert!(
-            macro_diagnostics(&report).is_empty(),
-            "the zoo expands without macro diagnostics: {:?}",
+            macro_diagnostics(&report)
+                .iter()
+                .all(|diagnostic| diagnostic.contains("hashmap! bodies were not analyzed")),
+            "the remaining notes are the maplit bodies: {:?}",
             macro_diagnostics(&report)
         );
         // `dbg!` is a standard-library macro even next to `#[macro_use]
