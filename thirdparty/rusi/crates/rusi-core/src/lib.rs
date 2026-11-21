@@ -1142,11 +1142,33 @@ fn analyze_on_this_thread(
         }
     }
 
+    // In compiler mode the compiler backend has expanded every macro of the
+    // files it analysed, so the stable backend's own blind spots there are
+    // not blind spots of the report: its notes about them would contradict
+    // the compiler evidence merged in below, and are left out for those
+    // files. A file the compiler run did not reach, for example one whose
+    // crate failed to compile, keeps its notes.
+    let compiler_covered_files: Option<HashSet<&str>> = compiler_payload.as_ref().map(|payload| {
+        payload
+            .files
+            .iter()
+            .map(|file| file.path.as_str())
+            .collect::<HashSet<_>>()
+    });
+    let file_is_compiler_covered = |file_path: &str| -> bool {
+        compiler_covered_files
+            .as_ref()
+            .is_some_and(|covered| covered.contains(file_path))
+    };
+
     // Report the macro bodies that could not be recovered as Rust, aggregated by
     // macro path: a consumer can then see exactly which blind spots this scan
     // has, instead of the evidence simply being absent.
     let mut unanalyzed_macros: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     for analyzed in &analyzed_files {
+        if file_is_compiler_covered(&analyzed.file.path) {
+            continue;
+        }
         for macro_path in &analyzed.unanalyzed_macros {
             unanalyzed_macros
                 .entry(macro_path.clone())
@@ -1171,6 +1193,9 @@ fn analyze_on_this_thread(
     }
 
     for analyzed in &analyzed_files {
+        if file_is_compiler_covered(&analyzed.file.path) {
+            continue;
+        }
         diagnostics.extend(analyzed.macro_diagnostics.iter().cloned());
     }
     let hygiene_renamed = analyzed_files
@@ -1262,7 +1287,12 @@ fn analyze_on_this_thread(
         merge_file_evidence(&mut report.files, payload.files);
         extend_unique_imports(&mut report.imports, payload.imports);
         merge_compiler_declarations(&mut report.declarations, payload.declarations);
+        drop_stable_macro_calls_the_compiler_recorded(&mut report.usages, &payload.usages);
         extend_unique_usages(&mut report.usages, payload.usages);
+        drop_stable_signals_the_compiler_raised(
+            &mut report.security_signals,
+            &payload.security_signals,
+        );
         extend_unique_security_signals(&mut report.security_signals, payload.security_signals);
         merge_crypto_evidence(&mut report.crypto, payload.crypto);
         report.call_graph = if options.call_graph_mode != "none" {
@@ -1332,7 +1362,12 @@ fn merge_file_evidence(target: &mut Vec<FileEvidence>, incoming: Vec<FileEvidenc
         if let Some(existing) = target.iter_mut().find(|entry| entry.path == file.path) {
             extend_unique_imports(&mut existing.imports, file.imports);
             merge_compiler_declarations(&mut existing.declarations, file.declarations);
+            drop_stable_macro_calls_the_compiler_recorded(&mut existing.usages, &file.usages);
             extend_unique_usages(&mut existing.usages, file.usages);
+            drop_stable_signals_the_compiler_raised(
+                &mut existing.security_signals,
+                &file.security_signals,
+            );
             extend_unique_security_signals(&mut existing.security_signals, file.security_signals);
             merge_crypto_evidence(&mut existing.crypto, file.crypto);
         } else {
@@ -1452,6 +1487,59 @@ fn merge_compiler_declarations(target: &mut Vec<Declaration>, incoming: Vec<Decl
             None => target.push(declaration),
         }
     }
+}
+
+/// The compiler backend records every dependency macro invocation it walked
+/// through as a `macro-call` usage at the call site the stable backend
+/// recorded it from. The two backends id evidence by different schemes, so
+/// the stable entry of an invocation the compiler also recorded is removed
+/// before the compiler's, which carries the expansion's origin, is added.
+fn drop_stable_macro_calls_the_compiler_recorded(
+    target: &mut Vec<LibraryUsage>,
+    compiler: &[LibraryUsage],
+) {
+    let site = |usage: &LibraryUsage| {
+        (
+            usage.name.clone(),
+            usage.position.filename.clone(),
+            usage.position.line,
+            usage.position.column,
+        )
+    };
+    let recorded: HashSet<_> = compiler
+        .iter()
+        .filter(|usage| usage.kind == "macro-call")
+        .map(site)
+        .collect();
+    if recorded.is_empty() {
+        return;
+    }
+    target.retain(|usage| !(usage.kind == "macro-call" && recorded.contains(&site(usage))));
+}
+
+/// The same unsafe block at one position arrives once from each backend
+/// under different ids. The compiler's entry is the richer one, carrying the
+/// expansion origin, so the stable entry of a signal the compiler also raised
+/// is removed before the compiler's is added. Signals only one backend raised
+/// are kept.
+fn drop_stable_signals_the_compiler_raised(
+    target: &mut Vec<SecuritySignal>,
+    compiler: &[SecuritySignal],
+) {
+    let site = |signal: &SecuritySignal| {
+        (
+            signal.category.clone(),
+            signal.description.clone(),
+            signal.file_path.clone(),
+            signal.position.line,
+            signal.position.column,
+        )
+    };
+    let raised: HashSet<_> = compiler.iter().map(site).collect();
+    if raised.is_empty() {
+        return;
+    }
+    target.retain(|signal| !raised.contains(&site(signal)));
 }
 
 fn extend_unique_usages(target: &mut Vec<LibraryUsage>, incoming: Vec<LibraryUsage>) {
@@ -13785,7 +13873,7 @@ mod tests {
 
     use rusi_schema::{
         CallGraph, CryptoComponent, CryptoEvidence, DataFlowPattern, DataFlowPatternSet,
-        Declaration, Diagnostic, FileEvidence, Position, SecuritySignal,
+        Declaration, Diagnostic, FileEvidence, LibraryUsage, Position, SecuritySignal,
     };
 
     use super::{
@@ -17131,9 +17219,20 @@ pub fn note() { event!("happened"); }
             callees_of_function(&report, "macro_zoo_app::extra")
                 .contains("macro_zoo_app::helper::enc")
         );
+        // Every workspace macro expands, so the only macro diagnostics left
+        // are the two notes about `hashmap!`, whose body is a mapping rather
+        // than Rust and is reported as the blind spot it is.
+        assert_eq!(
+            macro_diagnostics(&report).len(),
+            2,
+            "the zoo expands except for the maplit bodies: {:?}",
+            macro_diagnostics(&report)
+        );
         assert!(
-            macro_diagnostics(&report).is_empty(),
-            "the zoo expands without macro diagnostics: {:?}",
+            macro_diagnostics(&report)
+                .iter()
+                .all(|diagnostic| diagnostic.contains("hashmap! bodies were not analyzed")),
+            "the remaining notes are the maplit bodies: {:?}",
             macro_diagnostics(&report)
         );
         // `dbg!` is a standard-library macro even next to `#[macro_use]
@@ -18399,6 +18498,155 @@ pub fn total() -> usize {{ cnt!({long}) }}
         );
         assert!(report.call_graph.is_some());
         assert!(report.data_flow.is_some());
+    }
+
+    fn compiler_options_for(dir: PathBuf) -> AnalyzeOptionsInput {
+        AnalyzeOptionsInput {
+            include_dependencies: false,
+            max_call_candidates: crate::DEFAULT_MAX_CALL_CANDIDATES,
+            dir,
+            backend: BACKEND_COMPILER.to_string(),
+            analysis_scope: AnalysisScope::Default,
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "security".to_string(),
+            custom_data_flow_patterns: None,
+            include_tests: false,
+            debug: false,
+        }
+    }
+
+    #[test]
+    fn compiler_coverage_replaces_the_stable_macro_call_and_drops_its_note() {
+        // Stable analysis alone cannot recover `maplit::hashmap!`'s body: it
+        // records the `macro-call` usage and reports the body as unanalyzed.
+        // The compiler payload covers the same file and records the same
+        // call, so the report must carry one entry for it and no note about
+        // a blind spot the compiler filled.
+        let stable_only = analyze_with_optional_compiler(
+            compiler_options_for(fixture_path("macro-zoo-app")),
+            None,
+        )
+        .expect("stable analysis succeeds");
+        let stable_call = stable_only
+            .usages
+            .iter()
+            .find(|usage| usage.kind == "macro-call" && usage.name == "maplit::hashmap!")
+            .expect("stable records the hashmap! call")
+            .clone();
+        assert!(
+            stable_only.diagnostics.iter().any(|diagnostic| {
+                diagnostic
+                    .message
+                    .contains("maplit::hashmap! bodies were not analyzed")
+            }),
+            "stable analysis alone reports the body it could not recover"
+        );
+
+        let compiler_call = LibraryUsage {
+            // A different id scheme from the stable backend's, at the same
+            // call site: this is what makes ids alone insufficient to merge.
+            id: "usage-compiler-maplit".to_string(),
+            ..stable_call.clone()
+        };
+        let payload = CompilerBackendPayload {
+            files: vec![FileEvidence {
+                path: "src/lib.rs".to_string(),
+                package_name: "macro-zoo-app".to_string(),
+                package_path: "macro-zoo-app".to_string(),
+                purl: String::new(),
+                imports: Vec::new(),
+                declarations: Vec::new(),
+                usages: Vec::new(),
+                security_signals: Vec::new(),
+                crypto: None,
+            }],
+            usages: vec![compiler_call],
+            ..CompilerBackendPayload::default()
+        };
+        let merged = analyze_with_optional_compiler(
+            compiler_options_for(fixture_path("macro-zoo-app")),
+            Some(payload),
+        )
+        .expect("analysis succeeds");
+        assert!(
+            !merged
+                .diagnostics
+                .iter()
+                .any(|diagnostic| { diagnostic.message.contains("bodies were not analyzed") }),
+            "no note about bodies the compiler analysed"
+        );
+        let calls = merged
+            .usages
+            .iter()
+            .filter(|usage| {
+                usage.kind == "macro-call"
+                    && usage.name == "maplit::hashmap!"
+                    && usage.position.line == stable_call.position.line
+            })
+            .count();
+        assert_eq!(calls, 1, "one macro-call entry survives the merge");
+    }
+
+    #[test]
+    fn a_file_the_compiler_run_missed_keeps_its_macro_note() {
+        // A compiler payload whose files list is empty is a run that produced
+        // no evidence, for example one whose crate failed to compile. The
+        // stable note about the bodies the report does not hold stays.
+        let merged = analyze_with_optional_compiler(
+            compiler_options_for(fixture_path("macro-zoo-app")),
+            Some(CompilerBackendPayload::default()),
+        )
+        .expect("analysis succeeds");
+        assert!(
+            merged.diagnostics.iter().any(|diagnostic| {
+                diagnostic
+                    .message
+                    .contains("maplit::hashmap! bodies were not analyzed")
+            }),
+            "the note about an unreached file is kept"
+        );
+    }
+
+    #[test]
+    fn a_compiler_signal_replaces_the_stable_signal_at_one_position() {
+        // The two backends id the same unsafe block differently, so the
+        // merged report would otherwise carry the block twice.
+        let stable_only = analyze_with_optional_compiler(
+            compiler_options_for(fixture_path("macro-zoo-app")),
+            None,
+        )
+        .expect("stable analysis succeeds");
+        let hand_written = stable_only
+            .security_signals
+            .iter()
+            .find(|signal| {
+                signal.description == "unsafe block detected" && signal.expanded_from.is_none()
+            })
+            .expect("stable reports the hand-written unsafe block")
+            .clone();
+        let payload = CompilerBackendPayload {
+            security_signals: vec![SecuritySignal {
+                id: "signal-compiler-hand-written".to_string(),
+                ..hand_written.clone()
+            }],
+            ..CompilerBackendPayload::default()
+        };
+        let merged = analyze_with_optional_compiler(
+            compiler_options_for(fixture_path("macro-zoo-app")),
+            Some(payload),
+        )
+        .expect("analysis succeeds");
+        let at_position = merged
+            .security_signals
+            .iter()
+            .filter(|signal| {
+                signal.description == hand_written.description
+                    && signal.file_path == hand_written.file_path
+                    && signal.position.line == hand_written.position.line
+                    && signal.position.column == hand_written.position.column
+            })
+            .count();
+        assert_eq!(at_position, 1, "the block is reported once");
     }
 
     #[test]
