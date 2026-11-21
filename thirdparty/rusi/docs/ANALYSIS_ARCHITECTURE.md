@@ -248,7 +248,8 @@ code. Everything it produces is positioned at the invocation site and carries
 per-file expansion number, so two invocations of one macro never merge.
 
 Four bounds keep an expansion finite, each with its own `macro` diagnostic: a nesting
-depth of 64 expansions, a budget of one million transcribed tokens for everything one
+depth of 128 expansions (rustc's default, raised to the crate's
+`#![recursion_limit]` up to 256), a budget of one million transcribed tokens for everything one
 hand-written invocation produces (nested and sibling expansions together), 16,384
 iterations of one repetition, and a step budget of one million for the matcher. Source
 that nests groups more than 64 deep is not read. No input is meant to make the module

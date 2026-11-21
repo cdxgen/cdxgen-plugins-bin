@@ -34,12 +34,17 @@ pub(crate) use scope::{
 
 use proc_macro2::{TokenStream, TokenTree};
 
-/// How deeply nested workspace macro invocations are expanded. Every level
-/// costs a full parse and visitor pass, well beyond what rustc spends per
-/// level, so this is half of rustc's default `recursion_limit` (128). Real
-/// token-tree munchers end within a few dozen levels; a macro that recurses
-/// forever is stopped here and reported.
-pub(crate) const MAX_EXPANSION_DEPTH: usize = 64;
+/// How deeply nested workspace macro invocations are expanded unless the
+/// crate says otherwise: rustc's default `recursion_limit`. Token-tree
+/// munchers that count or fold a list use one level per token, so a lower
+/// value stops code that compiles. The token and step budgets, not this depth,
+/// bound the work.
+pub(crate) const DEFAULT_RECURSION_LIMIT: usize = 128;
+
+/// The most a crate's `#![recursion_limit]` can raise the depth to. The
+/// analysis thread has 16 MiB of stack, and 256 levels of nested expansion use
+/// a small fraction of it.
+pub(crate) const MAX_RECURSION_LIMIT: usize = 256;
 
 /// Ceiling on the tokens one hand-written invocation may produce, summed
 /// across every nested and sibling expansion. Depth alone does not bound a

@@ -58,6 +58,8 @@ pub(crate) struct MacroFilePrepass {
     pub(crate) macro_use_extern_crates: Vec<String>,
     /// `extern crate original as alias;`, as `(alias, original)`.
     pub(crate) extern_aliases: Vec<(String, String)>,
+    /// The value of a crate-level `#![recursion_limit = "N"]`.
+    pub(crate) recursion_limit: Option<usize>,
 }
 
 /// Reads one file's macro-relevant items. `module_path` is the module the
@@ -82,7 +84,29 @@ pub(crate) fn prepass_file(
         out: MacroFilePrepass::default(),
     };
     visitor.visit_file(&syntax);
+    visitor.out.recursion_limit = recursion_limit_of(&syntax.attrs);
     visitor.out
+}
+
+/// The `N` of `#![recursion_limit = "N"]`, when the attribute is present and
+/// reads as a number.
+fn recursion_limit_of(attrs: &[syn::Attribute]) -> Option<usize> {
+    attrs.iter().find_map(|attr| {
+        if !attr.path().is_ident("recursion_limit") {
+            return None;
+        }
+        let syn::Meta::NameValue(pair) = &attr.meta else {
+            return None;
+        };
+        let syn::Expr::Lit(syn::ExprLit {
+            lit: syn::Lit::Str(text),
+            ..
+        }) = &pair.value
+        else {
+            return None;
+        };
+        text.value().trim().parse().ok()
+    })
 }
 
 struct PrepassVisitor<'a> {
@@ -390,6 +414,8 @@ struct CrateMacros {
     uses: Vec<(String, PositionedUse)>,
     macro_use_extern_crates: Vec<String>,
     extern_aliases: HashMap<String, String>,
+    /// The largest `#![recursion_limit]` any file of the crate declares.
+    recursion_limit: Option<usize>,
 }
 
 /// The scope table built from the pre-pass.
@@ -549,6 +575,19 @@ impl MacroScopeTable {
             .get(&reference.crate_path)?
             .definitions
             .get(reference.index)
+    }
+
+    /// How many levels of nested expansion the crate allows. rustc stops at
+    /// 128 unless the crate raises `#![recursion_limit]`; a larger declared
+    /// value is honoured up to `MAX_RECURSION_LIMIT`, and a smaller one is
+    /// not applied because accepting more than rustc is the safe side.
+    pub(crate) fn recursion_limit(&self, crate_path: &str) -> usize {
+        let declared = self
+            .crates
+            .get(crate_path)
+            .and_then(|macros| macros.recursion_limit)
+            .unwrap_or(0);
+        declared.clamp(super::DEFAULT_RECURSION_LIMIT, super::MAX_RECURSION_LIMIT)
     }
 
     pub(crate) fn crate_name_of(&self, crate_path: &str) -> String {
@@ -861,6 +900,7 @@ impl CrateMacros {
             macros
                 .extern_aliases
                 .extend(prepass.extern_aliases.iter().cloned());
+            macros.recursion_limit = macros.recursion_limit.max(prepass.recursion_limit);
             macros
                 .definitions
                 .extend(prepass.definitions.iter().cloned());

@@ -2942,13 +2942,13 @@ impl SourceCollector {
     ) -> bool {
         let written_path = path_to_string(&mac.path);
         let crate_name = self.macro_table.crate_name_of(&reference.crate_path);
-        if self.expansion_stack.len() >= macro_expand::MAX_EXPANSION_DEPTH {
+        let depth_limit = self.macro_table.recursion_limit(&self.file_ctx.crate_path);
+        if self.expansion_stack.len() >= depth_limit {
             self.push_macro_diagnostic(
                 mac,
                 format!(
-                    "expansion of `{written_path}!` was stopped at the depth limit {}; nested \
-                     expansions beyond it are not in the report",
-                    macro_expand::MAX_EXPANSION_DEPTH
+                    "expansion of `{written_path}!` was stopped at the depth limit {depth_limit}; \
+                     nested expansions beyond it are not in the report"
                 ),
             );
             return false;
@@ -17254,6 +17254,80 @@ pub fn f() {{ unmatched!(other); let _ = forever!(x); }}
             assert!(!about[0].contains("bodies were not analyzed"), "{about:?}");
         }
         let _ = fs::remove_dir_all(&root);
+    }
+
+    const COUNTING_MUNCHER: &str = r#"
+macro_rules! cnt {
+    () => { 0usize };
+    ($head:tt $($rest:tt)*) => { 1usize + cnt!($($rest)*) };
+}
+"#;
+
+    #[test]
+    fn a_counting_muncher_over_a_long_list_expands_to_the_end() {
+        // One level per token: rustc's default recursion limit is 128, and a
+        // list of 100 tokens needs 101 levels.
+        let list = "a ".repeat(100);
+        let root = fixture_crate(
+            "macro-long-muncher",
+            &format!(
+                "{COUNTING_MUNCHER}
+pub fn total() -> usize {{ cnt!({list}) }}
+"
+            ),
+        );
+        let report = static_report(&root);
+        assert!(
+            macro_diagnostics(&report).is_empty(),
+            "{:?}",
+            macro_diagnostics(&report)
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_depth_limit_follows_the_crate_recursion_limit_up_to_a_ceiling() {
+        let long = "a ".repeat(200);
+        let without = fixture_crate(
+            "macro-depth-default",
+            &format!(
+                "{COUNTING_MUNCHER}
+pub fn total() -> usize {{ cnt!({long}) }}
+"
+            ),
+        );
+        let messages = macro_diagnostics(&static_report(&without));
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("depth limit 128")),
+            "{messages:?}"
+        );
+        let raised = fixture_crate(
+            "macro-depth-raised",
+            &format!(
+                "#![recursion_limit = \"256\"]\n{COUNTING_MUNCHER}\npub fn total() -> usize {{ cnt!({long}) }}\n"
+            ),
+        );
+        let raised_messages = macro_diagnostics(&static_report(&raised));
+        assert!(raised_messages.is_empty(), "{raised_messages:?}");
+        let absurd = fixture_crate(
+            "macro-depth-ceiling",
+            &format!(
+                "#![recursion_limit = \"100000\"]\n{COUNTING_MUNCHER}\npub fn total() -> usize {{ cnt!({}) }}\n",
+                "a ".repeat(400)
+            ),
+        );
+        let messages = macro_diagnostics(&static_report(&absurd));
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("depth limit 256")),
+            "{messages:?}"
+        );
+        for root in [without, raised, absurd] {
+            let _ = fs::remove_dir_all(&root);
+        }
     }
 
     #[test]
