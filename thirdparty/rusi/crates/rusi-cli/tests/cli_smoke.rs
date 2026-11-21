@@ -949,6 +949,19 @@ fn analyze_with_backend(fixture: &str, backend: &str) -> Result<Report> {
 }
 
 fn analyze_with_backend_at(dir: &std::path::Path, backend: &str) -> Result<Report> {
+    let output = run_analyze_at(dir, backend)?;
+    assert!(
+        output.status.success(),
+        "{}/{backend} cli stderr: {}",
+        dir.display(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Ok(serde_json::from_slice(&output.stdout)?)
+}
+
+/// Runs `rusi analyze` on `dir` with the toolchain the test environment pins,
+/// returning the process output whether or not the run succeeded.
+fn run_analyze_at(dir: &std::path::Path, backend: &str) -> Result<std::process::Output> {
     let binary = std::env::var("CARGO_BIN_EXE_rusi")?;
     let mut args = vec![
         "analyze".to_string(),
@@ -976,14 +989,7 @@ fn analyze_with_backend_at(dir: &std::path::Path, backend: &str) -> Result<Repor
         args.push("--toolchain".to_string());
         args.push(toolchain);
     }
-    let output = Command::new(&binary).args(&args).output()?;
-    assert!(
-        output.status.success(),
-        "{}/{backend} cli stderr: {}",
-        dir.display(),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    Ok(serde_json::from_slice(&output.stdout)?)
+    Ok(Command::new(&binary).args(&args).output()?)
 }
 
 /// True when the embedded rustc collector actually ran.
@@ -1289,15 +1295,27 @@ fn compiler_mode_names_dependency_macro_helpers_and_matches_stable_macro_calls()
         ("log::__private_api::log", "log::info!"),
         ("anyhow::__private::format_err", "anyhow::bail!"),
     ] {
-        let usage = compiler
+        // One helper serves several macros (`trace!`, `info!` and `warn!` all
+        // call `log::__private_api::log`), and report order is not part of
+        // the contract, so every helper call must name some macro and one of
+        // them must name this one.
+        let named: Vec<Option<&str>> = compiler
             .usages
             .iter()
-            .find(|usage| usage.name.ends_with(helper))
-            .unwrap_or_else(|| panic!("compiler report names the {helper} helper"));
-        assert_eq!(
-            usage.properties.get("viaMacro").map(String::as_str),
-            Some(macro_name),
-            "the {helper} helper names the macro that made it"
+            .filter(|usage| usage.name.ends_with(helper))
+            .map(|usage| usage.properties.get("viaMacro").map(String::as_str))
+            .collect();
+        assert!(
+            !named.is_empty(),
+            "compiler report names the {helper} helper"
+        );
+        assert!(
+            named.iter().all(Option::is_some),
+            "every {helper} call names the macro that made it: {named:?}"
+        );
+        assert!(
+            named.contains(&Some(macro_name)),
+            "a {helper} call names {macro_name}: {named:?}"
         );
     }
     // The negative case: a call written by hand, or one a workspace macro
@@ -1476,26 +1494,17 @@ fn compiler_mode_keeps_macro_note_when_the_compiler_run_fails() -> Result<()> {
     // A crate the compiler run fails on contributes no compiler evidence, so
     // the stable note about its macro bodies stays: the report's macro-level
     // blind spot is real there.
-    let binary = std::env::var("CARGO_BIN_EXE_rusi")?;
     let broken = copy_macro_zoo(
         "broken",
         "\nfn broken() {\n    let x: u32 = \"not a number\";\n}\n",
     )?;
 
-    let output = Command::new(&binary)
-        .args([
-            "analyze",
-            "--dir",
-            broken.to_string_lossy().as_ref(),
-            "--backend",
-            "compiler",
-            "--callgraph",
-            "static",
-            "--dataflow",
-            "none",
-        ])
-        .output()?;
+    // The pinned toolchain matters here as everywhere: without it `auto`
+    // picks a toolchain the CI leg did not install, and the run fails for that
+    // reason instead of the type error.
+    let output = run_analyze_at(&broken, "compiler");
     let _ = fs::remove_dir_all(&broken);
+    let output = output?;
     assert!(
         output.status.success(),
         "a failed compiler run is reported, not fatal: {}",
