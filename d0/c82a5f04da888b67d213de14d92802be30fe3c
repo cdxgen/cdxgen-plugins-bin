@@ -1,0 +1,19 @@
+thirdparty/rusi/crates/rusi-core/src/macro_expand/scope.rs
+  s_33b453a4a419f0::t_fdf5837b39f525 403-414,502,629-632,666
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d0c82a5f04da888b67d213de14d92802be30fe3c",
+  "prompts": {},
+  "sessions": {
+    "s_33b453a4a419f0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "106e5fb3-64f8-470a-81b6-58b72db4ce09",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
