@@ -24,8 +24,8 @@ use rusi_schema::{
     CallGraph, CallGraphEdge, CallGraphNode, CompilerEvidence, CryptoComponent, CryptoEvidence,
     CryptoFinding, CryptoLibrary, CryptoMaterial, DataFlowEdge, DataFlowEvidence,
     DataFlowMethodSummary, DataFlowNode, DataFlowPattern, DataFlowPatternSet, DataFlowSlice,
-    DataFlowStats, Declaration, Diagnostic, FileEvidence, GraphStats, ImportUsage, LibraryUsage,
-    Position, SecuritySignal, relative_display_path, stable_id,
+    DataFlowStats, Declaration, Diagnostic, ExpandedFrom, FileEvidence, GraphStats, ImportUsage,
+    LibraryUsage, Position, SecuritySignal, relative_display_path, stable_id,
 };
 use rustc_driver_impl::{Callbacks, Compilation};
 // `rustc_driver_impl::run_compiler` became `compiler_entrypoint` (same
@@ -54,6 +54,8 @@ use rustc_middle::mono::MonoItem;
 use rustc_middle::ty::print::with_crate_prefix;
 use rustc_middle::ty::{self, AssocContainer, Ty, TyCtxt};
 use rustc_span::{FileName, Span};
+
+mod macro_origin;
 
 // rustc_private shims. The wrapper builds against a window of compiler
 // versions (the pinned stable through current nightly), so these paper over
@@ -259,6 +261,7 @@ struct EmbeddedCollector {
     usages: Vec<LibraryUsage>,
     security_signals: Vec<SecuritySignal>,
     crypto: CryptoEvidence,
+    macro_calls: Vec<MacroCallRecord>,
     diagnostics: Vec<Diagnostic>,
     function_decls: HashMap<LocalDefId, Declaration>,
     function_ids: HashMap<LocalDefId, String>,
@@ -341,6 +344,7 @@ impl EmbeddedCollector {
             &self.functions,
             &self.hir_calls,
             &self.declarations,
+            &self.macro_calls,
             &mut call_graph_diagnostics,
         );
         let mut flow_diagnostics = Vec::new();
@@ -438,6 +442,14 @@ impl EmbeddedCollector {
                 ForeignItemKind::Type => "foreign-type",
             };
             let declaration = self.push_decl(tcx, item.owner_id.def_id, kind, None)?;
+            let SpanSite {
+                expanded_from,
+                from_foreign_expansion,
+                ..
+            } = span_site(tcx, &self.analysis_root, tcx.def_span(item.owner_id.def_id));
+            if from_foreign_expansion {
+                continue;
+            }
             self.push_security_signal(SecuritySignal {
                 cfg_gate: None,
                 properties: IndexMap::new(),
@@ -450,7 +462,7 @@ impl EmbeddedCollector {
                 purl: String::new(),
                 file_path: declaration.file_path.clone(),
                 position: declaration.position.clone(),
-                expanded_from: None,
+                expanded_from,
             });
         }
         for impl_item_id in items.impl_items() {
@@ -516,6 +528,7 @@ impl EmbeddedCollector {
                 hir_calls: &mut self.hir_calls,
                 usages: &mut self.usages,
                 security_signals: &mut self.security_signals,
+                macro_calls: &mut self.macro_calls,
                 files: &mut self.files,
                 crypto: &mut self.crypto,
                 function_ids: &self.function_ids,
@@ -565,10 +578,11 @@ impl EmbeddedCollector {
             };
             self.functions.push(MirFunction::from_mir(
                 tcx,
-                &self.package,
+                &self.package.clone(),
                 declaration,
                 body,
                 &resolutions,
+                &self.analysis_root,
             ));
         }
         Ok(())
@@ -930,6 +944,8 @@ impl EmbeddedCollector {
         let SpanSite {
             file_path,
             position,
+            expanded_from,
+            from_foreign_expansion,
             ..
         } = span_site(tcx, &self.analysis_root, tcx.def_span(def_id));
         let name = tcx
@@ -950,7 +966,7 @@ impl EmbeddedCollector {
             signature: declaration_signature(tcx, def_id),
             receiver,
             position,
-            expanded_from: None,
+            expanded_from,
         };
         if !self
             .declarations
@@ -967,7 +983,7 @@ impl EmbeddedCollector {
         {
             file.declarations.push(declaration.clone());
         }
-        if kind == "unsafe-function" || kind == "unsafe-method" {
+        if (kind == "unsafe-function" || kind == "unsafe-method") && !from_foreign_expansion {
             self.push_security_signal(SecuritySignal {
                 cfg_gate: None,
                 properties: IndexMap::new(),
@@ -980,7 +996,7 @@ impl EmbeddedCollector {
                 purl: String::new(),
                 file_path: declaration.file_path.clone(),
                 position: declaration.position.clone(),
-                expanded_from: None,
+                expanded_from: declaration.expanded_from.clone(),
             });
         }
         Ok(declaration)
@@ -1033,6 +1049,7 @@ struct BodyVisitor<'tcx, 'a> {
     hir_calls: &'a mut Vec<HirCallRecord>,
     usages: &'a mut Vec<LibraryUsage>,
     security_signals: &'a mut Vec<SecuritySignal>,
+    macro_calls: &'a mut Vec<MacroCallRecord>,
     files: &'a mut BTreeMap<String, FileEvidence>,
     crypto: &'a mut CryptoEvidence,
     function_ids: &'a HashMap<LocalDefId, String>,
@@ -1058,6 +1075,25 @@ struct HirCallRecord {
     file_path: String,
     position: Position,
     resolved: ResolvedCall,
+    /// The outermost workspace macro whose expansion holds this call.
+    expanded_from: Option<ExpandedFrom>,
+    /// The dependency bang macro whose expansion made this call, named the
+    /// way the stable backend names a macro call (`log::info!`).
+    via_macro: Option<String>,
+}
+
+/// A dependency macro invocation the compiler walked through: the
+/// `macro-call` usage the stable backend also records, once per call site,
+/// and the facts of the `macro` call-graph edge built for it.
+#[derive(Debug, Clone)]
+struct MacroCallRecord {
+    /// Declaration id of the function the invocation sits in.
+    caller_decl_id: String,
+    /// The macro's path without the trailing `!`, which names the synthetic
+    /// external target node.
+    macro_path: String,
+    position: Position,
+    expanded_from: Option<ExpandedFrom>,
 }
 
 impl<'tcx> Visitor<'tcx> for BodyVisitor<'tcx, '_> {
@@ -1198,6 +1234,9 @@ impl<'tcx> BodyVisitor<'tcx, '_> {
             file_path,
             position,
             key,
+            expanded_from,
+            via_macro,
+            ..
         } = self.site(span);
         let mut properties = IndexMap::new();
         properties.insert("callType".to_string(), resolved.call_type.clone());
@@ -1237,6 +1276,11 @@ impl<'tcx> BodyVisitor<'tcx, '_> {
         if resolved.task_boundary {
             properties.insert("taskBoundary".to_string(), "true".to_string());
         }
+        // The call itself is the dependency macro's expansion; name the macro
+        // so the helper it reaches stays linked to the call the user wrote.
+        if let Some(via_macro) = &via_macro {
+            properties.insert("viaMacro".to_string(), via_macro.clone());
+        }
         let usage = LibraryUsage {
             id: stable_id(
                 "usage",
@@ -1249,7 +1293,7 @@ impl<'tcx> BodyVisitor<'tcx, '_> {
             enclosing_declaration: Some(self.caller_decl.id.clone()),
             position: position.clone(),
             properties: properties.clone(),
-            expanded_from: None,
+            expanded_from: expanded_from.clone(),
         };
         if !self.usages.iter().any(|existing| existing.id == usage.id) {
             self.usages.push(usage.clone());
@@ -1257,6 +1301,37 @@ impl<'tcx> BodyVisitor<'tcx, '_> {
         let file = self.file_entry(&file_path);
         if !file.usages.iter().any(|existing| existing.id == usage.id) {
             file.usages.push(usage);
+        }
+        // Every call of one expansion shares the invocation's call site, so
+        // this id is the same for all of them and the invocation is recorded
+        // once.
+        if let Some(via_macro) = &via_macro {
+            let macro_name = via_macro.clone();
+            let macro_usage_id =
+                stable_id("usage", &[&file_path, "macro-call", &macro_name, &key]);
+            if !self
+                .usages
+                .iter()
+                .any(|existing| existing.id == macro_usage_id)
+            {
+                self.usages.push(LibraryUsage {
+                    id: macro_usage_id,
+                    kind: "macro-call".to_string(),
+                    name: macro_name.clone(),
+                    package_path: self.package.to_string(),
+                    purl: String::new(),
+                    enclosing_declaration: Some(self.caller_decl.id.clone()),
+                    position: position.clone(),
+                    properties: IndexMap::new(),
+                    expanded_from: expanded_from.clone(),
+                });
+                self.macro_calls.push(MacroCallRecord {
+                    caller_decl_id: self.caller_decl.id.clone(),
+                    macro_path: macro_name.trim_end_matches('!').to_string(),
+                    position: position.clone(),
+                    expanded_from: expanded_from.clone(),
+                });
+            }
         }
         if let Some((call_span, callee)) = callsite {
             self.callsites
@@ -1268,6 +1343,8 @@ impl<'tcx> BodyVisitor<'tcx, '_> {
             file_path: file_path.clone(),
             position: position.clone(),
             resolved: resolved.clone(),
+            expanded_from: expanded_from.clone(),
+            via_macro: via_macro.clone(),
         });
         if let Some(rule) = classify_crypto_symbol(&resolved.callee_display) {
             self.push_crypto_component(span, &rule);
@@ -1289,7 +1366,16 @@ impl<'tcx> BodyVisitor<'tcx, '_> {
             file_path,
             position,
             key,
+            expanded_from,
+            from_foreign_expansion,
+            ..
         } = self.site(span);
+        // The code the span names was produced by macro expansions, and every
+        // macro in its backtrace is defined outside the workspace: the signal
+        // is the dependency's, and the user's code did not contain it.
+        if from_foreign_expansion {
+            return;
+        }
         let signal = SecuritySignal {
             cfg_gate: None,
             properties: IndexMap::new(),
@@ -1302,7 +1388,7 @@ impl<'tcx> BodyVisitor<'tcx, '_> {
             purl: String::new(),
             file_path: file_path.clone(),
             position,
-            expanded_from: None,
+            expanded_from,
         };
         if !self
             .security_signals
@@ -1326,6 +1412,7 @@ impl<'tcx> BodyVisitor<'tcx, '_> {
             file_path,
             position,
             key,
+            ..
         } = self.site(span);
         let library = CryptoLibrary {
             id: stable_id("crypto-library", &[rule.provider, &file_path]),
@@ -1435,6 +1522,7 @@ impl<'tcx> BodyVisitor<'tcx, '_> {
             file_path,
             position,
             key,
+            ..
         } = self.site(span);
         let material = CryptoMaterial {
             id: stable_id("crypto-material", &[kind, name, &file_path, &key]),
@@ -1556,6 +1644,7 @@ struct MirFunction {
     package_path: String,
     file_path: String,
     position: Position,
+    expanded_from: Option<ExpandedFrom>,
     param_names: Vec<String>,
     param_types: Vec<String>,
     return_type: String,
@@ -1582,6 +1671,7 @@ impl MirFunction {
         declaration: Declaration,
         body: &MirBody<'tcx>,
         resolutions: &CallResolutions<'_>,
+        analysis_root: &Path,
     ) -> Self {
         let debug_names = debug_local_names(body);
         let param_names = (1..=body.arg_count)
@@ -1598,7 +1688,17 @@ impl MirFunction {
         let blocks = body
             .basic_blocks
             .iter_enumerated()
-            .map(|(bb, data)| MirBlock::from_block(tcx, body, &debug_names, bb, data, resolutions))
+            .map(|(bb, data)| {
+                MirBlock::from_block(
+                    tcx,
+                    body,
+                    &debug_names,
+                    bb,
+                    data,
+                    resolutions,
+                    analysis_root,
+                )
+            })
             .collect::<Vec<_>>();
         Self {
             id: declaration.id.clone(),
@@ -1608,6 +1708,7 @@ impl MirFunction {
             package_path: package.to_string(),
             file_path: declaration.file_path,
             position: declaration.position,
+            expanded_from: declaration.expanded_from,
             param_names,
             param_types,
             return_type: body.local_decls[mir::RETURN_PLACE].ty.to_string(),
@@ -1632,6 +1733,7 @@ impl MirBlock {
         bb: BasicBlock,
         data: &mir::BasicBlockData<'tcx>,
         resolutions: &CallResolutions<'_>,
+        analysis_root: &Path,
     ) -> Self {
         let mut ops = Vec::new();
         for statement in &data.statements {
@@ -1747,6 +1849,11 @@ impl MirBlock {
                         resolved.target_names = vec![def_path(tcx, target.to_def_id())];
                         resolved.dispatch_confidence = "high".to_string();
                     }
+                    // The macro the call came from, if any: a call inside a
+                    // dependency's expansion names it via `viaMacro`, and a
+                    // call inside a workspace macro's expansion carries the
+                    // macro as its origin.
+                    let origin = macro_origin::expansion_origin(tcx, analysis_root, *fn_span);
                     ops.push(MirOp::Call(Box::new(MirCall {
                         dest: place_to_path(debug_names, *destination),
                         dest_type: Some(body.local_decls[destination.local].ty.to_string()),
@@ -1764,6 +1871,8 @@ impl MirBlock {
                         task_boundary: resolved.task_boundary,
                         native_symbol: resolved.native_symbol,
                         operand_display: unresolved_display,
+                        expanded_from: origin.expanded_from,
+                        via_macro: origin.via_macro,
                         args: args
                             .iter()
                             .map(|arg| CallArg::from_operand(body, debug_names, arg.node.clone()))
@@ -1949,6 +2058,11 @@ struct MirCall {
     /// typeck's name whenever the call has a HIR resolution, and a model may
     /// name either.
     operand_display: String,
+    /// The outermost workspace macro whose expansion holds this call.
+    expanded_from: Option<ExpandedFrom>,
+    /// The dependency bang macro whose expansion made this call, named the
+    /// way the stable backend names a macro call (`log::info!`).
+    via_macro: Option<String>,
     args: Vec<CallArg>,
 }
 
@@ -2558,6 +2672,7 @@ fn build_call_graph(
     functions: &[MirFunction],
     hir_calls: &[HirCallRecord],
     declarations: &[Declaration],
+    macro_calls: &[MacroCallRecord],
     diagnostics: &mut Vec<Diagnostic>,
 ) -> CallGraph {
     let mut nodes = IndexMap::<String, CallGraphNode>::new();
@@ -2685,6 +2800,9 @@ fn build_call_graph(
                     if call.task_boundary {
                         properties.insert("taskBoundary".to_string(), "true".to_string());
                     }
+                    if let Some(via_macro) = &call.via_macro {
+                        properties.insert("viaMacro".to_string(), via_macro.clone());
+                    }
                     let edge_id = stable_id(
                         "cg-edge",
                         &[&function.id, &target_id, &block.label, &call.call_type],
@@ -2706,7 +2824,7 @@ fn build_call_graph(
                             dispatch_trait: call.dispatch_trait.clone(),
                             properties,
                             target_purl: String::new(),
-                            expanded_from: None,
+                            expanded_from: call.expanded_from.clone(),
                         });
                 }
             }
@@ -2839,6 +2957,9 @@ fn build_call_graph(
             if call.resolved.task_boundary {
                 properties.insert("taskBoundary".to_string(), "true".to_string());
             }
+            if let Some(via_macro) = &call.via_macro {
+                properties.insert("viaMacro".to_string(), via_macro.clone());
+            }
             let edge_id = stable_id(
                 "cg-edge",
                 &[
@@ -2874,9 +2995,60 @@ fn build_call_graph(
                     dispatch_trait: call.resolved.dispatch_trait.clone(),
                     properties,
                     target_purl: String::new(),
-                    expanded_from: None,
+                    expanded_from: call.expanded_from.clone(),
                 });
         }
+    }
+    // A dependency macro invocation the visitor walked through: the same
+    // `macro` edge the stable backend emits, one per call site, whose target
+    // names the macro rather than the helper its expansion calls.
+    for macro_call in macro_calls {
+        let target_id = stable_id("cg-node", &["external", &macro_call.macro_path]);
+        nodes
+            .entry(target_id.clone())
+            .or_insert_with(|| CallGraphNode {
+                id: target_id.clone(),
+                name: last_segment(&macro_call.macro_path).to_string(),
+                qualified_name: macro_call.macro_path.clone(),
+                canonical_name: rusi_schema::canonical_name(&macro_call.macro_path),
+                kind: "external-function".to_string(),
+                package_path: inferred_package_path(&macro_call.macro_path),
+                purl: String::new(),
+                file_path: String::new(),
+                local: false,
+                external: true,
+                receiver: None,
+                position: macro_call.position.clone(),
+            });
+        let edge_id = stable_id(
+            "cg-edge",
+            &[
+                &macro_call.caller_decl_id,
+                &target_id,
+                &macro_call.position.line.to_string(),
+                &macro_call.position.column.to_string(),
+                "macro",
+            ],
+        );
+        edges
+            .entry(edge_id.clone())
+            .or_insert_with(|| CallGraphEdge {
+                id: edge_id,
+                source_id: macro_call.caller_decl_id.clone(),
+                target_id,
+                call_type: "macro".to_string(),
+                line: macro_call.position.line,
+                column: macro_call.position.column,
+                callee_text: Some(macro_call.macro_path.clone()),
+                receiver: None,
+                method: None,
+                candidate_count: None,
+                emitted_candidate_count: None,
+                dispatch_trait: None,
+                properties: IndexMap::new(),
+                target_purl: String::new(),
+                expanded_from: macro_call.expanded_from.clone(),
+            });
     }
     let mut nodes = nodes.into_values().collect::<Vec<_>>();
     // Edges name their endpoints by node id, so reconciliation needs the node
@@ -3955,7 +4127,7 @@ impl<'a> DataFlowBuilder<'a> {
                                             parameter_index: Some(idx),
                                             type_name: None,
                                             properties: IndexMap::new(),
-                                            expanded_from: None,
+                                            expanded_from: function.expanded_from.clone(),
                                         };
                                         if let Some(last_step) = path.steps.last() {
                                             let edge_id = stable_id(
@@ -4124,7 +4296,7 @@ impl<'a> DataFlowBuilder<'a> {
                 parameter_index,
                 type_name: type_name.clone(),
                 properties,
-                expanded_from: None,
+                expanded_from: function.expanded_from.clone(),
             }
         };
         let node = match self.nodes.get(&node_id) {
@@ -4222,7 +4394,7 @@ impl<'a> DataFlowBuilder<'a> {
             parameter_index: Some(parameter_index),
             type_name: sink_type.clone(),
             properties,
-            expanded_from: None,
+            expanded_from: function.expanded_from.clone(),
         };
 
         for path in &taint.paths {
@@ -4515,7 +4687,7 @@ fn apply_assign_concrete(function: &MirFunction, assign: &AssignAction, state: &
             parameter_index: None,
             type_name: None,
             properties: IndexMap::new(),
-            expanded_from: None,
+            expanded_from: function.expanded_from.clone(),
         };
         for path in &mut taint.paths {
             if let Some(last_step) = path.steps.last() {
@@ -4580,7 +4752,7 @@ fn apply_assign_concrete(function: &MirFunction, assign: &AssignAction, state: &
                 parameter_index: None,
                 type_name: None,
                 properties: IndexMap::new(),
-                expanded_from: None,
+                expanded_from: function.expanded_from.clone(),
             };
             for path in &mut field_taint.paths {
                 if let Some(last_step) = path.steps.last() {
@@ -7898,9 +8070,20 @@ struct SpanSite {
     /// File, line and start and end columns, the part of an evidence id that
     /// tells apart two findings in one file.
     key: String,
+    /// The outermost workspace macro whose expansion produced the span, when
+    /// one is in the span's backtrace. Position and key stay at the call
+    /// site, so evidence ids are unchanged by it.
+    expanded_from: Option<ExpandedFrom>,
+    /// The dependency bang macro whose expansion produced the span, named the
+    /// way the stable backend names a macro call (`log::info!`).
+    via_macro: Option<String>,
+    /// The span was produced by macro expansions and no workspace macro is
+    /// among them: the code is a dependency's, not the user's.
+    from_foreign_expansion: bool,
 }
 
 fn span_site(tcx: TyCtxt<'_>, root: &Path, span: Span) -> SpanSite {
+    let origin = macro_origin::expansion_origin(tcx, root, span);
     let callsite = span.source_callsite();
     let source_map = tcx.sess.source_map();
     let lo = source_map.lookup_char_pos(callsite.lo());
@@ -7930,6 +8113,9 @@ fn span_site(tcx: TyCtxt<'_>, root: &Path, span: Span) -> SpanSite {
             column: lo.col_display + 1,
         },
         key,
+        expanded_from: origin.expanded_from,
+        via_macro: origin.via_macro,
+        from_foreign_expansion: origin.from_foreign_expansion_only,
     }
 }
 
@@ -8148,6 +8334,7 @@ mod tests {
             package_path: "probe".to_string(),
             file_path: "src/main.rs".to_string(),
             position: Position::default(),
+            expanded_from: None,
             param_names: params.iter().map(|param| param.to_string()).collect(),
             param_types: params
                 .iter()

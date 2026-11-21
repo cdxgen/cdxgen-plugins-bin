@@ -1262,6 +1262,34 @@ fn analyze_on_this_thread(
         merge_file_evidence(&mut report.files, payload.files);
         extend_unique_imports(&mut report.imports, payload.imports);
         merge_compiler_declarations(&mut report.declarations, payload.declarations);
+        // The compiler backend records every dependency macro invocation it
+        // walked through as a `macro-call` usage at the same call site the
+        // stable backend recorded it from, so the stable entry of an
+        // invocation the compiler also saw is replaced by the compiler's,
+        // which carries the expansion's origin. Both name the macro the
+        // invoking line wrote, at the same file and position.
+        let compiler_macro_calls: HashSet<(&str, &str, usize, usize)> = payload
+            .usages
+            .iter()
+            .filter(|usage| usage.kind == "macro-call")
+            .map(|usage| {
+                (
+                    usage.name.as_str(),
+                    usage.position.filename.as_str(),
+                    usage.position.line,
+                    usage.position.column,
+                )
+            })
+            .collect();
+        report.usages.retain(|usage| {
+            !(usage.kind == "macro-call"
+                && compiler_macro_calls.contains(&(
+                    usage.name.as_str(),
+                    usage.position.filename.as_str(),
+                    usage.position.line,
+                    usage.position.column,
+                )))
+        });
         extend_unique_usages(&mut report.usages, payload.usages);
         extend_unique_security_signals(&mut report.security_signals, payload.security_signals);
         merge_crypto_evidence(&mut report.crypto, payload.crypto);
