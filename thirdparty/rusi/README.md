@@ -27,6 +27,8 @@ cargo run -p rusi-cli -- analyze --dir . --dataflow security --dataflow-out data
 cargo run -p rusi-cli -- cryptos --dir . --callgraph static --dataflow security --out rusi-cryptos.json
 cargo run -p rusi-cli -- analyze --dir . --callgraph none --dataflow none --out rusi-structure.json
 cargo run -p rusi-cli -- analyze --dir . --pretty --out rusi-pretty.json   # indented JSON (default is minified)
+cargo run -p rusi-cli -- analyze --dir crates-a --dir crates-b --out rusi.json   # several crates, one report; paths relative to their common parent
+cargo run -p rusi-cli -- analyze --dir /path/to/repo --discover --exclude 'test/**' --exclude 'docs/**' --out rusi.json   # every crate or workspace below the root
 cargo run -p rusi-cli -- analyze --dir . --max-call-candidates 0 --out rusi-full-callgraph.json   # no fan-out cap
 cargo run -p rusi-cli -- analyze --dir . --deps --out rusi-deps.json                              # also analyze dependency crates
 cargo run -p rusi-cli -- analyze --dir . --deps --dataflow security-deps --out rusi-deps-taint.json  # + dependency bodies, for taint through a dependency

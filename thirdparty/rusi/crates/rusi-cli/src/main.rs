@@ -4,6 +4,9 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
+use rusi_core::multi::{
+    CrateReport, common_root, discover_crate_dirs, merge_reports, root_relative_prefix,
+};
 use rusi_core::{
     AnalysisScope, AnalyzeOptionsInput, BACKEND_COMPILER, BACKEND_STABLE, analyze,
     analyze_with_optional_compiler,
@@ -32,8 +35,29 @@ enum Command {
 
 #[derive(Debug, Clone, Args)]
 struct AnalysisArgs {
-    #[arg(long, default_value = ".")]
-    dir: PathBuf,
+    #[arg(
+        long,
+        default_value = ".",
+        help = "Crate or workspace directory to analyze. Repeat the option to analyze several in one report; every path in that report is relative to --root"
+    )]
+    dir: Vec<PathBuf>,
+    #[arg(
+        long,
+        help = "Directory that file paths in the report are relative to. Defaults to the one --dir given, or to the deepest directory containing all of them"
+    )]
+    root: Option<PathBuf>,
+    #[arg(
+        long,
+        default_value_t = false,
+        help = "Treat each --dir as a root and analyze every crate or workspace below it (a directory with a Cargo.toml is one unit; target/ and .git are skipped). The report root is the --dir given unless --root is set"
+    )]
+    discover: bool,
+    #[arg(
+        long,
+        requires = "discover",
+        help = "With --discover, skip directories whose path relative to the root matches this glob (anchored at the root; * stays in one segment, ** spans segments). Repeatable"
+    )]
+    exclude: Vec<String>,
     #[arg(long, default_value = BACKEND_STABLE, value_parser = [BACKEND_STABLE, BACKEND_COMPILER])]
     backend: String,
     #[arg(long, default_value = "auto")]
@@ -122,26 +146,10 @@ fn run_analysis_command(args: AnalysisArgs, scope: AnalysisScope) -> Result<()> 
         );
     }
 
-    let mut options = AnalyzeOptionsInput {
-        dir: args.dir,
-        backend: args.backend.clone(),
-        analysis_scope: AnalysisScope::Default,
-        call_graph_mode: args.callgraph,
-        data_flow_mode: args.dataflow,
-        custom_data_flow_patterns: None,
-        include_tests: args.tests,
-        debug: args.debug,
-        max_call_candidates: args.max_call_candidates,
-        include_dependencies: args.deps,
-    };
-    apply_modeling(&mut options, scope, &args.modeling)?;
-    let report = if options.backend == BACKEND_COMPILER {
-        let mut driver_options = DriverOptions::from_analyze_options(&options);
-        driver_options.rustc_toolchain = args.toolchain;
-        let envelope = run_driver(&driver_options)?;
-        analyze_with_optional_compiler(options, Some(envelope.into_compiler_payload()))?
+    let report = if args.dir.len() == 1 && !args.discover && args.root.is_none() {
+        analyze_directory(&args, args.dir[0].clone(), scope)?
     } else {
-        analyze(options)?
+        analyze_directories(&args, scope)?
     };
 
     if let Some(path) = args.callgraph_out.as_ref() {
@@ -160,6 +168,67 @@ fn run_analysis_command(args: AnalysisArgs, scope: AnalysisScope) -> Result<()> 
     }
 
     write_report_json(&report, args.out.as_deref(), args.pretty)
+}
+
+/// Analyze one crate or workspace directory.
+fn analyze_directory(args: &AnalysisArgs, dir: PathBuf, scope: AnalysisScope) -> Result<Report> {
+    let mut options = AnalyzeOptionsInput {
+        dir,
+        backend: args.backend.clone(),
+        analysis_scope: AnalysisScope::Default,
+        call_graph_mode: args.callgraph.clone(),
+        data_flow_mode: args.dataflow.clone(),
+        custom_data_flow_patterns: None,
+        include_tests: args.tests,
+        debug: args.debug,
+        max_call_candidates: args.max_call_candidates,
+        include_dependencies: args.deps,
+    };
+    apply_modeling(&mut options, scope, &args.modeling)?;
+    if options.backend == BACKEND_COMPILER {
+        let mut driver_options = DriverOptions::from_analyze_options(&options);
+        driver_options.rustc_toolchain = args.toolchain.clone();
+        let envelope = run_driver(&driver_options)?;
+        analyze_with_optional_compiler(options, Some(envelope.into_compiler_payload()))
+    } else {
+        analyze(options)
+    }
+}
+
+/// Analyze several directories and merge them into one report relative to a
+/// single root.
+fn analyze_directories(args: &AnalysisArgs, scope: AnalysisScope) -> Result<Report> {
+    let mut dirs = Vec::new();
+    let mut roots = Vec::new();
+    for dir in &args.dir {
+        let canonical = fs::canonicalize(dir)
+            .with_context(|| format!("failed to resolve {}", dir.display()))?;
+        if args.discover {
+            let found = discover_crate_dirs(&canonical, &args.exclude)?;
+            if found.is_empty() {
+                anyhow::bail!("no Cargo.toml found below {}", canonical.display());
+            }
+            dirs.extend(found);
+        } else {
+            dirs.push(canonical.clone());
+        }
+        roots.push(canonical);
+    }
+    dirs.sort();
+    dirs.dedup();
+    let root = match args.root.as_ref() {
+        Some(root) => fs::canonicalize(root)
+            .with_context(|| format!("failed to resolve {}", root.display()))?,
+        None if args.discover && roots.len() == 1 => roots.remove(0),
+        None => common_root(&dirs).context("no directory to analyze")?,
+    };
+    let mut parts = Vec::new();
+    for dir in dirs {
+        let prefix = root_relative_prefix(&root, &dir)?;
+        let report = analyze_directory(args, dir, scope)?;
+        parts.push(CrateReport { prefix, report });
+    }
+    merge_reports(&root, parts)
 }
 
 /// Serialize the report straight into the destination writer instead of
@@ -278,7 +347,10 @@ mod tests {
             AnalysisArgs {
                 deps: false,
                 max_call_candidates: rusi_core::DEFAULT_MAX_CALL_CANDIDATES,
-                dir: fixture_path("basic-app"),
+                dir: vec![fixture_path("basic-app")],
+                root: None,
+                discover: false,
+                exclude: Vec::new(),
                 backend: "compiler".to_string(),
                 toolchain: "auto".to_string(),
                 format: "json".to_string(),
@@ -328,7 +400,10 @@ mod tests {
             AnalysisArgs {
                 deps: false,
                 max_call_candidates: rusi_core::DEFAULT_MAX_CALL_CANDIDATES,
-                dir: fixture_path("basic-app"),
+                dir: vec![fixture_path("basic-app")],
+                root: None,
+                discover: false,
+                exclude: Vec::new(),
                 backend: "stable".to_string(),
                 toolchain: "auto".to_string(),
                 format: "json".to_string(),
