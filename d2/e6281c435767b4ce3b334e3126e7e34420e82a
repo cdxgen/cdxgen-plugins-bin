@@ -1,0 +1,43 @@
+thirdparty/rusi/README.md
+  s_91734a5ab3e2d9::t_5035a9a6abd15c 30-31
+thirdparty/rusi/crates/rusi-cli/src/main.rs
+  s_91734a5ab3e2d9::t_21ee0f3416704e 7-9,38-60,149-150,152,173-233,350-353,403-406
+thirdparty/rusi/crates/rusi-cli/tests/cli_smoke.rs
+  s_91734a5ab3e2d9::t_1441d4a816eed5 1529-1796
+thirdparty/rusi/crates/rusi-core/src/lib.rs
+  s_91734a5ab3e2d9::t_8ffb1c6098427d 40
+thirdparty/rusi/crates/rusi-core/src/multi.rs
+  s_91734a5ab3e2d9::t_30ad42ce15bc8a 1-496
+thirdparty/rusi/fixtures/multi-crate-root/alpha/Cargo.lock
+  s_91734a5ab3e2d9::t_24a02b0631a1ac 1-7
+thirdparty/rusi/fixtures/multi-crate-root/alpha/Cargo.toml
+  s_91734a5ab3e2d9::t_c8af9906c3b502 1-8
+thirdparty/rusi/fixtures/multi-crate-root/alpha/src/main.rs
+  s_91734a5ab3e2d9::t_8b71127592f789 1-13
+thirdparty/rusi/fixtures/multi-crate-root/beta/Cargo.lock
+  s_91734a5ab3e2d9::t_39411740653291 1-7
+thirdparty/rusi/fixtures/multi-crate-root/beta/Cargo.toml
+  s_91734a5ab3e2d9::t_e4e3e40e708d7c 1-8
+thirdparty/rusi/fixtures/multi-crate-root/beta/src/main.rs
+  s_91734a5ab3e2d9::t_f81b875e1bc05d 1-13
+thirdparty/rusi/fixtures/multi-crate-root/skipped/Cargo.toml
+  s_91734a5ab3e2d9::t_a1da4a2a3589e5 1-8
+thirdparty/rusi/fixtures/multi-crate-root/skipped/src/main.rs
+  s_91734a5ab3e2d9::t_f73882010a6740 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d2e6281c435767b4ce3b334e3126e7e34420e82a",
+  "prompts": {},
+  "sessions": {
+    "s_91734a5ab3e2d9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "02994b15-7315-4472-b3a5-d9ba54fdc77d",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
