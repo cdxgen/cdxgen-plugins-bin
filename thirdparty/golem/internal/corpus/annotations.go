@@ -97,9 +97,9 @@ type Annotation struct {
 	// report must carry. Category names pass the same known-category check
 	// the flow kinds have, so a negative signal expectation cannot be
 	// satisfied vacuously by a category golem never emits.
-	Category    string // signal: the security-signal category
-	WantLine    int    // signal: the line the signal's range must start on (0 = any)
-	Confidence  string // signal: required confidence ("textual", "high", ...)
+	Category   string // signal: the security-signal category
+	WantLine   int    // signal: the line the signal's range must start on (0 = any)
+	Confidence string // signal: required confidence ("textual", "high", ...)
 	// CgoMode scopes an expectation to one cgo mode: "textual" for a
 	// CGO_ENABLED=0 load, "compiled" for CGO_ENABLED=1. Empty means every
 	// mode. The cgo pointer-check findings differ by mode by design, which is

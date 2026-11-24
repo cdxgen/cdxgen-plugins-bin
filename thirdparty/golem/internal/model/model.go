@@ -822,12 +822,12 @@ type CgoEvidence struct {
 	// analysis found cgo checks with no type information, after arguments
 	// rooted in C-owned memory were excluded. The findings themselves are
 	// SecuritySignals with the cgo-pointer-check-untyped category.
-	UntypedPointerCheckCount int              `json:"untypedPointerCheckCount,omitempty"`
+	UntypedPointerCheckCount int `json:"untypedPointerCheckCount,omitempty"`
 	// UnpinnedReachableCount counts the C call arguments whose pointed-to type
 	// is recursive or deeper than the two levels cgo's check reaches, where the
 	// enclosing function did not pin the values. Signals carry the
 	// cgo-unpinned-reachable category.
-	UnpinnedReachableCount int              `json:"unpinnedReachableCount,omitempty"`
+	UnpinnedReachableCount int `json:"unpinnedReachableCount,omitempty"`
 	// CallSites are the per-call-site pointer-check records, ordered by
 	// position. They carry the argument shapes and memory owners for every C
 	// call the analysis walked, including the ones that produced no finding.
