@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"golang.org/x/tools/go/packages"
@@ -25,6 +26,10 @@ type cgoEvidence struct {
 	files      map[string]*cgoFile
 	packages   map[string]*model.CgoPackageSummary
 	syso       map[string]bool // path -> header looks like an object or archive
+	// gocheckHits are the configuration locations that turn cgo pointer
+	// checking off, before the module filter: a hit counts only when its
+	// module contains cgo.
+	gocheckHits []cgoGocheckHit
 }
 
 // cgoFile is one .go file that imports "C", read with go/parser rather than
@@ -179,6 +184,15 @@ func (a *Analyzer) collectCgoEvidence(pkgs []*packages.Package, moduleRoot strin
 		case strings.HasSuffix(path, ".syso"):
 			collected.syso[path] = native.SysoObjectValid(path)
 		case strings.HasSuffix(path, ".go") && !known[path]:
+			// A plain Go file the pointer walk would otherwise never read:
+			// the GODEBUG prefilter keeps the parse to the rare files that
+			// mention it at all.
+			if data, err := os.ReadFile(path); err == nil && len(data) <= cgoGocheckMaxScan && strings.Contains(string(data), "GODEBUG") {
+				fset := token.NewFileSet()
+				if parsed, err := parser.ParseFile(fset, path, data, parser.SkipObjectResolution); err == nil {
+					collected.gocheckHits = append(collected.gocheckHits, scanGocheckSetenv(fset, parsed, path)...)
+				}
+			}
 			if collected.readCgoFile(path, "", "", false) {
 				record := collected.files[path]
 				if record.packagePath == "" {
@@ -187,6 +201,9 @@ func (a *Analyzer) collectCgoEvidence(pkgs []*packages.Package, moduleRoot strin
 				}
 				collected.notePackage(record.packagePath, record.modulePath, false)
 			}
+		case gocheckConfigName(entry.Name()) != "":
+			kind := gocheckConfigName(entry.Name())
+			collected.gocheckHits = append(collected.gocheckHits, scanGocheckConfig(path, kind)...)
 		}
 		return nil
 	})
@@ -295,6 +312,10 @@ func (c *cgoEvidence) readCgoFile(path, packagePath, modulePath string, loaded b
 		// pass confirms, refutes and upgrades them in place, and assembly
 		// attaches the merged set.
 		record.pointer = cgoWalkFilePointerChecks(fset, file, path, packagePath)
+		// A cgo file that calls os.Setenv with GODEBUG records intent, not
+		// effect: the runtime read GODEBUG at start-up. The hit still joins
+		// the module filter below.
+		c.gocheckHits = append(c.gocheckHits, scanGocheckSetenv(fset, file, path)...)
 	}
 	c.files[path] = record
 	return true
@@ -486,6 +507,43 @@ func (a *Analyzer) assembleCgoReport(collected *cgoEvidence, mode, toolchainVers
 	}
 	riskyFlags := map[string]bool{}
 	riskCategories := map[string]bool{}
+	// The module a file belongs to: the nearest go.mod above it, or the
+	// analysis root when none names it. cgocheck-disabled hits count only in
+	// modules that contain cgo, because a GODEBUG line in a pure-Go module
+	// cannot disable a check no code uses.
+	cgoModuleKeys := map[string]bool{}
+	for record := range collected.files {
+		cgoModuleKeys[moduleKeyOf(filepath.Dir(record), collected.moduleRoot)] = true
+	}
+	for _, hit := range collected.gocheckHits {
+		if !cgoModuleKeys[moduleKeyOf(filepath.Dir(hit.path), collected.moduleRoot)] {
+			continue
+		}
+		evidence.GocheckFileDisabledCount++
+		evidence.GocheckDisabled = true
+		riskCategories[CgoCategoryGocheckDisabled] = true
+		signal := model.SecuritySignal{
+			ID:          stableID("cgo-gocheck", hit.source, hit.path, strconv.Itoa(hit.line)),
+			Category:    CgoCategoryGocheckDisabled,
+			Severity:    "medium",
+			Confidence:  "textual",
+			Symbol:      "GODEBUG",
+			Description: "This configuration turns cgo pointer checking off with cgocheck=0, which the runtime reads at process start and which //go:debug cannot set.",
+			Range:       model.Range{Start: model.Position{Filename: hit.path, Line: hit.line}, End: model.Position{Filename: hit.path, Line: hit.line}},
+			Properties:  map[string]string{"source": hit.source},
+		}
+		if hit.source == "go-setenv" {
+			signal.Description = "This call sets GODEBUG to a value that turns cgo pointer checking off. os.Setenv after process start-up does not change the check the runtime already configured, so this records intent rather than effect."
+		}
+		owner := ownerOf(hit.path)
+		signal.PackagePath = owner
+		if summary := collected.packages[owner]; summary != nil {
+			summary.RiskCategories = append(summary.RiskCategories, CgoCategoryGocheckDisabled)
+		}
+		if owner != "" {
+			attachment.signalsByPackage[owner] = append(attachment.signalsByPackage[owner], signal)
+		}
+	}
 	for path, valid := range sysoVerdict {
 		evidence.SysoCount++
 		owner := ownerOf(path)
@@ -589,6 +647,28 @@ func (a *Analyzer) assembleCgoReport(collected *cgoEvidence, mode, toolchainVers
 		return a.Column < b.Column
 	})
 	return evidence, attachment
+}
+
+// moduleKeyOf returns the directory of the nearest go.mod above dir, bounded
+// by the analysis root, which is how two files land in the same module for
+// the cgocheck filter.
+func moduleKeyOf(dir, moduleRoot string) string {
+	search := filepath.Clean(dir)
+	root := filepath.Clean(moduleRoot)
+	for len(search) >= len(root) {
+		if _, err := os.Lstat(filepath.Join(search, "go.mod")); err == nil {
+			return search
+		}
+		if search == root {
+			break
+		}
+		parent := filepath.Dir(search)
+		if parent == search {
+			break
+		}
+		search = parent
+	}
+	return root
 }
 
 func boolLabel(value bool) string {

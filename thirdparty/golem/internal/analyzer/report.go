@@ -134,6 +134,24 @@ func Analyze(options Options) (*model.Report, error) {
 	}
 	collected := a.collectCgoEvidence(pkgs, absDir)
 	cgoReport, cgoAttach := a.assembleCgoReport(collected, cgoMode, toolchainVersion, toolchainPatched, cgoEnvOverrideNames(envForOverrides))
+	// The environment the load ran with, by name: a GODEBUG carrying
+	// cgocheck=0 disables the runtime pointer check for the process, and
+	// GOEXPERIMENT=cgocheck2 turns the stronger check on. Only the names and
+	// the categories are reported, never the values.
+	// The environment settings only count where cgo exists: a GODEBUG line
+	// in an analysis with no Go/C crossing disables nothing, so the gate is
+	// the same one the file scan applies per module.
+	if cgoReport.FileCount > 0 {
+		cgoReport.GocheckEnvDisabled = gocheckDisabledInEnv(envForOverrides)
+		cgoReport.Gocheck2Enabled = gocheck2EnabledInEnv(target.GOEXPERIMENT, envForOverrides)
+	}
+	if cgoReport.GocheckEnvDisabled || cgoReport.GocheckFileDisabledCount > 0 {
+		cgoReport.GocheckDisabled = true
+	}
+	if cgoReport.GocheckEnvDisabled {
+		cgoReport.EnvOverrideNames = append(cgoReport.EnvOverrideNames, "GODEBUG")
+	}
+	cgoReport.RiskCategories = sortedUnique(append(cgoReport.RiskCategories, cgoReportCategories(cgoReport)...))
 	a.cgoArtifacts = map[string]model.NativeArtifact{}
 	for _, artifacts := range cgoAttach.artifactsByPackage {
 		for _, artifact := range artifacts {

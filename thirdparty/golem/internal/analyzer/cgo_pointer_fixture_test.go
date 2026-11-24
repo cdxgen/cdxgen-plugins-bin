@@ -262,3 +262,86 @@ func signalKey(signal *model.SecuritySignal) string {
 	return filepath.Base(signal.Range.Start.Filename) + ":" +
 		strconv.Itoa(signal.Range.Start.Line) + ":" + strconv.Itoa(signal.Range.Start.Column)
 }
+
+// TestCgoGocheckEnvDisabled covers the environment half of the
+// cgocheck-disabled finding: the load environment naming cgocheck=0 marks
+// the cgo object, names the GODEBUG override, and stays silent in a module
+// without cgo. The process environment is process-wide, which is why this
+// test cannot run beside the parallel fixture suite.
+func TestCgoGocheckEnvDisabled(t *testing.T) {
+	t.Setenv("GODEBUG", "cgocheck=0")
+	report, err := Analyze(Options{Dir: filepath.Join(cgoPointerFixtureRoot, "docker-gocheck"), IncludeLocal: true, ToolVersion: "test"})
+	if err != nil {
+		t.Fatalf("analyze docker-gocheck with GODEBUG=cgocheck=0: %v", err)
+	}
+	if report.Cgo == nil || !report.Cgo.GocheckEnvDisabled {
+		t.Fatal("the load environment carried cgocheck=0 and the cgo object does not say so")
+	}
+	if !containsString(report.Cgo.EnvOverrideNames, "GODEBUG") {
+		t.Errorf("env override names = %v, want GODEBUG among them", report.Cgo.EnvOverrideNames)
+	}
+	if !containsString(report.Cgo.RiskCategories, CgoCategoryGocheckDisabled) {
+		t.Errorf("risk categories = %v, want cgocheck-disabled", report.Cgo.RiskCategories)
+	}
+	if got := report.Cgo.GocheckFileDisabledCount; got != 1 {
+		t.Errorf("file disabled count = %d, want the Dockerfile hit", got)
+	}
+	pure, err := Analyze(Options{Dir: filepath.Join(cgoPointerFixtureRoot, "pure-go-check"), IncludeLocal: true, ToolVersion: "test"})
+	if err != nil {
+		t.Fatalf("analyze pure-go-check with GODEBUG=cgocheck=0: %v", err)
+	}
+	if pure.Cgo != nil && (pure.Cgo.GocheckEnvDisabled || pure.Cgo.GocheckDisabled) {
+		t.Error("a module without cgo reported cgocheck-disabled from the environment")
+	}
+}
+
+// TestCgoGocheckEnvHelpers pins the value parsing: a GODEBUG value with
+// other knobs beside cgocheck=0 still disables, cgocheck=1 does not, and
+// cgocheck=011 is not zero. GOEXPERIMENT=cgocheck2 is the informational
+// stronger check, not a disablement.
+func TestCgoGocheckEnvHelpers(t *testing.T) {
+	disabling := [][]string{
+		{"GODEBUG=cgocheck=0"},
+		{"GODEBUG=asyncpreemptoff=1,cgocheck=0"},
+		{"GODEBUG=cgocheck=0,madvdontneed=1"},
+		{"other=x", "GODEBUG=cgocheck=0"},
+	}
+	for _, environ := range disabling {
+		if !gocheckDisabledInEnv(environ) {
+			t.Errorf("gocheckDisabledInEnv(%v) = false, want true", environ)
+		}
+	}
+	benign := [][]string{
+		{"GODEBUG=cgocheck=1"},
+		{"GODEBUG=asyncpreemptoff=1"},
+		{"GODEBUG=cgocheck=011"},
+		{"GODEBUG="},
+		{"CGO_ENABLED=1"},
+		nil,
+	}
+	for _, environ := range benign {
+		if gocheckDisabledInEnv(environ) {
+			t.Errorf("gocheckDisabledInEnv(%v) = true, want false", environ)
+		}
+	}
+	if !gocheck2EnabledInEnv("cgocheck2", nil) {
+		t.Error("GOEXPERIMENT=cgocheck2 from the toolchain probe was not seen")
+	}
+	if !gocheck2EnabledInEnv("", []string{"GOEXPERIMENT=cgocheck2"}) {
+		t.Error("GOEXPERIMENT=cgocheck2 from the environment was not seen")
+	}
+	if gocheck2EnabledInEnv("simd", []string{"GOEXPERIMENT=notcgocheck2"}) {
+		t.Error("a non-cgocheck2 experiment was reported as cgocheck2")
+	}
+}
+
+// goEnvOrSkip reads one go env key, skipping when the toolchain cannot be
+// asked.
+func goEnvOrSkip(t *testing.T, key string) string {
+	t.Helper()
+	value, err := goEnv(key)
+	if err != nil {
+		t.Skipf("go env %s: %v", key, err)
+	}
+	return value
+}
