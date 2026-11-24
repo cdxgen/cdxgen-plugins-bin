@@ -33,17 +33,18 @@ import (
 // cgoCompiledCheck is one _cgoCheckPointer call found in generated code,
 // resolved to the original coordinates and values it guards.
 type cgoCompiledCheck struct {
-	file    string         // the original source file the check's position resolves to
-	line    int            // the checked argument's original position; the join key
-	col     int            // with the textual records, because the /*line*/
-	argPos  model.Position // directives pin the generated code to it
-	untyped bool           // the second argument is nil
-	arg     ast.Expr       // the defining expression of the checked value
-	object  ast.Expr       // the object whose memory the runtime scan covers
-	owner   string         // go, c or unknown, from the generated definitions
-	pinned  bool           // the value was passed to a Pinner earlier in the function
-	sym     string         // C symbol, from the closure's _Cfunc_ call
-	pkg     *packages.Package
+	file      string         // the original source file the check's position resolves to
+	line      int            // the checked argument's original position; the join key
+	col       int            // with the textual records, because the /*line*/
+	argPos    model.Position // directives pin the generated code to it
+	untyped   bool           // the second argument is nil
+	arg       ast.Expr       // the defining expression of the checked value
+	object    ast.Expr       // the object whose memory the runtime scan covers
+	owner     string         // go, c or unknown, from the generated definitions
+	pinned    bool           // the value was passed to a Pinner earlier in the function
+	addressed bool           // the argument took an address, so the object type is the pointee
+	sym       string         // C symbol, from the closure's _Cfunc_ call
+	pkg       *packages.Package
 }
 
 // cgoPinnedBefore reports whether every identifier the expression is rooted
@@ -225,7 +226,7 @@ func (a *Analyzer) collectClosureChecks(literal *ast.FuncLit, facts, functionFac
 			continue
 		}
 		event := &cgoCallEvent{facts: facts}
-		object := cgoCheckedObject(arg, event)
+		object, addressed := cgoCheckedObject(arg, event)
 		owner := cgoOwnerUnknown
 		if cgoIsCRooted(arg, event, 0) {
 			owner = cgoOwnerC
@@ -241,17 +242,18 @@ func (a *Analyzer) collectClosureChecks(literal *ast.FuncLit, facts, functionFac
 		}
 		*found = true
 		*out = append(*out, cgoCompiledCheck{
-			file:    argPos.Filename,
-			line:    argPos.Line,
-			col:     argPos.Column,
-			argPos:  model.Position{Filename: argPos.Filename, Line: argPos.Line, Column: argPos.Column},
-			untyped: untyped,
-			arg:     arg,
-			object:  object,
-			owner:   owner,
-			pinned:  pinned,
-			sym:     sym,
-			pkg:     pkg,
+			file:      argPos.Filename,
+			line:      argPos.Line,
+			col:       argPos.Column,
+			argPos:    model.Position{Filename: argPos.Filename, Line: argPos.Line, Column: argPos.Column},
+			untyped:   untyped,
+			arg:       arg,
+			object:    object,
+			owner:     owner,
+			pinned:    pinned,
+			addressed: addressed,
+			sym:       sym,
+			pkg:       pkg,
 		})
 	}
 }
@@ -355,6 +357,16 @@ func (a *Analyzer) mergeFileCompiledChecks(record *cgoFile, checks []cgoCompiled
 		}
 		record.pointer.signals = kept
 	}
+	// Reachable but unpinned: for every argument whose memory Go owns and
+	// whose value was not pinned, the pointee's type says whether C can walk
+	// past what cgo's two-level check covers. This needs type information, so
+	// it only runs on compiled evidence; the textual read has no types and
+	// stays silent rather than guess.
+	// Bounded and untyped checks alike: the two-level question is about the
+	// type behind the argument, not about which shape the check used.
+	for _, check := range checks {
+		a.maybeUnpinnedReachableFinding(record, check)
+	}
 }
 
 // compiledFinding builds the signal for a nil-typed check the textual pass
@@ -434,7 +446,7 @@ func (a *Analyzer) escalate(check cgoCompiledCheck, severity *string, props map[
 // a, and a C-rooted chase stops, because Go never scans C memory. An
 // identifier without a visible definition names itself, which is what a
 // function parameter looks like to the intraprocedural read.
-func cgoCheckedObject(arg ast.Expr, event *cgoCallEvent) ast.Expr {
+func cgoCheckedObject(arg ast.Expr, event *cgoCallEvent) (object ast.Expr, addressed bool) {
 	expr := arg
 	for depth := 0; depth < 8; depth++ {
 		switch e := expr.(type) {
@@ -445,7 +457,7 @@ func cgoCheckedObject(arg ast.Expr, event *cgoCallEvent) ast.Expr {
 					continue
 				}
 			}
-			return e
+			return e, addressed
 		case *ast.CallExpr:
 			// A C wrapper call result is C memory; the chase stops. Any
 			// other single-argument call is a conversion to unwrap.
@@ -453,28 +465,31 @@ func cgoCheckedObject(arg ast.Expr, event *cgoCallEvent) ast.Expr {
 				expr = e.Args[0]
 				continue
 			}
-			return nil
+			return nil, addressed
 		case *ast.ParenExpr:
 			expr = e.X
 		case *ast.UnaryExpr:
 			if e.Op == token.AND {
 				expr = e.X
+				addressed = true
 				continue
 			}
-			return nil
+			return nil, addressed
 		case *ast.SelectorExpr:
 			// &s.f scans s: the object is the receiver.
 			expr = e.X
 		case *ast.IndexExpr:
 			// &a[i] scans a's backing array.
 			expr = e.X
+			addressed = true
 		case *ast.SliceExpr:
 			expr = e.X
+			addressed = true
 		default:
-			return nil
+			return nil, addressed
 		}
 	}
-	return nil
+	return nil, addressed
 }
 
 // isCgoWrapperCall reports whether the call invokes one of the _Cfunc_
@@ -565,4 +580,126 @@ func trimCgoWrapperName(name string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// maybeUnpinnedReachableFinding reports a C call argument whose pointed-to
+// type is recursive or whose pointer chain exceeds the two levels cgo's check
+// follows, when the enclosing function did not pin the value. Severity is
+// medium and the confidence says type-resolved: the types are exact, the pin
+// analysis is the intraprocedural one.
+func (a *Analyzer) maybeUnpinnedReachableFinding(record *cgoFile, check cgoCompiledCheck) {
+	if check.owner != cgoOwnerGo || check.pinned || check.object == nil {
+		return
+	}
+	if check.pkg == nil || check.pkg.TypesInfo == nil {
+		return
+	}
+	t := check.pkg.TypesInfo.TypeOf(check.object)
+	if t == nil {
+		return
+	}
+	// The object type is the pointee when the argument took an address, and
+	// reaching its contents is the first hop; a value passed directly starts
+	// its chain at its own type.
+	startHops := 0
+	if check.addressed {
+		startHops = 1
+	}
+	recursive := cgoTypeRecursive(types.Unalias(t), map[types.Type]bool{}, 0)
+	depth := cgoPointerChainDepth(types.Unalias(t), map[types.Type]bool{}, startHops, 0)
+	if !recursive && depth <= cgoCheckFollowsLevels {
+		return
+	}
+	signal := model.SecuritySignal{
+		ID:             stableID("cgo-unpinned-reachable", check.pkg.PkgPath, check.file, strconv.Itoa(check.line)+":"+strconv.Itoa(check.col)),
+		Category:       CgoCategoryUnpinnedReachable,
+		Severity:       "medium",
+		Confidence:     "type-resolved",
+		PackagePath:    check.pkg.PkgPath,
+		Symbol:         "C." + check.sym,
+		Description:    "The type behind this argument is recursive or deeper than the two pointer levels cgo's check follows: C can walk nodes whose pinning golem cannot see verified.",
+		Recommendation: "Pin every node C will read with runtime.Pinner, or copy the structure into C memory.",
+		Range:          model.Range{Start: model.Position{Filename: check.file, Line: check.line, Column: check.col}, End: model.Position{Filename: check.file, Line: check.line, Column: check.col}},
+		Properties:     map[string]string{},
+	}
+	if recursive {
+		signal.Properties["recursive"] = "true"
+	}
+	if depth > cgoCheckFollowsLevels {
+		signal.Properties["pointerChainDepth"] = strconv.Itoa(depth)
+	}
+	record.pointer.signals = append(record.pointer.signals, signal)
+}
+
+// cgoCheckFollowsLevels is the pointer depth cgo's runtime check covers: two
+// levels of pointers from the value it receives.
+const cgoCheckFollowsLevels = 2
+
+// cgoTypeRecursive reports whether the type contains a pointer path back to
+// itself: a struct with a field pointing to its own type, directly or
+// through a slice, an array or another struct.
+func cgoTypeRecursive(t types.Type, path map[types.Type]bool, depth int) bool {
+	if t == nil || depth > 16 {
+		return false
+	}
+	t = types.Unalias(t)
+	if path[t] {
+		return true
+	}
+	switch u := t.Underlying().(type) {
+	case *types.Pointer:
+		return cgoTypeRecursive(u.Elem(), path, depth+1)
+	case *types.Slice:
+		return cgoTypeRecursive(u.Elem(), path, depth+1)
+	case *types.Array:
+		return cgoTypeRecursive(u.Elem(), path, depth+1)
+	case *types.Struct:
+		path[t] = true
+		defer delete(path, t)
+		for i := 0; i < u.NumFields(); i++ {
+			if cgoTypeRecursive(u.Field(i).Type(), path, depth+1) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// cgoPointerChainDepth returns the largest number of pointer hops needed to
+// walk every pointer reachable from t, where t is the type of the value the
+// check received. A linked list needs unbounded hops, which the path set
+// caps; the recursion detector above reports that case separately.
+func cgoPointerChainDepth(t types.Type, seen map[types.Type]bool, hops int, depth int) int {
+	if t == nil || depth > 16 {
+		return hops
+	}
+	t = types.Unalias(t)
+	if seen[t] {
+		return hops
+	}
+	seen[t] = true
+	defer delete(seen, t)
+	switch u := t.Underlying().(type) {
+	case *types.Pointer:
+		next := cgoPointerChainDepth(u.Elem(), seen, hops+1, depth+1)
+		if next > hops+1 {
+			return next
+		}
+		return hops + 1
+	case *types.Slice:
+		// A slice header holds one pointer; the elements are walked at the
+		// same hop the header costs.
+		return cgoPointerChainDepth(u.Elem(), seen, hops+1, depth+1)
+	case *types.Array:
+		return cgoPointerChainDepth(u.Elem(), seen, hops, depth+1)
+	case *types.Struct:
+		best := hops
+		for i := 0; i < u.NumFields(); i++ {
+			if d := cgoPointerChainDepth(u.Field(i).Type(), seen, hops, depth+1); d > best {
+				best = d
+			}
+		}
+		return best
+	}
+	return hops
 }

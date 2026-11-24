@@ -236,6 +236,26 @@ func assertCgoPointerCaseDetails(t *testing.T, caseName, mode string, report *mo
 			t.Error("buffer-shapes: the SliceData call produced no compiled finding")
 		}
 	}
+	// The unpinned-reachable findings of the linked-list case: the recursive
+	// type behind the first argument, and silence for the pinned and
+	// two-level calls next to it.
+	if caseName == "linked-list" && mode == "compiled" {
+		var reachable []*model.SecuritySignal
+		for i := range report.SecuritySignals {
+			if report.SecuritySignals[i].Category == CgoCategoryUnpinnedReachable {
+				reachable = append(reachable, &report.SecuritySignals[i])
+			}
+		}
+		if len(reachable) != 1 || reachable[0].Range.Start.Line != 41 {
+			var lines []string
+			for _, s := range reachable {
+				lines = append(lines, strconv.Itoa(s.Range.Start.Line))
+			}
+			t.Errorf("linked-list: unpinned-reachable findings at lines %v, want exactly line 41", lines)
+		} else if reachable[0].Confidence != "type-resolved" {
+			t.Errorf("linked-list: finding confidence %q, want type-resolved", reachable[0].Confidence)
+		}
+	}
 }
 
 func signalKey(signal *model.SecuritySignal) string {
