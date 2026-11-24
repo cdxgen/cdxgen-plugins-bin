@@ -125,6 +125,15 @@ func cgoIsType(t ast.Expr) bool {
 				strings.HasPrefix(name, "enum_") {
 				return true
 			}
+			// The stdint and sys(types) names, size_t and friends, are
+			// typedefs by C convention and can never name a function, so a
+			// call spelled C.<name>_t is a conversion whatever the preamble
+			// says. Without this, C.uintptr_t(...) in the syscall wrappers
+			// of the module cache reads as a C call and its argument is
+			// checked as if cgo would check it.
+			if strings.HasSuffix(name, "_t") {
+				return true
+			}
 		}
 		return false
 	case *ast.Ident:
