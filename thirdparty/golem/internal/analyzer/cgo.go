@@ -37,6 +37,27 @@ type cgoFile struct {
 	directives  []model.BuildDirective
 	risks       []native.CgoFlagRisk
 	signals     []model.SecuritySignal
+	// pointer carries the per-call-site pointer-check classification; nil when
+	// the file never parsed fully (a broken file still reports its preamble).
+	pointer *cgoFilePointerCheck
+}
+
+// reattributePointerCheck moves the pointer-check records of a file whose
+// package path was only inferred after the walk onto the final attribution.
+func reattributePointerCheck(record *cgoFile, packagePath string) {
+	if record == nil || record.pointer == nil || packagePath == "" {
+		return
+	}
+	for i := range record.pointer.signals {
+		if record.pointer.signals[i].PackagePath == "" {
+			record.pointer.signals[i].PackagePath = packagePath
+		}
+	}
+	for i := range record.pointer.callSites {
+		if record.pointer.callSites[i].PackagePath == "" {
+			record.pointer.callSites[i].PackagePath = packagePath
+		}
+	}
 }
 
 // cgoModeOf resolves the cgo mode the load ran with: "disabled" when golem
@@ -162,6 +183,7 @@ func (a *Analyzer) collectCgoEvidence(pkgs []*packages.Package, moduleRoot strin
 				record := collected.files[path]
 				if record.packagePath == "" {
 					record.packagePath, record.modulePath = collected.inferPackage(filepath.Dir(path))
+					reattributePointerCheck(record, record.packagePath)
 				}
 				collected.notePackage(record.packagePath, record.modulePath, false)
 			}
@@ -195,9 +217,15 @@ func (a *Analyzer) packageCompiledWithCgo(pkg *packages.Package) bool {
 	return false
 }
 
-// readCgoFile parses one file with go/parser in ImportsOnly|ParseComments mode
-// and records it when it imports "C". Nothing in the file is ever executed;
-// the parser is the only tool that touches it.
+// readCgoFile parses one file with go/parser in full-comment mode and records
+// it when it imports "C". Nothing in the file is ever executed; the parser is
+// the only tool that touches it.
+//
+// The parse used to be ImportsOnly: the preamble needs the comment groups and
+// nothing else. The pointer-check classification walks every C.f(...) call in
+// the file, so a full parse is now attempted first, and a file that does not
+// parse completely falls back to ImportsOnly and loses the walk but keeps its
+// preamble and its native-interop signal.
 func (c *cgoEvidence) readCgoFile(path, packagePath, modulePath string, loaded bool) bool {
 	if existing, ok := c.files[path]; ok {
 		// A file can be reached from two packages (a test variant, or the
@@ -220,7 +248,11 @@ func (c *cgoEvidence) readCgoFile(path, packagePath, modulePath string, loaded b
 		return false
 	}
 	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, path, nil, parser.ImportsOnly|parser.ParseComments)
+	file, err := parser.ParseFile(fset, path, nil, parser.ParseComments|parser.SkipObjectResolution)
+	fullParse := err == nil
+	if !fullParse {
+		file, err = parser.ParseFile(fset, path, nil, parser.ImportsOnly|parser.ParseComments)
+	}
 	if err != nil || !fileImportsC(file) {
 		return false
 	}
@@ -252,6 +284,15 @@ func (c *cgoEvidence) readCgoFile(path, packagePath, modulePath string, loaded b
 			Recommendation: "Review native build flags, linked libraries, and C memory safety.",
 			Range:          model.Range{Start: model.Position{Filename: path, Line: line}, End: model.Position{Filename: path, Line: line}},
 		}}
+	}
+	if fullParse {
+		// The pointer-check classification of every C call in the file. The
+		// package path may still be inferred later for a file no loaded
+		// package owns; reattributePointerCheck moves the records then.
+		record.pointer = cgoWalkFilePointerChecks(fset, file, path, packagePath)
+		for _, signal := range record.pointer.signals {
+			record.signals = append(record.signals, signal)
+		}
 	}
 	c.files[path] = record
 	return true
@@ -470,6 +511,26 @@ func (a *Analyzer) assembleCgoReport(collected *cgoEvidence, mode, toolchainVers
 		if summary := collected.packages[record.packagePath]; summary != nil {
 			summary.FileCount++
 		}
+		if record.pointer != nil {
+			// The per-call-site records and the untyped-check findings of one
+			// file. Findings join the signals the report already attaches per
+			// package; the counts and the category name go on the cgo object
+			// so a consumer can roll them up without reading the signals.
+			evidence.CallSites = append(evidence.CallSites, record.pointer.callSites...)
+			untyped := 0
+			for _, signal := range record.pointer.signals {
+				if signal.Category == CgoCategoryUntypedCheck {
+					untyped++
+				}
+				if signal.Category == CgoCategoryUntypedCheck || signal.Category == CgoCategoryUnpinnedReachable {
+					if summary := collected.packages[record.packagePath]; summary != nil {
+						summary.RiskCategories = append(summary.RiskCategories, signal.Category)
+					}
+					riskCategories[signal.Category] = true
+				}
+			}
+			evidence.UntypedPointerCheckCount += untyped
+		}
 		if record.packagePath != "" {
 			attachment.directivesByPackage[record.packagePath] = append(attachment.directivesByPackage[record.packagePath], record.directives...)
 			attachment.signalsByPackage[record.packagePath] = append(attachment.signalsByPackage[record.packagePath], record.signals...)
@@ -512,6 +573,16 @@ func (a *Analyzer) assembleCgoReport(collected *cgoEvidence, mode, toolchainVers
 	evidence.RiskyFlags = sortedKeys(riskyFlags)
 	evidence.RiskCategories = sortedKeys(riskCategories)
 	evidence.RiskyFlagCount = len(evidence.RiskyFlags)
+	sort.Slice(evidence.CallSites, func(i, j int) bool {
+		a, b := evidence.CallSites[i].Position, evidence.CallSites[j].Position
+		if a.Filename != b.Filename {
+			return a.Filename < b.Filename
+		}
+		if a.Line != b.Line {
+			return a.Line < b.Line
+		}
+		return a.Column < b.Column
+	})
 	return evidence, attachment
 }
 

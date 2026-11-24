@@ -12,7 +12,7 @@ import (
 	"github.com/cdxgen/cdxgen-plugins-bin/thirdparty/golem/internal/native"
 )
 
-const SchemaVersion = "https://cdxgen.github.io/cdxgen-plugins-bin/golem/schema/v6"
+const SchemaVersion = "https://cdxgen.github.io/cdxgen-plugins-bin/golem/schema/v7"
 
 type Options struct {
 	Dir                             string

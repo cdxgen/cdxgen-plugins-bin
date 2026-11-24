@@ -10,6 +10,8 @@
 //	// golem:want-not edge from=<symbol> to=<symbol> [known-fail=<defect>]
 //	// golem:want     reachable symbol=<symbol> [from=<symbol>] [maxdepth=N] [known-fail=<defect>]
 //	// golem:want-not reachable symbol=<symbol>
+//	// golem:want     signal category=<category> [line=N] [symbol=<s>] [severity=S] [confidence=C] [cgo=textual|compiled] [count=N] [known-fail=<defect>]
+//	// golem:want-not signal category=<category> [line=N] [symbol=<s>] [cgo=textual|compiled]
 //	// golem:env      KEY=VALUE [KEY=VALUE …]
 //
 // golem:env is not an expectation but the case's build shape: the KEY=VALUE
@@ -71,24 +73,38 @@ const (
 	KindFlow      = "flow"
 	KindEdge      = "edge"
 	KindReachable = "reachable"
+	KindSignal    = "signal"
 )
 
 // Annotation is one ground-truth expectation attached to a source position.
 type Annotation struct {
 	Want      bool   // want (true) vs want-not (false)
-	Kind      string // KindFlow | KindEdge | KindReachable
+	Kind      string // KindFlow | KindEdge | KindReachable | KindSignal
 	Source    string // flow: source category; edge: caller; reachable: origin root
 	Sink      string // flow: sink category; edge: callee
 	Symbol    string // reachable: target symbol
 	SinkFn    string // flow: optional sink function constraint
 	SourceFn  string // flow: optional source function constraint
 	CallType  string // edge: optional call type constraint
-	Severity  string // flow: optional severity constraint
+	Severity  string // flow or signal: optional severity constraint
 	Mode      string // optional data-flow mode this expectation applies to ("" = every mode)
 	Count     int    // minimum matches required for want (default 1)
 	MaxDepth  int    // reachable: maximum permitted depth (0 = unconstrained)
 	Connected bool   // flow: require a structurally connected path
 	KnownFail int    // non-zero defect number this expectation is known to fail on, for every engine
+	// Signal expectations name a security-signal category, and may pin the
+	// line it must appear on, the symbol it must name, and the confidence the
+	// report must carry. Category names pass the same known-category check
+	// the flow kinds have, so a negative signal expectation cannot be
+	// satisfied vacuously by a category golem never emits.
+	Category    string // signal: the security-signal category
+	WantLine    int    // signal: the line the signal's range must start on (0 = any)
+	Confidence  string // signal: required confidence ("textual", "high", ...)
+	// CgoMode scopes an expectation to one cgo mode: "textual" for a
+	// CGO_ENABLED=0 load, "compiled" for CGO_ENABLED=1. Empty means every
+	// mode. The cgo pointer-check findings differ by mode by design, which is
+	// why the guard exists for them first.
+	CgoMode string
 	// KnownFailByEngine records a defect that is open in one taint engine and
 	// closed in another. Two engines now ship, and without this the corpus can
 	// only describe a defect as open everywhere or nowhere: removing a marker
@@ -116,6 +132,14 @@ func (a Annotation) String() string {
 		if a.Source != "" {
 			parts = append(parts, "from="+a.Source)
 		}
+	case KindSignal:
+		parts = append(parts, "category="+a.Category)
+		if a.WantLine > 0 {
+			parts = append(parts, "line="+strconv.Itoa(a.WantLine))
+		}
+		if a.Symbol != "" {
+			parts = append(parts, "symbol="+a.Symbol)
+		}
 	}
 	if a.Count > 1 {
 		parts = append(parts, "count="+strconv.Itoa(a.Count))
@@ -141,6 +165,23 @@ func (a Annotation) String() string {
 // data-flow mode.
 func (a Annotation) AppliesTo(mode string) bool {
 	return a.Mode == "" || strings.EqualFold(a.Mode, mode)
+}
+
+// AppliesToCgo reports whether the annotation constrains a run in the given
+// cgo mode ("enabled" from the report maps to "compiled", "disabled" to
+// "textual"). An annotation with no cgo= key applies to both.
+func (a Annotation) AppliesToCgo(cgoMode string) bool {
+	if a.CgoMode == "" {
+		return true
+	}
+	got := ""
+	switch cgoMode {
+	case "enabled":
+		got = "compiled"
+	case "disabled":
+		got = "textual"
+	}
+	return a.CgoMode == got
 }
 
 // Required returns the minimum number of matches a want annotation needs.
@@ -254,10 +295,10 @@ func parseAnnotation(text string) (Annotation, error) {
 		return Annotation{}, fmt.Errorf("unknown annotation verb %q (want or want-not)", fields[0])
 	}
 	switch fields[1] {
-	case KindFlow, KindEdge, KindReachable:
+	case KindFlow, KindEdge, KindReachable, KindSignal:
 		ann.Kind = fields[1]
 	default:
-		return Annotation{}, fmt.Errorf("unknown annotation kind %q (flow, edge or reachable)", fields[1])
+		return Annotation{}, fmt.Errorf("unknown annotation kind %q (flow, edge, reachable or signal)", fields[1])
 	}
 	for _, field := range fields[2:] {
 		key, value, hasValue := strings.Cut(field, "=")
@@ -277,6 +318,21 @@ func parseAnnotation(text string) (Annotation, error) {
 			ann.Sink = value
 		case "symbol":
 			ann.Symbol = value
+		case "category":
+			ann.Category = value
+		case "line":
+			n, err := strconv.Atoi(value)
+			if err != nil || n < 1 {
+				return Annotation{}, fmt.Errorf("line=%q is not a positive line number", value)
+			}
+			ann.WantLine = n
+		case "confidence":
+			ann.Confidence = value
+		case "cgo":
+			if value != "textual" && value != "compiled" {
+				return Annotation{}, fmt.Errorf("cgo=%q is neither textual nor compiled", value)
+			}
+			ann.CgoMode = value
 		case "sinkFn", "sinkfn":
 			ann.SinkFn = value
 		case "sourceFn", "sourcefn":
@@ -350,6 +406,13 @@ func (a Annotation) validate() error {
 		if a.Symbol == "" {
 			return fmt.Errorf("reachable annotation needs symbol=")
 		}
+	case KindSignal:
+		if a.Category == "" {
+			return fmt.Errorf("signal annotation needs category=")
+		}
+		if err := validateCategory(a.Category); err != nil {
+			return err
+		}
 	}
 	if a.Count < 0 {
 		return fmt.Errorf("count must not be negative")
@@ -399,6 +462,9 @@ var categories = func() map[string]bool {
 		"http-response", "insecure-random", "logging", "native-conversion", "native-interop", "panic", "parameter",
 		"path", "path-validation", "proxy-derived", "queue-message", "queue-send", "redirect", "secure-random",
 		"sink", "sql-parameterization", "syscall", "unsafe", "url-encoding",
+		// The cgo pointer-check families the analyzer emits from its textual
+		// read and, with CGO_ENABLED=1, from the checks cgo itself emitted.
+		"cgo-pointer-check-untyped", "cgo-unpinned-reachable", "cgocheck-disabled", "cgocheck2-enabled",
 	} {
 		set[name] = true
 	}

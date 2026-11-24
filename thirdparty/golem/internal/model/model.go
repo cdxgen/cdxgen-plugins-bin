@@ -152,6 +152,35 @@ type NativeArgumentRole struct {
 	Variadic bool   `json:"variadic,omitempty"`
 }
 
+// NativeCallSite describes one C.f(...) call site the cgo pointer-check
+// analysis walked. NativeCall and NativeArgumentRole stay declaration-level:
+// they describe the wrapper cgo generates once per C symbol, while this record
+// is per call site, because the pointer check and the memory ownership are
+// decided per argument at each crossing.
+type NativeCallSite struct {
+	ID          string               `json:"id"`
+	PackagePath string               `json:"packagePath,omitempty"`
+	Symbol      string               `json:"symbol,omitempty"`
+	Position    Position             `json:"position,omitempty"`
+	Confidence  string               `json:"confidence,omitempty"`
+	Arguments   []NativeCallArgument `json:"arguments,omitempty"`
+}
+
+// NativeCallArgument is one argument of a call site, with the way cgo's
+// pointer check sees it and where the memory behind it lives. Shape is the
+// classification rewriteCall makes: "addr", "index" and "slice" bound the
+// runtime check to that field, element or slice; "untyped" means the argument
+// is checked with no type information; "unchecked" means cgo emits no check
+// (a nil argument or an unsafe.StringData result). Owner says whose memory
+// the argument points into: "go" for Go memory the runtime will scan, "c" for
+// memory a C call returned, "unknown" when the read cannot tell.
+type NativeCallArgument struct {
+	Index  int    `json:"index"`
+	Shape  string `json:"shape"`
+	Owner  string `json:"owner,omitempty"`
+	Pinned bool   `json:"pinned,omitempty"`
+}
+
 // BuildShapeDelta records a file that exists on disk but was excluded by build
 // constraints or configuration.
 type BuildShapeDelta struct {
@@ -785,6 +814,34 @@ type CgoEvidence struct {
 	SysoInvalidCount     int                 `json:"sysoInvalidCount"`
 	UnloadedPackageCount int                 `json:"unloadedPackageCount"`
 	Packages             []CgoPackageSummary `json:"packages,omitempty"`
+	// UntypedPointerCheckCount counts the C call arguments the pointer-check
+	// analysis found cgo checks with no type information, after arguments
+	// rooted in C-owned memory were excluded. The findings themselves are
+	// SecuritySignals with the cgo-pointer-check-untyped category.
+	UntypedPointerCheckCount int              `json:"untypedPointerCheckCount,omitempty"`
+	// UnpinnedReachableCount counts the C call arguments whose pointed-to type
+	// is recursive or deeper than the two levels cgo's check reaches, where the
+	// enclosing function did not pin the values. Signals carry the
+	// cgo-unpinned-reachable category.
+	UnpinnedReachableCount int              `json:"unpinnedReachableCount,omitempty"`
+	// CallSites are the per-call-site pointer-check records, ordered by
+	// position. They carry the argument shapes and memory owners for every C
+	// call the analysis walked, including the ones that produced no finding.
+	CallSites []NativeCallSite `json:"callSites,omitempty"`
+	// GocheckDisabled states that pointer checking is turned off somewhere the
+	// analysis saw it: the load environment, or a build or runtime
+	// configuration file in a module that contains cgo.
+	GocheckDisabled bool `json:"gocheckDisabled,omitempty"`
+	// GocheckEnvDisabled isolates the environment case, where GODEBUG names
+	// cgocheck=0 in the environment the packages were loaded with. The value
+	// itself is never reported, only the fact.
+	GocheckEnvDisabled bool `json:"gocheckEnvDisabled,omitempty"`
+	// GocheckFileDisabledCount counts the configuration files that turn cgo
+	// checking off. Signals carry their positions.
+	GocheckFileDisabledCount int `json:"gocheckFileDisabledCount,omitempty"`
+	// Gocheck2Enabled states that GOEXPERIMENT=cgocheck2 was seen, which turns
+	// the stronger whole-program check on. Informational.
+	Gocheck2Enabled bool `json:"gocheck2Enabled,omitempty"`
 }
 
 // CgoPackageSummary is the cgo evidence of one package. ModulePath names the
