@@ -3,7 +3,6 @@ package analyzer
 import (
 	"path/filepath"
 	"strconv"
-	"strings"
 	"sync"
 	"testing"
 
@@ -130,9 +129,9 @@ func TestCgoPointerFixtures(t *testing.T) {
 }
 
 // assertCgoPointerCaseDetails states, per fixture, what the annotations
-// cannot say: the exact confidence each mode reports, the call-site argument
-// shapes, and which findings carry severity or properties that depend on type
-// information.
+// cannot say: the exact confidence each mode reports, the severities and
+// properties the type escalation adds, and the absence of findings on the
+// calls whose arguments are C-owned or pinned.
 func assertCgoPointerCaseDetails(t *testing.T, caseName, mode string, report *model.Report) {
 	t.Helper()
 	if report.Cgo == nil {
@@ -144,28 +143,102 @@ func assertCgoPointerCaseDetails(t *testing.T, caseName, mode string, report *mo
 			signals[signalKey(&report.SecuritySignals[i])] = &report.SecuritySignals[i]
 		}
 	}
-	// The textual pass is the only detector in this mode, so every finding it
-	// reports says so; the compiled mode's confidence is asserted together
-	// with the confirmation that changes it.
 	if mode == "textual" {
+		// The textual pass is the only detector in this mode, so every
+		// finding it reports says so.
 		for _, signal := range signals {
 			if signal.Confidence != "textual" {
 				t.Errorf("%s: untyped-check signal at %s:%d has confidence %q, want textual",
 					caseName, filepath.Base(signal.Range.Start.Filename), signal.Range.Start.Line, signal.Confidence)
 			}
+			if signal.Severity != "medium" {
+				t.Errorf("%s: textual signal at %s:%d has severity %q, want medium without type information",
+					caseName, filepath.Base(signal.Range.Start.Filename), signal.Range.Start.Line, signal.Severity)
+			}
+			if len(signal.Properties) != 0 {
+				t.Errorf("%s: textual signal at %s:%d carries properties %v; escalation needs type information",
+					caseName, filepath.Base(signal.Range.Start.Filename), signal.Range.Start.Line, signal.Properties)
+			}
 		}
 		return
 	}
-	// Compiled-mode-only assertions live with the changes that make them
-	// true; the fixtures' cgo= annotations carry the mode-scoped expectations
-	// in the meantime.
-	_ = signals
+	for _, signal := range signals {
+		if signal.Confidence != "high" {
+			t.Errorf("%s: compiled signal at %s:%d has confidence %q, want high: the compiled pass is exact",
+				caseName, filepath.Base(signal.Range.Start.Filename), signal.Range.Start.Line, signal.Confidence)
+		}
+	}
+	// Per-fixture escalation verdicts, from the types the generated files
+	// carry. (line, severity, properties)
+	type want struct {
+		line  int
+		col   int
+		props map[string]string
+	}
+	switch caseName {
+	case "addr-shapes":
+		// Both untyped arguments scan a pair object whose other field holds
+		// a Go pointer: panic risk, one pointer slot.
+		for _, key := range []string{"39:9", "49:9"} {
+			signal, ok := signals["main.go:"+key]
+			if !ok {
+				t.Errorf("addr-shapes: no compiled finding at main.go:%s", key)
+				continue
+			}
+			if signal.Severity != "high" {
+				t.Errorf("addr-shapes: finding at main.go:%s has severity %q, want high: the object holds a Go pointer", key, signal.Severity)
+			}
+			if signal.Properties["panicRisk"] != "true" || signal.Properties["pointerSlots"] != "1" {
+				t.Errorf("addr-shapes: finding at main.go:%s has properties %v, want panicRisk and pointerSlots=1", key, signal.Properties)
+			}
+		}
+	case "plain-struct":
+		if signal, ok := signals["main.go:27:9"]; ok && (signal.Severity != "medium" || len(signal.Properties) != 0) {
+			t.Errorf("plain-struct: finding at main.go:27 has severity %q and properties %v; a struct without pointer fields stays medium",
+				signal.Severity, signal.Properties)
+		}
+	case "c-memory":
+		if _, ok := signals["main.go:23:9"]; ok {
+			t.Error("c-memory: C.free over a C.CString result produced a finding; the runtime stops at non-Go memory")
+		}
+		if _, ok := signals["main.go:32:9"]; ok {
+			t.Error("c-memory: handing C-owned memory to another C function produced a finding")
+		}
+		if signal, ok := signals["main.go:43:9"]; ok {
+			if signal.Severity != "medium" {
+				t.Errorf("c-memory: the Go-memory contrast finding has severity %q, want medium: a byte slice holds no pointers", signal.Severity)
+			}
+		} else {
+			t.Error("c-memory: the Go-memory contrast produced no compiled finding")
+		}
+	case "pin-state":
+		if signal, ok := signals["main.go:30:9"]; ok {
+			if signal.Severity != "high" || signal.Properties["panicRisk"] != "true" {
+				t.Errorf("pin-state: the unpinned finding has severity %q properties %v, want high with panicRisk", signal.Severity, signal.Properties)
+			}
+		} else {
+			t.Error("pin-state: the unpinned call produced no compiled finding")
+		}
+		if signal, ok := signals["main.go:47:9"]; ok {
+			if signal.Severity != "medium" || signal.Properties["pinned"] != "true" {
+				t.Errorf("pin-state: the pinned finding has severity %q properties %v, want medium with pinned=true: a pinned object cannot panic the scan",
+					signal.Severity, signal.Properties)
+			}
+		} else {
+			t.Error("pin-state: the pinned call produced no compiled finding")
+		}
+	case "buffer-shapes":
+		if signal, ok := signals["main.go:59:9"]; ok {
+			if signal.Severity != "medium" {
+				t.Errorf("buffer-shapes: the SliceData finding has severity %q, want medium: the buffer elements are C ints", signal.Severity)
+			}
+		} else {
+			t.Error("buffer-shapes: the SliceData call produced no compiled finding")
+		}
+	}
 }
 
 func signalKey(signal *model.SecuritySignal) string {
-	return strings.Join([]string{
-		signal.Range.Start.Filename,
-		strconv.Itoa(signal.Range.Start.Line),
-		strconv.Itoa(signal.Range.Start.Column),
-	}, ":")
+	return filepath.Base(signal.Range.Start.Filename) + ":" +
+		strconv.Itoa(signal.Range.Start.Line) + ":" + strconv.Itoa(signal.Range.Start.Column)
 }

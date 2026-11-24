@@ -198,6 +198,10 @@ func (a *Analyzer) collectCgoEvidence(pkgs []*packages.Package, moduleRoot strin
 			return record.directives[i].Variable < record.directives[j].Variable
 		})
 	}
+	// With CGO_ENABLED=1 the generated files carry the checks cgo itself
+	// emitted; fold their verdicts into the textual records before assembly
+	// counts them.
+	a.mergeCompiledPointerChecks(collected, pkgs)
 	return collected
 }
 
@@ -287,12 +291,10 @@ func (c *cgoEvidence) readCgoFile(path, packagePath, modulePath string, loaded b
 	}
 	if fullParse {
 		// The pointer-check classification of every C call in the file. The
-		// package path may still be inferred later for a file no loaded
-		// package owns; reattributePointerCheck moves the records then.
+		// signals stay in record.pointer, not record.signals: the compiled
+		// pass confirms, refutes and upgrades them in place, and assembly
+		// attaches the merged set.
 		record.pointer = cgoWalkFilePointerChecks(fset, file, path, packagePath)
-		for _, signal := range record.pointer.signals {
-			record.signals = append(record.signals, signal)
-		}
 	}
 	c.files[path] = record
 	return true
@@ -534,6 +536,9 @@ func (a *Analyzer) assembleCgoReport(collected *cgoEvidence, mode, toolchainVers
 		if record.packagePath != "" {
 			attachment.directivesByPackage[record.packagePath] = append(attachment.directivesByPackage[record.packagePath], record.directives...)
 			attachment.signalsByPackage[record.packagePath] = append(attachment.signalsByPackage[record.packagePath], record.signals...)
+			if record.pointer != nil {
+				attachment.signalsByPackage[record.packagePath] = append(attachment.signalsByPackage[record.packagePath], record.pointer.signals...)
+			}
 		}
 		for _, directive := range record.directives {
 			evidence.DirectiveCount++

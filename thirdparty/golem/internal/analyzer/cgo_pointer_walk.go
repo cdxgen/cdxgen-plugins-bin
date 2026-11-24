@@ -102,13 +102,10 @@ type cgoPointerWalker struct {
 // cgoCallEvent is one C.f(...) call found in a function body, plus the
 // function-level facts its classification needs.
 type cgoCallEvent struct {
-	call     *ast.CallExpr
-	name     string
-	pos      token.Pos
-	defs     map[string]ast.Expr
-	setTwice map[string]bool
-	cOwned   map[string]bool
-	pins     []cgoPinEvent
+	call  *ast.CallExpr
+	name  string
+	pos   token.Pos
+	facts *cgoFunctionFacts
 }
 
 // cgoPinEvent is one (*runtime.Pinner).Pin or .Unpin call, in source order.
@@ -116,9 +113,9 @@ type cgoCallEvent struct {
 // invisible to another, and a pin on a path the walker cannot see (an
 // if-branch it walked but which does not dominate the call) still counts.
 type cgoPinEvent struct {
-	pos    token.Pos
-	unpin  bool
-	target string // the identifier passed to Pin; empty for Unpin
+	pos     token.Pos
+	unpin   bool
+	targets map[string]bool // the base identifiers of the pinned expression
 }
 
 // cgoPreamble is what the walker could read out of the C preamble text: the
@@ -332,37 +329,66 @@ func cCParamNeedsCheck(paramType string) bool {
 	return true
 }
 
-// walkFunction collects the C calls, the single-assignment definitions, the
-// C-owned identifiers and the Pinner calls of one function body, then
-// classifies each call. Definitions are collected per function rather than
-// per block: a name assigned twice anywhere in the function is ambiguous and
-// resolves to nothing, which is the safe reading, and a closure variable that
-// shadows an outer one is the known limit of that choice.
-func (w *cgoPointerWalker) walkFunction(fn *ast.FuncDecl, preamble *cgoPreamble) {
-	defs := map[string]ast.Expr{}
-	setTwice := map[string]bool{}
-	cOwned := map[string]bool{}
-	pinnerVars := map[string]bool{}
-	var pins []cgoPinEvent
-	var calls []*cgoCallEvent
+// cgoFunctionFacts is what one function body shows about its values: the
+// single-assignment definitions, the names assigned more than once, the
+// identifiers rooted in C-owned memory, and the Pinner calls in source order.
+// The textual walk and the compiled pass over cgo-generated files both
+// collect it, which is why it is a structure and not local state.
+type cgoFunctionFacts struct {
+	defs       map[string]ast.Expr
+	setTwice   map[string]bool
+	cOwned     map[string]bool
+	pinnerVars map[string]bool
+	pins       []cgoPinEvent
+	// parent is the enclosing scope's facts, set when the compiled pass
+	// resolves a closure argument that names identifiers defined outside the
+	// closure. Lookups fall through to it.
+	parent *cgoFunctionFacts
+}
 
-	record := func(name string, expr ast.Expr) {
-		if _, seen := defs[name]; seen {
-			setTwice[name] = true
+// lookup finds the single defining expression of name, falling through to
+// the parent scope. A name assigned twice resolves to nothing.
+func (f *cgoFunctionFacts) lookup(name string) (ast.Expr, bool) {
+	for scope := f; scope != nil; scope = scope.parent {
+		if scope.setTwice[name] {
+			return nil, false
 		}
-		defs[name] = expr
-		if cgoIsCRooted(expr, nil, 0) {
-			cOwned[name] = true
+		if def, ok := scope.defs[name]; ok {
+			return def, true
 		}
 	}
+	return nil, false
+}
 
-	ast.Inspect(fn.Body, func(n ast.Node) bool {
+// isCOwned reports whether name was defined from a C call result.
+func (f *cgoFunctionFacts) isCOwned(name string) bool {
+	for scope := f; scope != nil; scope = scope.parent {
+		if scope.cOwned[name] {
+			return true
+		}
+	}
+	return false
+}
+
+// cgoCollectFacts walks one function body and collects its facts.
+// Definitions are collected per function rather than per block: a name
+// assigned twice anywhere in the function is ambiguous and resolves to
+// nothing, which is the safe reading, and a closure variable that shadows an
+// outer one is the known limit of that choice.
+func cgoCollectFacts(body ast.Node) *cgoFunctionFacts {
+	facts := &cgoFunctionFacts{
+		defs:       map[string]ast.Expr{},
+		setTwice:   map[string]bool{},
+		cOwned:     map[string]bool{},
+		pinnerVars: map[string]bool{},
+	}
+	ast.Inspect(body, func(n ast.Node) bool {
 		switch node := n.(type) {
 		case *ast.AssignStmt:
 			if len(node.Lhs) == len(node.Rhs) {
 				for i, lhs := range node.Lhs {
 					if id, ok := lhs.(*ast.Ident); ok && id.Name != "_" {
-						record(id.Name, node.Rhs[i])
+						facts.record(id.Name, node.Rhs[i])
 					}
 				}
 			}
@@ -374,45 +400,64 @@ func (w *cgoPointerWalker) walkFunction(fn *ast.FuncDecl, preamble *cgoPreamble)
 				}
 				if cgoIsPinnerType(node, valueSpec) {
 					for _, name := range valueSpec.Names {
-						pinnerVars[name.Name] = true
+						facts.pinnerVars[name.Name] = true
 					}
 				}
 				for i, name := range valueSpec.Names {
 					if i < len(valueSpec.Values) {
-						record(name.Name, valueSpec.Values[i])
+						facts.record(name.Name, valueSpec.Values[i])
 					}
 				}
 			}
 		case *ast.CallExpr:
-			if name, ok := cgoCallOf(node); ok {
-				calls = append(calls, &cgoCallEvent{call: node, name: name, pos: node.Pos()})
-				// Calls nested inside a C call's arguments are separate C
-				// calls in cgo's own walk; ast.Inspect still visits them.
-				return true
-			}
 			if sel, ok := node.Fun.(*ast.SelectorExpr); ok {
-				if recv, ok := sel.X.(*ast.Ident); ok && pinnerVars[recv.Name] {
+				if recv, ok := sel.X.(*ast.Ident); ok && facts.pinnerVars[recv.Name] {
 					switch sel.Sel.Name {
 					case "Pin":
 						if len(node.Args) == 1 {
-							if id, ok := node.Args[0].(*ast.Ident); ok {
-								pins = append(pins, cgoPinEvent{pos: node.Pos(), target: id.Name})
+							// Pin(&s.other) pins s.other, Pin(p) pins p: the
+							// targets are the base identifiers of the pinned
+							// expression, chased through single definitions.
+							targets := cgoBaseIdents(node.Args[0], nil, 0)
+							if len(targets) > 0 {
+								facts.pins = append(facts.pins, cgoPinEvent{pos: node.Pos(), targets: targets})
 							}
 						}
 					case "Unpin":
-						pins = append(pins, cgoPinEvent{pos: node.Pos(), unpin: true})
+						facts.pins = append(facts.pins, cgoPinEvent{pos: node.Pos(), unpin: true})
 					}
 				}
 			}
 		}
 		return true
 	})
+	return facts
+}
 
+func (f *cgoFunctionFacts) record(name string, expr ast.Expr) {
+	if _, seen := f.defs[name]; seen {
+		f.setTwice[name] = true
+	}
+	f.defs[name] = expr
+	if cgoIsCRooted(expr, nil, 0) {
+		f.cOwned[name] = true
+	}
+}
+
+// walkFunction collects the C calls of one function body and classifies each.
+func (w *cgoPointerWalker) walkFunction(fn *ast.FuncDecl, preamble *cgoPreamble) {
+	facts := cgoCollectFacts(fn.Body)
+	var calls []*cgoCallEvent
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		if call, ok := n.(*ast.CallExpr); ok {
+			if name, ok := cgoCallOf(call); ok {
+				calls = append(calls, &cgoCallEvent{call: call, name: name, pos: call.Pos()})
+			}
+		}
+		return true
+	})
 	for _, event := range calls {
-		event.defs = defs
-		event.setTwice = setTwice
-		event.cOwned = cOwned
-		event.pins = pins
+		event.facts = facts
 		classified := cgoCallClassification{walker: w, preamble: preamble}
 		classified.classify(event)
 		w.check.callSites = append(w.check.callSites, classified.site)
@@ -492,6 +537,9 @@ func (c *cgoCallClassification) classify(event *cgoCallEvent) {
 func (c *cgoCallClassification) classifyArgument(event *cgoCallEvent, index int, arg ast.Expr, paramChecksKnown bool, paramChecks []bool) model.NativeCallArgument {
 	argument := model.NativeCallArgument{Index: index}
 	argument.Shape, _ = cgoCheckShape(arg)
+	if pos := c.walker.fset.Position(arg.Pos()); pos.IsValid() {
+		argument.Position = &model.Position{Filename: pos.Filename, Offset: pos.Offset, Line: pos.Line, Column: pos.Column}
+	}
 
 	if paramChecksKnown && !paramChecks[index] {
 		// The parameter is a pointer to a scalar or a scalar itself, the one
@@ -527,12 +575,11 @@ func (c *cgoCallClassification) classifyArgument(event *cgoCallEvent, index int,
 // defined identifier assigned twice resolves to nothing, the safe reading.
 func cgoPointerCarrying(arg ast.Expr, event *cgoCallEvent) bool {
 	expr := arg
-	if id, ok := arg.(*ast.Ident); ok && event != nil {
-		if event.setTwice[id.Name] {
-			return false
-		}
-		if def, ok := event.defs[id.Name]; ok {
+	if id, ok := arg.(*ast.Ident); ok && event != nil && event.facts != nil {
+		if def, ok := event.facts.lookup(id.Name); ok {
 			expr = def
+		} else {
+			return false
 		}
 	}
 	return cgoContainsUnsafePointer(expr, event, 0)
@@ -587,21 +634,23 @@ func cgoIsCRooted(expr ast.Expr, event *cgoCallEvent, depth int) bool {
 		if _, ok := cgoCallOf(e); ok {
 			return true
 		}
+		// In generated code the same call appears as _Cfunc_<name>, and the
+		// conversion helpers cgo synthesises appear only in that form.
+		if isCgoWrapperCall(e) {
+			return true
+		}
 		if len(e.Args) == 1 {
 			return cgoIsCRooted(e.Args[0], event, depth+1)
 		}
 		return false
 	case *ast.Ident:
-		if event == nil {
+		if event == nil || event.facts == nil {
 			return false
 		}
-		if event.cOwned[e.Name] {
+		if event.facts.isCOwned(e.Name) {
 			return true
 		}
-		if event.setTwice[e.Name] {
-			return false
-		}
-		if def, ok := event.defs[e.Name]; ok {
+		if def, ok := event.facts.lookup(e.Name); ok {
 			return cgoIsCRooted(def, event, depth+1)
 		}
 		return false
@@ -647,7 +696,7 @@ func (c *cgoCallClassification) argumentPinned(event *cgoCallEvent, arg ast.Expr
 		return false
 	}
 	var lastUnpin token.Pos
-	for _, pin := range event.pins {
+	for _, pin := range event.facts.pins {
 		if pin.pos >= event.pos {
 			break
 		}
@@ -658,8 +707,8 @@ func (c *cgoCallClassification) argumentPinned(event *cgoCallEvent, arg ast.Expr
 		if pin.pos < lastUnpin {
 			continue
 		}
-		if bases[pin.target] {
-			delete(bases, pin.target)
+		for target := range pin.targets {
+			delete(bases, target)
 		}
 	}
 	return len(bases) == 0
@@ -676,12 +725,16 @@ func cgoBaseIdents(expr ast.Expr, event *cgoCallEvent, depth int) map[string]boo
 		}
 		switch v := e.(type) {
 		case *ast.Ident:
-			out[v.Name] = true
-			if event != nil && !event.setTwice[v.Name] {
-				if def, ok := event.defs[v.Name]; ok {
+			if event != nil && event.facts != nil {
+				if def, ok := event.facts.lookup(v.Name); ok {
+					// A resolved variable stands for its definition: Pin(&s)
+					// covers p := unsafe.Pointer(&s) even though p itself
+					// was never named by Pin.
 					collect(def, d+1)
+					return
 				}
 			}
+			out[v.Name] = true
 		case *ast.ParenExpr:
 			collect(v.X, d+1)
 		case *ast.StarExpr:

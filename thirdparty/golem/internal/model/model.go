@@ -173,12 +173,16 @@ type NativeCallSite struct {
 // is checked with no type information; "unchecked" means cgo emits no check
 // (a nil argument or an unsafe.StringData result). Owner says whose memory
 // the argument points into: "go" for Go memory the runtime will scan, "c" for
-// memory a C call returned, "unknown" when the read cannot tell.
+// memory a C call returned, "unknown" when the read cannot tell. Position is
+// the argument expression's own position, which lets a consumer join the
+// records with the source line and lets golem join the textual view with the
+// checks cgo emitted.
 type NativeCallArgument struct {
-	Index  int    `json:"index"`
-	Shape  string `json:"shape"`
-	Owner  string `json:"owner,omitempty"`
-	Pinned bool   `json:"pinned,omitempty"`
+	Index    int       `json:"index"`
+	Shape    string    `json:"shape"`
+	Owner    string    `json:"owner,omitempty"`
+	Pinned   bool      `json:"pinned,omitempty"`
+	Position *Position `json:"position,omitempty"`
 }
 
 // BuildShapeDelta records a file that exists on disk but was excluded by build
