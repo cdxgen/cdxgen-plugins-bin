@@ -1,0 +1,21 @@
+thirdparty/golem/internal/corpus/annotations.go
+  s_988a2d6d5d81c8::t_333305e76736bb 100-102
+thirdparty/golem/internal/model/model.go
+  s_988a2d6d5d81c8::t_333305e76736bb 825,830
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "5e53d9325d5d2e7b54481280f399bb5469773325",
+  "prompts": {},
+  "sessions": {
+    "s_988a2d6d5d81c8": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_38e72215-9c5a-4b17-81d7-1d9280df1409",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
