@@ -1526,3 +1526,271 @@ fn compiler_mode_keeps_macro_note_when_the_compiler_run_fails() -> Result<()> {
     );
     Ok(())
 }
+
+fn run_report(args: &[&str]) -> Result<serde_json::Value> {
+    let binary = std::env::var("CARGO_BIN_EXE_rusi")?;
+    let output = Command::new(binary).arg("analyze").args(args).output()?;
+    assert!(
+        output.status.success(),
+        "cli stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Ok(serde_json::from_slice(&output.stdout)?)
+}
+
+/// Every `id` of one list, collected from `value[section]`.
+fn ids_of(list: &serde_json::Value) -> Vec<String> {
+    list.as_array()
+        .into_iter()
+        .flatten()
+        .map(|item| item["id"].as_str().expect("item has an id").to_string())
+        .collect()
+}
+
+fn assert_unique(label: &str, ids: &[String]) {
+    let distinct: std::collections::BTreeSet<_> = ids.iter().collect();
+    assert_eq!(distinct.len(), ids.len(), "duplicate ids in {label}");
+}
+
+/// Every string under a `file_path` or `filename` key, anywhere in the report.
+fn collect_file_strings(value: &serde_json::Value, into: &mut Vec<String>) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (key, child) in map {
+                if (key == "file_path" || key == "filename")
+                    && let Some(text) = child.as_str()
+                {
+                    into.push(text.to_string());
+                }
+                collect_file_strings(child, into);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            items
+                .iter()
+                .for_each(|item| collect_file_strings(item, into));
+        }
+        _ => {}
+    }
+}
+
+#[test]
+fn discover_merges_sibling_crates_into_one_root_relative_report() -> Result<()> {
+    let root = fixture_path("multi-crate-root");
+    let root_text = root.to_string_lossy().into_owned();
+    let report = run_report(&[
+        "--dir",
+        &root_text,
+        "--discover",
+        "--exclude",
+        "skipped/**",
+        "--dataflow",
+        "security",
+    ])?;
+
+    let canonical_root = fs::canonicalize(&root)?;
+    assert_eq!(
+        report["options"]["directory"].as_str(),
+        Some(canonical_root.display().to_string().as_str())
+    );
+    assert_eq!(
+        report["runtime"]["working_directory"].as_str(),
+        Some(canonical_root.display().to_string().as_str())
+    );
+
+    // Files: both crates, each under its own directory; the excluded one is out.
+    let files: Vec<&str> = report["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|file| file["path"].as_str().unwrap())
+        .collect();
+    assert_eq!(files, ["alpha/src/main.rs", "beta/src/main.rs"]);
+    assert_eq!(report["packages"].as_array().unwrap().len(), 2);
+
+    // Every file reference in every section is the root-relative path of a file
+    // that exists, or is empty (an external call-graph node has no file).
+    let mut strings = Vec::new();
+    collect_file_strings(&report, &mut strings);
+    assert!(strings.iter().any(|path| path == "alpha/src/main.rs"));
+    assert!(strings.iter().any(|path| path == "beta/src/main.rs"));
+    for path in strings.iter().filter(|path| !path.is_empty()) {
+        assert!(
+            canonical_root.join(path).is_file(),
+            "{path} is not a file relative to the root"
+        );
+    }
+    // No crate-relative path was left behind in any string of the report.
+    assert!(!report.to_string().contains("\"src/main.rs\""));
+
+    // Package manifests keep their absolute paths and exist.
+    for package in report["packages"].as_array().unwrap() {
+        let manifest = PathBuf::from(package["manifest_path"].as_str().unwrap());
+        assert!(manifest.is_absolute() && manifest.is_file());
+        for file in package["files"].as_array().unwrap() {
+            assert!(canonical_root.join(file.as_str().unwrap()).is_file());
+        }
+    }
+
+    // Both crates share a package name, a file name and a function name, so
+    // their ids collide until the merge tells them apart.
+    for section in ["packages", "declarations", "usages", "security_signals"] {
+        assert_unique(section, &ids_of(&report[section]));
+    }
+    let call_graph = &report["call_graph"];
+    let node_ids = ids_of(&call_graph["nodes"]);
+    assert_unique("call graph nodes", &node_ids);
+    assert_unique("call graph edges", &ids_of(&call_graph["edges"]));
+    for edge in call_graph["edges"].as_array().unwrap() {
+        for end in ["source_id", "target_id"] {
+            let id = edge[end].as_str().unwrap();
+            assert!(
+                node_ids.iter().any(|node| node == id),
+                "dangling {end} {id}"
+            );
+        }
+    }
+    assert_eq!(
+        call_graph["stats"]["node_count"].as_u64().unwrap() as usize,
+        node_ids.len()
+    );
+    assert_eq!(
+        report["stats"]["call_graph_node_count"].as_u64().unwrap() as usize,
+        node_ids.len()
+    );
+
+    let data_flow = &report["data_flow"];
+    let flow_nodes = ids_of(&data_flow["nodes"]);
+    let flow_edges = ids_of(&data_flow["edges"]);
+    assert_unique("data-flow nodes", &flow_nodes);
+    assert_unique("data-flow edges", &flow_edges);
+    let slices = ids_of(&data_flow["slices"]);
+    assert_unique("data-flow slices", &slices);
+    assert!(
+        !slices.is_empty(),
+        "the fixture must produce data-flow slices"
+    );
+    for slice in data_flow["slices"].as_array().unwrap() {
+        for end in ["source_id", "sink_id"] {
+            assert!(flow_nodes.iter().any(|n| n == slice[end].as_str().unwrap()));
+        }
+        for id in slice["node_ids"].as_array().unwrap() {
+            assert!(flow_nodes.iter().any(|n| n == id.as_str().unwrap()));
+        }
+        for id in slice["edge_ids"].as_array().unwrap() {
+            assert!(flow_edges.iter().any(|n| n == id.as_str().unwrap()));
+        }
+    }
+    for summary in data_flow["summaries"].as_array().unwrap() {
+        let function_id = summary["function_id"].as_str().unwrap();
+        assert!(
+            report["declarations"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|declaration| declaration["id"] == function_id),
+            "summary names {function_id}, which no declaration carries"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn discover_without_exclude_takes_every_crate_and_skips_target() -> Result<()> {
+    let scratch = temp_path("multi-copy", "d");
+    let source = fixture_path("multi-crate-root");
+    for crate_dir in ["alpha", "beta", "skipped"] {
+        fs::create_dir_all(scratch.join(crate_dir).join("src"))?;
+        for file in ["Cargo.toml", "src/main.rs"] {
+            fs::copy(
+                source.join(crate_dir).join(file),
+                scratch.join(crate_dir).join(file),
+            )?;
+        }
+    }
+    fs::create_dir_all(scratch.join("target/stray/src"))?;
+    fs::copy(
+        source.join("alpha/Cargo.toml"),
+        scratch.join("target/stray/Cargo.toml"),
+    )?;
+    fs::copy(
+        source.join("alpha/src/main.rs"),
+        scratch.join("target/stray/src/main.rs"),
+    )?;
+
+    let report = run_report(&["--dir", scratch.to_str().unwrap(), "--discover"])?;
+    let _ = fs::remove_dir_all(&scratch);
+    let files: Vec<&str> = report["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|file| file["path"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        files,
+        [
+            "alpha/src/main.rs",
+            "beta/src/main.rs",
+            "skipped/src/main.rs"
+        ]
+    );
+    Ok(())
+}
+
+#[test]
+fn repeated_dir_uses_the_common_parent_as_root_unless_told_otherwise() -> Result<()> {
+    let root = fixture_path("multi-crate-root");
+    let alpha = root.join("alpha");
+    let beta = root.join("beta");
+    let report = run_report(&[
+        "--dir",
+        alpha.to_str().unwrap(),
+        "--dir",
+        beta.to_str().unwrap(),
+    ])?;
+    let files: Vec<&str> = report["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|file| file["path"].as_str().unwrap())
+        .collect();
+    assert_eq!(files, ["alpha/src/main.rs", "beta/src/main.rs"]);
+
+    let fixtures = fixture_path("");
+    let report = run_report(&[
+        "--dir",
+        alpha.to_str().unwrap(),
+        "--dir",
+        beta.to_str().unwrap(),
+        "--root",
+        fixtures.to_str().unwrap(),
+    ])?;
+    let files: Vec<&str> = report["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|file| file["path"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        files,
+        [
+            "multi-crate-root/alpha/src/main.rs",
+            "multi-crate-root/beta/src/main.rs"
+        ]
+    );
+    Ok(())
+}
+
+#[test]
+fn single_directory_report_is_the_same_with_and_without_discovery() -> Result<()> {
+    let dir = fixture_path("basic-app");
+    let plain = run_report(&["--dir", dir.to_str().unwrap()])?;
+    let discovered = run_report(&["--dir", dir.to_str().unwrap(), "--discover"])?;
+    assert_eq!(plain, discovered);
+    assert!(
+        plain["files"][0]["path"]
+            .as_str()
+            .is_some_and(|path| path.starts_with("src/"))
+    );
+    Ok(())
+}

@@ -37,6 +37,7 @@ mod import_resolution;
 mod macro_expand;
 mod modeling;
 mod module_tree;
+pub mod multi;
 
 use api_discovery::discover_api_endpoints;
 use cfg::{CfgEvaluator, CfgExpr, CfgOptions};
