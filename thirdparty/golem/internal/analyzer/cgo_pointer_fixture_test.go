@@ -345,3 +345,38 @@ func goEnvOrSkip(t *testing.T, key string) string {
 	}
 	return value
 }
+
+// TestCgoBufferTaintTextualMode runs the corpus taint case with cgo off.
+// The package cannot load — the loader refuses its cgo files — so the
+// http-input flow cannot exist in this mode, and the textual boundary
+// signal is what the report still carries. The point of the test is that
+// both statements stay true: no flow in textual mode, the flow in compiled
+// mode (which the corpus driver asserts), and a cgo object in both.
+func TestCgoBufferTaintTextualMode(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads and analyses the cgo taint case")
+	}
+	report, err := Analyze(Options{
+		Dir:          "../../testdata/corpus/cgo-buffer-taint",
+		IncludeLocal: true,
+		cgoEnabled:   "0",
+		DataFlowMode: "security",
+		ToolVersion:  "test",
+	})
+	if err != nil {
+		t.Fatalf("analyze cgo-buffer-taint with cgo off: %v", err)
+	}
+	if report.Cgo == nil || report.Cgo.FileCount != 1 {
+		t.Fatalf("the textual read lost the cgo file: %+v", report.Cgo)
+	}
+	if findSignal(report, "native-interop") == nil {
+		t.Error("the textual boundary signal is missing in the disabled mode")
+	}
+	if report.DataFlow != nil {
+		for _, slice := range report.DataFlow.Slices {
+			if slice.SourceCategory == "http-input" && slice.SinkCategory == "native-interop" {
+				t.Errorf("a textual-mode run produced the compiled-only flow %s; the package cannot load with cgo off", slice.FlowKey)
+			}
+		}
+	}
+}
