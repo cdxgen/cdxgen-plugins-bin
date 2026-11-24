@@ -247,6 +247,8 @@ Package loading follows the local Go environment. Missing modules, unsupported b
 
 Loading runs with `CGO_ENABLED=0` unless the environment states a choice, because compiling a cgo preamble would run the host C compiler with flags the analysed packages choose (see THREAT_MODEL.md). Export `CGO_ENABLED=1` to load cgo packages through the toolchain as before; the `cgo` object in the report then names the toolchain and whether it carries the go1.26.11/go1.27.4 cgo flag fixes, and packages that import "C" appear with their `#cgo` variables, flag names and risk categories in every mode, collected by reading the source rather than compiling it.
 
+The cgo pointer check is classified per call site in every mode, with three finding families: arguments cgo checks with no type information (`cgo-pointer-check-untyped`), structures C can walk past what the check covers (`cgo-unpinned-reachable`, compiled mode only), and places where the runtime check itself is turned off (`cgocheck-disabled`). The textual mode classifies the way `cmd/cgo/gcc.go` does, without the C prototype; compiled mode confirms the findings against the literal `_cgoCheckPointer` calls in the generated files and adds type-based severity. Per-argument records live on `cgo.callSites[]`. See docs/GOLEM.md, "The cgo pointer check", for what each confidence and property means.
+
 ## Threat Model
 
 Threat model notes live in [THREAT_MODEL.md](THREAT_MODEL.md). In short, Golem treats the analyzed repository as untrusted input, does not run `go:generate`, and avoids copying raw secret values into the report. Source paths, package names, module paths, and symbols can still be sensitive metadata.

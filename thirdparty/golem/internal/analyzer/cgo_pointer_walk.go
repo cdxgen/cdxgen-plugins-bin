@@ -245,6 +245,10 @@ func cParamType(param string) string {
 		// The last plain identifier is the parameter name, unless it is the
 		// only field left, which is an untyped `int`-style parameter.
 		typeFields = typeFields[:len(typeFields)-1]
+	} else if strings.HasPrefix(last, "*") && isCIdentifier(strings.TrimPrefix(last, "*")) && len(typeFields) > 1 {
+		// `char *p` parses as two fields where the star is glued to the
+		// name; the star belongs to the type and the name goes.
+		typeFields[len(typeFields)-1] = "*"
 	}
 	for i, field := range typeFields {
 		if strings.Contains(field, "[") {
@@ -665,6 +669,12 @@ func cgoIsCRooted(expr ast.Expr, event *cgoCallEvent, depth int) bool {
 	case *ast.SliceExpr:
 		return cgoIsCRooted(e.X, event, depth+1)
 	case *ast.SelectorExpr:
+		// A bare C.<name> reference is a C symbol (a function pointer taken
+		// by name, a C variable): the memory behind it is C-side whatever the
+		// conversion around it says.
+		if id, ok := e.X.(*ast.Ident); ok && id.Name == "C" {
+			return true
+		}
 		return cgoIsCRooted(e.X, event, depth+1)
 	}
 	return false

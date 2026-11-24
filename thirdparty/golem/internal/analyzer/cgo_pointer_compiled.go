@@ -232,6 +232,12 @@ func (a *Analyzer) collectClosureChecks(literal *ast.FuncLit, facts, functionFac
 			owner = cgoOwnerC
 		} else if object != nil {
 			owner = cgoOwnerGo
+			// A Go field or variable typed as a C pointer holds a C handle:
+			// the scan stops at non-Go memory even though the value never
+			// passed through a C call in this function.
+			if cgoIsCPointer(pkg.TypesInfo.TypeOf(object)) {
+				owner = cgoOwnerC
+			}
 		}
 		// The pin state the same function body shows: a value pinned before
 		// the check cannot panic the scan, which is what the escalation
@@ -292,6 +298,11 @@ func (a *Analyzer) mergeFileCompiledChecks(record *cgoFile, checks []cgoCompiled
 		}
 	}
 	confirmed := map[key]bool{}
+	// Additions are held apart from the record's signals until every
+	// confirmation is done: appending during the loop could reallocate the
+	// backing array and leave the textual map pointing at a stale copy, the
+	// bug this ordering exists to avoid.
+	var additions []model.SecuritySignal
 	for _, check := range checks {
 		k := key{check.line, check.col}
 		if signal, ok := textual[k]; ok {
@@ -310,10 +321,8 @@ func (a *Analyzer) mergeFileCompiledChecks(record *cgoFile, checks []cgoCompiled
 			// C-owned arguments are never findings: the runtime stops at
 			// non-Go memory, whatever check cgo emitted.
 			argument := argsByPos[k]
-			signal := a.compiledFinding(check, argument)
-			record.pointer.signals = append(record.pointer.signals, signal)
+			additions = append(additions, a.compiledFinding(check, argument))
 			confirmed[k] = true
-			textual[k] = &record.pointer.signals[len(record.pointer.signals)-1]
 		} else {
 			// A bounded check the textual shape already describes.
 			confirmed[k] = true
@@ -329,6 +338,9 @@ func (a *Analyzer) mergeFileCompiledChecks(record *cgoFile, checks []cgoCompiled
 				site.Confidence = "high"
 			}
 		}
+	}
+	if len(additions) > 0 {
+		record.pointer.signals = append(record.pointer.signals, additions...)
 	}
 	// A textual finding whose argument no compiled check covers is the
 	// approximation over-firing, final on a file whose cgo step ran.
@@ -412,6 +424,11 @@ func (a *Analyzer) escalate(check cgoCompiledCheck, severity *string, props map[
 		// nothing to scan and nothing to panic on.
 		return
 	}
+	if check.pkg != nil && check.pkg.TypesInfo != nil && check.object != nil {
+		if cgoIsCPointer(check.pkg.TypesInfo.TypeOf(check.object)) {
+			return
+		}
+	}
 	if check.pinned {
 		// A pinned object cannot panic the scan; the expensive scan still
 		// runs, so the finding stays, at medium severity.
@@ -476,7 +493,12 @@ func cgoCheckedObject(arg ast.Expr, event *cgoCallEvent) (object ast.Expr, addre
 			}
 			return nil, addressed
 		case *ast.SelectorExpr:
-			// &s.f scans s: the object is the receiver.
+			// &s.f scans s: the object is the receiver. Without an address
+			// of, though, the selector IS the value C receives (a handle
+			// field such as c.db), and its own type is the pointee.
+			if !addressed {
+				return e, addressed
+			}
 			expr = e.X
 		case *ast.IndexExpr:
 			// &a[i] scans a's backing array.
@@ -635,6 +657,35 @@ func (a *Analyzer) maybeUnpinnedReachableFinding(record *cgoFile, check cgoCompi
 // levels of pointers from the value it receives.
 const cgoCheckFollowsLevels = 2
 
+// cgoIsCType reports whether the type is one of the _Ctype_ named types cgo
+// synthesises for C types.
+func cgoIsCType(t types.Type) bool {
+	named, ok := types.Unalias(t).(*types.Named)
+	if !ok {
+		return false
+	}
+	return strings.HasPrefix(named.Obj().Name(), "_Ctype_")
+}
+
+// cgoIsCPointer reports whether the type is a pointer to a C type, directly
+// or through a Go named type defined over one (the wrapper pattern build-tag
+// files use to keep one type name across platforms). The memory behind such
+// a pointer is C-side, whatever the Go name on it is.
+func cgoIsCPointer(t types.Type) bool {
+	if t == nil {
+		return false
+	}
+	t = types.Unalias(t)
+	if cgoIsCType(t) {
+		return false
+	}
+	ptr, ok := t.Underlying().(*types.Pointer)
+	if !ok {
+		return false
+	}
+	return cgoIsCType(types.Unalias(ptr.Elem()))
+}
+
 // cgoTypeRecursive reports whether the type contains a pointer path back to
 // itself: a struct with a field pointing to its own type, directly or
 // through a slice, an array or another struct.
@@ -645,6 +696,11 @@ func cgoTypeRecursive(t types.Type, path map[types.Type]bool, depth int) bool {
 	t = types.Unalias(t)
 	if path[t] {
 		return true
+	}
+	// A C type is C memory: what lies behind it is C's own structure and
+	// never a Go node to pin.
+	if cgoIsCType(t) {
+		return false
 	}
 	switch u := t.Underlying().(type) {
 	case *types.Pointer:
@@ -675,6 +731,11 @@ func cgoPointerChainDepth(t types.Type, seen map[types.Type]bool, hops int, dept
 	}
 	t = types.Unalias(t)
 	if seen[t] {
+		return hops
+	}
+	if cgoIsCType(t) {
+		// C memory ends the Go-side walk: there is nothing behind it for the
+		// pin recommendation to cover.
 		return hops
 	}
 	seen[t] = true

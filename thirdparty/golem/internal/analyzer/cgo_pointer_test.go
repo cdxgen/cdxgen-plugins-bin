@@ -148,3 +148,8 @@ func parseTestExpr(t *testing.T, expr string) ast.Expr {
 	}
 	return found
 }
+
+func mustShape(arg ast.Expr) string {
+	s, _ := cgoCheckShape(arg)
+	return s
+}
