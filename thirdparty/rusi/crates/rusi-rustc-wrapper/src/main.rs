@@ -13,6 +13,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::{Context, Result};
 use indexmap::IndexMap;
@@ -25,7 +26,7 @@ use rusi_schema::{
     CryptoFinding, CryptoLibrary, CryptoMaterial, DataFlowEdge, DataFlowEvidence,
     DataFlowMethodSummary, DataFlowNode, DataFlowPattern, DataFlowPatternSet, DataFlowSlice,
     DataFlowStats, Declaration, Diagnostic, ExpandedFrom, FileEvidence, GraphStats, ImportUsage,
-    LibraryUsage, Position, SecuritySignal, relative_display_path, stable_id,
+    LibraryUsage, Position, SecuritySignal, WrapperWorkCounts, relative_display_path, stable_id,
 };
 use rustc_driver_impl::{Callbacks, Compilation};
 // `rustc_driver_impl::run_compiler` became `compiler_entrypoint` (same
@@ -379,6 +380,7 @@ impl EmbeddedCollector {
             },
             call_graph: Some(call_graph),
             data_flow: Some(data_flow),
+            work_counts: Some(wrapper_work_counts()),
         }
     }
 
@@ -3187,6 +3189,22 @@ fn method_suffix(target_name: &str) -> String {
     last_segment(&canonical_call_symbol(target_name)).to_string()
 }
 
+/// Work counters this wrapper process accumulated, sent to the driver through
+/// the crate artifact so the `--stats-json` document can report the compiler
+/// backend's work next to the stable backend's. The wrapper analyzes crates
+/// sequentially in one process, so plain atomics are enough.
+static SUMMARY_EVALUATIONS: AtomicU64 = AtomicU64::new(0);
+static ABSTRACT_BLOCK_EVALUATIONS: AtomicU64 = AtomicU64::new(0);
+static CONCRETE_BLOCK_EVALUATIONS: AtomicU64 = AtomicU64::new(0);
+
+fn wrapper_work_counts() -> WrapperWorkCounts {
+    WrapperWorkCounts {
+        summary_evaluations: SUMMARY_EVALUATIONS.load(Ordering::Relaxed),
+        block_evaluations_abstract: ABSTRACT_BLOCK_EVALUATIONS.load(Ordering::Relaxed),
+        block_evaluations_concrete: CONCRETE_BLOCK_EVALUATIONS.load(Ordering::Relaxed),
+    }
+}
+
 fn build_data_flow(
     functions: &[MirFunction],
     diagnostics: &mut Vec<Diagnostic>,
@@ -3238,6 +3256,7 @@ fn infer_summaries(
     debug: bool,
 ) -> BTreeMap<String, FunctionSummary> {
     let (summaries, evaluations) = summary_fixpoint(functions, ctx, debug);
+    SUMMARY_EVALUATIONS.fetch_add(evaluations as u64, Ordering::Relaxed);
     debug_log(
         debug,
         format_args!(
@@ -3370,6 +3389,7 @@ fn summarize_function(function: &MirFunction, pass: &SummaryPass<'_, '_>) -> Fun
             }
         }
     }
+    ABSTRACT_BLOCK_EVALUATIONS.fetch_add(worklist.evaluations() as u64, Ordering::Relaxed);
     for (block_index, (block, state)) in function.blocks.iter().zip(in_states).enumerate() {
         let Some(mut state) = state else {
             continue;
@@ -3957,6 +3977,7 @@ impl<'a> DataFlowBuilder<'a> {
                 }
             }
         }
+        CONCRETE_BLOCK_EVALUATIONS.fetch_add(worklist.evaluations() as u64, Ordering::Relaxed);
         self.emitting = true;
         for &block in &graph.order {
             if let Some(state) = in_states[block].take() {

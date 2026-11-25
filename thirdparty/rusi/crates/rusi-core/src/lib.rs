@@ -38,6 +38,7 @@ mod macro_expand;
 mod modeling;
 mod module_tree;
 pub mod multi;
+pub mod stats;
 
 use api_discovery::discover_api_endpoints;
 use cfg::{CfgEvaluator, CfgExpr, CfgOptions};
@@ -134,6 +135,9 @@ pub struct CompilerBackendPayload {
     pub rustc_version: Option<String>,
     /// `cargo --version` of that same toolchain.
     pub cargo_version: Option<String>,
+    /// Work counters the wrapper's data-flow passes measured, summed over the
+    /// crate artifacts the driver merged. None for a payload with no counts.
+    pub work_counts: Option<rusi_schema::WrapperWorkCounts>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -378,6 +382,7 @@ fn run_operations<S: Clone>(
     state: &mut S,
     visit: &mut dyn FnMut(&Operation, &mut S, bool),
     join: fn(&mut S, &S) -> bool,
+    pass: stats::AnalysisPass,
 ) {
     fn count(loops: &[LoopNode]) -> usize {
         loops.iter().map(|node| 1 + count(&node.children)).sum()
@@ -386,6 +391,7 @@ fn run_operations<S: Clone>(
         operations,
         visit,
         join,
+        pass,
         settled: (0..count(loops)).map(|_| None).collect(),
     }
     .run(0, operations.len(), loops, state, true);
@@ -395,6 +401,9 @@ struct OperationWalk<'o, 'v, S> {
     operations: &'o [Operation],
     visit: &'v mut dyn FnMut(&Operation, &mut S, bool),
     join: fn(&mut S, &S) -> bool,
+    /// Which pass this walk belongs to, so its loop walks and state clones
+    /// land in that pass's `--stats-json` counters.
+    pass: stats::AnalysisPass,
     /// Each loop's settled head, by [`LoopNode::index`], once it has one.
     settled: Vec<Option<S>>,
 }
@@ -425,14 +434,19 @@ impl<S: Clone> OperationWalk<'_, '_, S> {
             *state = head;
         }
         while !settled {
+            stats::record_loop_walks(self.pass, 1);
+            stats::record_state_clones(self.pass, 1);
             let mut body = state.clone();
             self.run(node.start, node.end, &node.children, &mut body, false);
             settled = !(self.join)(state, &body);
         }
         if emit {
+            stats::record_loop_walks(self.pass, 1);
+            stats::record_state_clones(self.pass, 1);
             let mut body = state.clone();
             self.run(node.start, node.end, &node.children, &mut body, true);
         }
+        stats::record_state_clones(self.pass, 1);
         self.settled[node.index] = Some(state.clone());
     }
 }
@@ -1059,58 +1073,60 @@ fn analyze_on_this_thread(
         }
     }
 
-    let mut analyzed_files = Vec::new();
     debug_log(
         options.debug,
         format_args!("pass=stable-file-analysis files={}", analysis_tasks.len()),
     );
-    let macro_table = std::sync::Arc::new(build_macro_table(
-        &metadata,
-        &analysis_root,
-        options.debug,
-        &analysis_tasks,
-    ));
-    let mut parse_diagnostics = parallel_map_collect(&analysis_tasks, |task| {
-        match analyze_file(
-            &task.package_ctx,
+    let mut analyzed_files = stats::time_phase("parse", || {
+        let macro_table = std::sync::Arc::new(build_macro_table(
+            &metadata,
             &analysis_root,
-            &task.path,
-            &task.module_path,
-            &task.crate_path,
-            &task.evaluator,
-            task.collect_bodies,
-            &macro_table,
-        ) {
-            Ok(file) => {
-                debug_log(
-                    options.debug,
-                    format_args!(
-                        "pass=stable-file-analysis file={}",
-                        relative_display_path(&analysis_root, &task.path)
-                    ),
-                );
-                Ok(file)
+            options.debug,
+            &analysis_tasks,
+        ));
+        let mut parse_diagnostics = parallel_map_collect(&analysis_tasks, |task| {
+            match analyze_file(
+                &task.package_ctx,
+                &analysis_root,
+                &task.path,
+                &task.module_path,
+                &task.crate_path,
+                &task.evaluator,
+                task.collect_bodies,
+                &macro_table,
+            ) {
+                Ok(file) => {
+                    debug_log(
+                        options.debug,
+                        format_args!(
+                            "pass=stable-file-analysis file={}",
+                            relative_display_path(&analysis_root, &task.path)
+                        ),
+                    );
+                    Ok(file)
+                }
+                // Boxed so the per-file result stays small: a parse failure is
+                // the rare path, while every successfully analyzed file would
+                // otherwise carry the unused Diagnostic's footprint.
+                Err(error) => Err(Box::new(Diagnostic {
+                    kind: "parse".to_string(),
+                    message: error.to_string(),
+                    package_path: Some(task.package_ctx.crate_name.clone()),
+                    file_path: Some(relative_display_path(&analysis_root, &task.path)),
+                    position: None,
+                })),
             }
-            // Boxed so the per-file result stays small: a parse failure is
-            // the rare path, while every successfully analyzed file would
-            // otherwise carry the unused Diagnostic's footprint.
-            Err(error) => Err(Box::new(Diagnostic {
-                kind: "parse".to_string(),
-                message: error.to_string(),
-                package_path: Some(task.package_ctx.crate_name.clone()),
-                file_path: Some(relative_display_path(&analysis_root, &task.path)),
-                position: None,
-            })),
+        });
+        let mut parsed = Vec::new();
+        for result in parse_diagnostics.drain(..) {
+            match result {
+                Ok(file) => parsed.push(file),
+                Err(diagnostic) => diagnostics.push(*diagnostic),
+            }
         }
+        parsed.sort_by(|left, right| left.file.path.cmp(&right.file.path));
+        parsed
     });
-    for result in parse_diagnostics.drain(..) {
-        match result {
-            Ok(file) => analyzed_files.push(file),
-            Err(diagnostic) => diagnostics.push(*diagnostic),
-        }
-    }
-    analyzed_files.sort_by(|left, right| left.file.path.cmp(&right.file.path));
-
     debug_log(options.debug, format_args!("pass=import-resolution"));
     for glob in resolve_imports(&mut analyzed_files) {
         diagnostics.push(Diagnostic {
@@ -1232,19 +1248,25 @@ fn analyze_on_this_thread(
         static_initializers.append(&mut analyzed.static_initializers);
     }
 
+    stats::work().functions.fetch_add(
+        all_functions.len() as u64,
+        std::sync::atomic::Ordering::Relaxed,
+    );
     let fallback_call_graph = if options.call_graph_mode != "none" {
         debug_log(
             options.debug,
             format_args!("pass=stable-callgraph functions={}", all_functions.len()),
         );
-        Some(build_call_graph(
-            &all_functions,
-            &trait_index,
-            &field_types,
-            &field_element_types,
-            &local_types,
-            options.max_call_candidates,
-        ))
+        Some(stats::time_phase("call_graph", || {
+            build_call_graph(
+                &all_functions,
+                &trait_index,
+                &field_types,
+                &field_element_types,
+                &local_types,
+                options.max_call_candidates,
+            )
+        }))
     } else {
         None
     };
@@ -1284,6 +1306,9 @@ fn analyze_on_this_thread(
     };
 
     if let Some(payload) = compiler_payload {
+        if let Some(counts) = payload.work_counts {
+            stats::record_compiler_counts(counts);
+        }
         debug_log(options.debug, format_args!("pass=compiler-payload-merge"));
         merge_file_evidence(&mut report.files, payload.files);
         extend_unique_imports(&mut report.imports, payload.imports);
@@ -1313,6 +1338,12 @@ fn analyze_on_this_thread(
     }
 
     report.diagnostics = diagnostics;
+    if let Some(call_graph) = &report.call_graph {
+        stats::work().call_graph_edges.fetch_add(
+            call_graph.edges.len() as u64,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+    }
     if options.analysis_scope == AnalysisScope::Cryptos {
         retain_crypto_focus(&mut report);
     }
@@ -1321,20 +1352,22 @@ fn analyze_on_this_thread(
     // crypto operations participate in which API endpoint flow (e.g.
     // "this /auth/login endpoint touches sha2::Sha256::digest and
     // jsonwebtoken::EncodingKey::from_secret").
-    debug_log(options.debug, format_args!("pass=api-discovery"));
-    let framework_purls = build_framework_purls(&metadata);
-    report.api_endpoints = discover_api_endpoints(
-        &package_contexts,
-        &analysis_root,
-        &report.imports,
-        &framework_purls,
-    );
-    debug_log(options.debug, format_args!("pass=normalize-report"));
-    normalize_report(&mut report);
-    debug_log(options.debug, format_args!("pass=canonical-names"));
-    report.fill_canonical_names();
-    debug_log(options.debug, format_args!("pass=stats"));
-    report.stats = compute_stats(&report);
+    stats::time_phase("export", || {
+        debug_log(options.debug, format_args!("pass=api-discovery"));
+        let framework_purls = build_framework_purls(&metadata);
+        report.api_endpoints = discover_api_endpoints(
+            &package_contexts,
+            &analysis_root,
+            &report.imports,
+            &framework_purls,
+        );
+        debug_log(options.debug, format_args!("pass=normalize-report"));
+        normalize_report(&mut report);
+        debug_log(options.debug, format_args!("pass=canonical-names"));
+        report.fill_canonical_names();
+        debug_log(options.debug, format_args!("pass=stats"));
+        report.stats = compute_stats(&report);
+    });
     debug_log(options.debug, format_args!("pass=done"));
     if hygiene_renamed {
         report = strip_hygiene_suffixes(&report)?;
@@ -6741,6 +6774,9 @@ fn resolve_call_target(
     local_index: &HashMap<String, Vec<String>>,
     trait_index: Option<&TraitImplIndex>,
 ) -> Option<String> {
+    stats::work()
+        .resolve_call_target_calls
+        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let normalized = normalize_local_path(callee, package_path);
     if let Some(ids) = local_index.get(&normalized)
         && ids.len() == 1
@@ -8496,7 +8532,9 @@ fn build_data_flow(
         field_element_types,
         return_types: &ReturnTypeIndex::build(functions),
     };
-    let summaries = infer_summaries(functions, &local_index, &patterns, &indexes);
+    let summaries = stats::time_phase("summary_fixpoint", || {
+        infer_summaries(functions, &local_index, &patterns, &indexes)
+    });
     let static_source_seeds = infer_static_source_seeds(
         functions,
         static_initializers,
@@ -8504,18 +8542,20 @@ fn build_data_flow(
         &local_index,
         &patterns,
     );
-    let partials = parallel_map_collect(functions, |function| {
-        let mut builder = DataFlowBuilder::new(
-            mode,
-            &patterns,
-            &summaries,
-            &local_index,
-            &function_map,
-            &indexes,
-            &static_source_seeds,
-        );
-        builder.materialize_function(function);
-        builder
+    let partials = stats::time_phase("concrete_pass", || {
+        parallel_map_collect(functions, |function| {
+            let mut builder = DataFlowBuilder::new(
+                mode,
+                &patterns,
+                &summaries,
+                &local_index,
+                &function_map,
+                &indexes,
+                &static_source_seeds,
+            );
+            builder.materialize_function(function);
+            builder
+        })
     });
     let mut builder = DataFlowBuilder::new(
         mode,
@@ -11235,6 +11275,9 @@ fn infer_summaries_counted(
         }
     }
     let evaluations = waves.evaluations();
+    stats::work()
+        .summary_evaluations
+        .fetch_add(evaluations as u64, std::sync::atomic::Ordering::Relaxed);
     (summaries, evaluations)
 }
 
@@ -11597,6 +11640,7 @@ fn summarize_function(
             }
         },
         join_abstract_env,
+        stats::AnalysisPass::Summary,
     );
     summary
 }
@@ -11882,6 +11926,7 @@ fn eval_abstract_expr(
             // field taints) is handled in the `SimpleExpr::Field` arm.
             let mut taint = env.get(name).cloned().unwrap_or_default();
             let prefix = format!("{}.", name);
+            stats::record_env_scan(stats::AnalysisPass::Summary, env.len() as u64);
             for (key, value) in env {
                 if key.starts_with(&prefix) {
                     taint.extend(value.iter().cloned());
@@ -12190,6 +12235,7 @@ impl<'a> DataFlowBuilder<'a> {
             &mut env,
             &mut |operation, env, emit| self.materialize_operation(function, operation, env, emit),
             join_concrete_env,
+            stats::AnalysisPass::Concrete,
         );
         self.emitting = true;
     }
@@ -12649,6 +12695,7 @@ impl<'a> DataFlowBuilder<'a> {
                     .cloned()
                     .unwrap_or(ConcreteTaint { paths: vec![] });
                 let prefix = format!("{}.", name);
+                stats::record_env_scan(stats::AnalysisPass::Concrete, env.len() as u64);
                 for (key, value) in env {
                     if key.starts_with(&prefix) {
                         taint.paths.extend(value.paths.iter().cloned());
@@ -13355,6 +13402,9 @@ fn forwarded_method_source(
 }
 
 fn find_source_pattern(callee: &str, patterns: &[DataFlowPattern]) -> Option<SourcePatternMatch> {
+    stats::work()
+        .find_source_pattern_calls
+        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let normalized = normalize_pattern_text(callee);
     patterns
         .iter()
@@ -13370,6 +13420,9 @@ fn find_sink_pattern(
     receiver_type: Option<&str>,
     patterns: &[DataFlowPattern],
 ) -> Option<SinkPatternMatch> {
+    stats::work()
+        .find_sink_pattern_calls
+        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let normalized = normalize_pattern_text(callee);
     patterns
         .iter()
@@ -18471,6 +18524,7 @@ pub fn total() -> usize {{ cnt!({long}) }}
             data_flow: None,
             rustc_version: None,
             cargo_version: None,
+            work_counts: None,
         };
 
         let report = analyze_with_optional_compiler(
@@ -18838,6 +18892,7 @@ pub fn total() -> usize {{ cnt!({long}) }}
             data_flow: None,
             rustc_version: None,
             cargo_version: None,
+            work_counts: None,
         };
 
         let report = analyze_with_optional_compiler(
@@ -19200,6 +19255,7 @@ pub fn total() -> usize {{ cnt!({long}) }}
             data_flow: None,
             rustc_version: None,
             cargo_version: None,
+            work_counts: None,
         };
 
         let stable_report = analyze(AnalyzeOptionsInput {
@@ -21431,6 +21487,7 @@ pub fn run(rows: Vec<Vec<String>>) {
                 env.insert(target.clone(), origins);
             },
             join_abstract_env,
+            crate::stats::AnalysisPass::Summary,
         );
         assert!(env["x0"].contains(&source));
         // The first trip reads the source into `x{links}`; one more trip per
@@ -21526,6 +21583,7 @@ pub fn run(rows: Vec<Vec<String>>) {
                 step_tainted(operation, state);
             },
             join_tainted,
+            crate::stats::AnalysisPass::Concrete,
         );
         assert_eq!(state, Tainted::from(["a".to_string(), "b".to_string()]));
         assert_eq!(visits[innermost], (3, 1));
@@ -21667,6 +21725,7 @@ pub fn run(rows: Vec<Vec<String>>) {
                     step_tainted(operation, state);
                 },
                 join_tainted,
+                crate::stats::AnalysisPass::Concrete,
             );
             assert_eq!(state, expected_state, "case {case}: final state");
             for (index, states) in emitted.iter().enumerate() {
