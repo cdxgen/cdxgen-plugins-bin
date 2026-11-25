@@ -1,0 +1,51 @@
+thirdparty/golem/internal/analyzer/analyzer_test.go
+  s_9a5b80e5d116ed::t_580cfe11ad737c 372,537,851,934,958
+thirdparty/golem/internal/analyzer/cgo_pointer_fixture_test.go
+  s_9a5b80e5d116ed::t_4a37a32030d3f7 95,443
+thirdparty/golem/internal/analyzer/cgo_test.go
+  s_9a5b80e5d116ed::t_3b4d2463483933 179
+thirdparty/golem/internal/analyzer/corpus_test.go
+  s_9a5b80e5d116ed::t_c5bc5bc78e3c11 48
+thirdparty/golem/internal/analyzer/options.go
+  s_9a5b80e5d116ed::t_9e728013ea358a 52-58
+thirdparty/golem/internal/analyzer/report.go
+  s_9a5b80e5d116ed::t_504288c8dae94e 65
+thirdparty/golem/internal/analyzer/seam_parity_test.go
+  s_9a5b80e5d116ed::t_a8ea2a10fcf36c 86
+thirdparty/golem/internal/bench/bench.go
+  s_9a5b80e5d116ed::t_846afc52c11d98 172-181,200
+thirdparty/golem/internal/bench/digest.go
+  s_9a5b80e5d116ed::t_77c21a188b7f73 33-35,101,325-331
+thirdparty/golem/testdata/golden/go-chi-exported-roots.digest.json
+  s_9a5b80e5d116ed::t_ad1c4c7040f2cd 6
+thirdparty/golem/testdata/golden/go-chi-security.digest.json
+  s_9a5b80e5d116ed::t_27b60346960904 6
+thirdparty/golem/testdata/golden/go-test-bench-all.digest.json
+  s_9a5b80e5d116ed::t_cc3cecb324b0ef 5-6,9,11,16,21-22,24,27-30,32-34,36,40-41
+thirdparty/golem/testdata/golden/go-test-bench-security.digest.json
+  s_9a5b80e5d116ed::t_cf60525904a8d1 5-6,9,11,16,21-22,24,27-30,32-34,36
+thirdparty/golem/testdata/golden/gorilla-mux-exported-roots.digest.json
+  s_9a5b80e5d116ed::t_6fa86162d7931f 6
+thirdparty/golem/testdata/golden/gorilla-mux-security.digest.json
+  s_9a5b80e5d116ed::t_adde2175e64d80 6
+thirdparty/golem/testdata/golden/shiftleft-go-demo-all.digest.json
+  s_9a5b80e5d116ed::t_b3407012618053 5-6,9,11,16-20,24-25,27,30,32,34-36,38,42-45,50,53-54,56,59
+thirdparty/golem/testdata/golden/shiftleft-go-demo-security.digest.json
+  s_9a5b80e5d116ed::t_23a779c5553a33 5-6,9,11,16-20,24-25,27,30,32,34-36,38,42-45,50,53-54,56,59
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "895d6d1c0b0b1e52fc51a6c29a8e513b2470c83d",
+  "prompts": {},
+  "sessions": {
+    "s_9a5b80e5d116ed": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2e2ab37a-699a-4730-ad3b-185cb7d55824",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
