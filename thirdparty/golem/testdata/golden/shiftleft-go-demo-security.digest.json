@@ -2,71 +2,62 @@
   "fixture": "shiftleft-go-demo",
   "commit": "da1198ad49be7940af11f0af9763dfa061a80f4d",
   "config": "security",
-  "schemaVersion": "https://cdxgen.github.io/cdxgen-plugins-bin/golem/schema/v6",
+  "schemaVersion": "https://cdxgen.github.io/cdxgen-plugins-bin/golem/schema/v7",
+  "cgoMode": "disabled",
   "counts": {
     "apiEndpoints": 22,
-    "buildDirectives": 0,
+    "buildDirectives": 2,
     "declarations": 124,
-    "files": 21,
+    "files": 23,
     "imports": 124,
     "modules": 9,
     "nativeArtifacts": 0,
     "packages": 15,
-    "securitySignals": 24,
-    "usages": 278
+    "securitySignals": 26,
+    "usages": 275
+  },
+  "diagnosticKinds": {
+    "package": 1
   },
   "callGraph": {
     "algorithm": "rta",
-    "nodeCount": 147,
-    "edgeCount": 903,
+    "nodeCount": 142,
+    "edgeCount": 892,
     "nodesByKind": {
-      "function": 147
+      "function": 142
     },
     "edgesByCallType": {
-      "func-value": 292,
+      "func-value": 287,
       "interface": 357,
-      "static": 254
+      "static": 248
     },
-    "nodeSetHash": "1f8f4c0b18721273",
-    "edgeSetHash": "186f895bc0d055c6",
-    "syntheticNodes": 33,
+    "nodeSetHash": "ed8bb3097e8e261e",
+    "edgeSetHash": "07f712ffb1d19f3a",
+    "syntheticNodes": 31,
     "stdlibNodes": 0,
-    "externalNodes": 43
+    "externalNodes": 39
   },
   "dataFlow": {
     "mode": "security",
-    "nodeCount": 42,
-    "edgeCount": 35,
-    "sliceCount": 13,
-    "uniqueFlowCount": 8,
+    "nodeCount": 38,
+    "edgeCount": 32,
+    "sliceCount": 11,
+    "uniqueFlowCount": 6,
     "summaryCount": 0,
     "flowsByCategoryPair": {
       "http-input-\u003edata": 2,
       "http-input-\u003elogging": 4,
-      "http-input-\u003epanic": 1,
-      "http-input-\u003etemplate-injection": 5,
-      "http-input-\u003ezip-slip": 1
+      "http-input-\u003etemplate-injection": 5
     },
     "flowsBySeverity": {
-      "high": 8,
-      "medium": 5
+      "high": 7,
+      "medium": 4
     },
-    "flowKeySetHash": "178c23f05a66d6af",
+    "flowKeySetHash": "e3be3bb8fb4b892f",
     "edgeConnectivity": 1,
     "integrityViolations": 0,
-    "dependencyCrossingSlices": 10,
+    "dependencyCrossingSlices": 8,
     "sampleFlows": [
-      {
-        "flowKey": "df-flow|sha256:0dc4f6cbbb2026ba8276d962377ead012248f9808cb9dd2638e12400a06b40e8",
-        "source": "net/http.(*Request)",
-        "sink": "panic",
-        "sourceAt": "vulnerability/path-traversal/traversal.go:20",
-        "sinkAt": "vulnerability/path-traversal/traversal.go:23",
-        "severity": "medium",
-        "pathLength": 2,
-        "connected": true,
-        "taintKinds": "secret,user-input"
-      },
       {
         "flowKey": "df-flow|sha256:209d8d8ccc588384d537709fb6442765daea99482abd485242a0d15e87ea1813",
         "source": "net/http.(*Request).FormValue",
@@ -132,17 +123,6 @@
         "pathLength": 3,
         "connected": true,
         "taintKinds": "user-input"
-      },
-      {
-        "flowKey": "df-flow|sha256:84f86c8906ce9526d82877d4016699fee049589629db58aade9c9fb28e9dee17",
-        "source": "net/http.(*Request)",
-        "sink": "(*github.com/gen2brain/go-unarr.Archive).Extract",
-        "sourceAt": "vulnerability/path-traversal/traversal.go:20",
-        "sinkAt": "vulnerability/path-traversal/traversal.go:27",
-        "severity": "high",
-        "pathLength": 2,
-        "connected": true,
-        "taintKinds": "path,user-input"
       },
       {
         "flowKey": "df-flow|sha256:b00cae2508e9201cc311e7766984397dc8f3d623bab155e6b634cb10b951b995",

@@ -3,6 +3,7 @@
   "commit": "b4617d0b9670ad14039b2739167fd35a60f557c5",
   "config": "security",
   "schemaVersion": "https://cdxgen.github.io/cdxgen-plugins-bin/golem/schema/v7",
+  "cgoMode": "disabled",
   "counts": {
     "apiEndpoints": 0,
     "buildDirectives": 0,

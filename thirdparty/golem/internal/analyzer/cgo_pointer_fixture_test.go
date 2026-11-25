@@ -92,7 +92,7 @@ func TestCgoPointerFixtures(t *testing.T) {
 					report, err := Analyze(Options{
 						Dir:          dir,
 						IncludeLocal: true,
-						cgoEnabled:   mode.cgoValue,
+						CgoEnabled:   mode.cgoValue,
 						ToolVersion:  "test",
 					})
 					if err != nil {
@@ -440,7 +440,7 @@ func TestCgoBufferTaintTextualMode(t *testing.T) {
 	report, err := Analyze(Options{
 		Dir:          "../../testdata/corpus/cgo-buffer-taint",
 		IncludeLocal: true,
-		cgoEnabled:   "0",
+		CgoEnabled:   "0",
 		DataFlowMode: "security",
 		ToolVersion:  "test",
 	})

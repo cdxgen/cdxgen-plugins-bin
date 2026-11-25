@@ -49,12 +49,13 @@ type Options struct {
 	// such as GOFLAGS would turn an analysis option into command execution in
 	// the toolchain. See THREAT_MODEL.md.
 	Env []string
-	// cgoEnabled, when non-empty, is the CGO_ENABLED every load runs with.
-	// It exists for this package's parallel tests, which cannot touch the
-	// process environment; every consumer outside the package leaves it empty
-	// and the process environment decides (unset means CGO_ENABLED=0, an
-	// explicit value passes through). See effectiveLoadEnv.
-	cgoEnabled       string
+	// CgoEnabled, when non-empty, is the CGO_ENABLED every load runs with.
+	// Empty leaves it to the process environment: unset means CGO_ENABLED=0
+	// and an explicit value passes through (see effectiveLoadEnv). The CLI
+	// leaves it empty so the analyst decides; a harness whose output must
+	// not depend on the shell it runs in (the golden digests, the bench, the
+	// parallel tests that cannot touch the process environment) sets it.
+	CgoEnabled       string
 	MaxProcs         int
 	MemoryLimit      int64
 	Progress         bool

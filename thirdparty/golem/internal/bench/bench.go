@@ -169,6 +169,16 @@ func Run(options Options) ([]Result, error) {
 	return results, nil
 }
 
+// benchCgoEnabled pins the cgo mode of every bench and golden run to
+// golem's shipping default. Left to the process environment, a digest
+// written in a shell that exported CGO_ENABLED=1 disagrees with one written
+// without it: cgo off drops packages that only build with cgo (the
+// shiftleft-go-demo fixture loses its go-unarr flows) and changes the call
+// graph, which is how the stored digests drifted unnoticed. Off is also what
+// the threat model asks for, because cgo on runs the host C compiler with
+// flags the fixture chooses.
+const benchCgoEnabled = "0"
+
 func runSlot(fixture Fixture, slot MatrixSlot, dir string, annotations []corpus.Annotation, env []string, options Options) (Result, error) {
 	maxSlices := slot.DataFlowMax
 	if maxSlices == 0 {
@@ -187,6 +197,7 @@ func runSlot(fixture Fixture, slot MatrixSlot, dir string, annotations []corpus.
 		DataFlowMax:           maxSlices,
 		TaintEngine:           slot.TaintEngine,
 		Env:                   env,
+		CgoEnabled:            benchCgoEnabled,
 		ToolVersion:           "bench",
 	})
 	elapsed := time.Since(started)

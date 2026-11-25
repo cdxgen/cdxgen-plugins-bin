@@ -30,6 +30,9 @@ type Digest struct {
 	Commit        string `json:"commit,omitempty"`
 	Config        string `json:"config"`
 	SchemaVersion string `json:"schemaVersion"`
+	// CgoMode is the cgo mode the load ran with, "enabled" or "disabled". It
+	// changes which packages load at all, so a digest states it.
+	CgoMode string `json:"cgoMode,omitempty"`
 
 	Counts      map[string]int `json:"counts"`
 	Diagnostics map[string]int `json:"diagnosticKinds,omitempty"`
@@ -95,6 +98,7 @@ func BuildDigest(fixture, commit, config, root string, report *model.Report) *Di
 		Commit:        commit,
 		Config:        config,
 		SchemaVersion: report.SchemaVersion,
+		CgoMode:       cgoModeOf(report),
 		Counts: map[string]int{
 			"packages":        report.Stats.PackageCount,
 			"files":           report.Stats.FileCount,
@@ -317,4 +321,11 @@ func nonEmpty(value, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func cgoModeOf(report *model.Report) string {
+	if report.Cgo == nil {
+		return ""
+	}
+	return report.Cgo.Mode
 }

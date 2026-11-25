@@ -62,7 +62,7 @@ func Analyze(options Options) (*model.Report, error) {
 	// module graph can otherwise run the compiler with flags that package
 	// chose (CVE-2026-97033 through CVE-2026-97043, fixed in go1.26.11 and
 	// go1.27.4).
-	cgoPinned := options.cgoEnabled
+	cgoPinned := options.CgoEnabled
 	if cgoPinned == "" {
 		cgoPinned = cgoEnabledFor(os.Environ())
 	}
