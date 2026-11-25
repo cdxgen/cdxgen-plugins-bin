@@ -1,0 +1,25 @@
+thirdparty/golem/testdata/golden/go-chi-exported-roots.digest.json
+  s_988a2d6d5d81c8::t_09856117bdd12a 5
+thirdparty/golem/testdata/golden/go-chi-security.digest.json
+  s_988a2d6d5d81c8::t_0e3e8baa0e47d9 5
+thirdparty/golem/testdata/golden/gorilla-mux-exported-roots.digest.json
+  s_988a2d6d5d81c8::t_fa2f21ed6dde1c 5
+thirdparty/golem/testdata/golden/gorilla-mux-security.digest.json
+  s_988a2d6d5d81c8::t_c774a497cf782a 5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "82199ea019068e0b52eb13f25a710ca90f60de8b",
+  "prompts": {},
+  "sessions": {
+    "s_988a2d6d5d81c8": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_38e72215-9c5a-4b17-81d7-1d9280df1409",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

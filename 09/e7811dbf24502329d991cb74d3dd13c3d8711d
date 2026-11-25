@@ -1,0 +1,19 @@
+.github/workflows/go-test.yml
+  s_9a5b80e5d116ed::t_07cde1783c5a78 129-144
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "09e7811dbf24502329d991cb74d3dd13c3d8711d",
+  "prompts": {},
+  "sessions": {
+    "s_9a5b80e5d116ed": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2e2ab37a-699a-4730-ad3b-185cb7d55824",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

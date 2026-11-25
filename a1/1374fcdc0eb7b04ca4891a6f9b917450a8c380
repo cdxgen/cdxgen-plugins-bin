@@ -1,0 +1,34 @@
+thirdparty/golem/internal/analyzer/cgo_pointer_test.go
+  s_988a2d6d5d81c8::t_085952315b478a 151-154
+  s_988a2d6d5d81c8::t_5c338560f443cd 155
+thirdparty/golem/internal/analyzer/cgo_pointer_walk.go
+  s_988a2d6d5d81c8::t_ae9fd71363a64d 248-251,672-677
+thirdparty/golem/internal/analyzer/cgo_pointer_compiled.go
+  s_988a2d6d5d81c8::t_0401d4dc1aa5a5 235-237,239-240,688,700-701,737-739
+  s_988a2d6d5d81c8::t_ffb78644d6cbc8 238,344,427-431,496-501,660-687,702-704,736,740
+  s_988a2d6d5d81c8::t_dcfb03bd6b82ad 301-305,324,342-343
+thirdparty/golem/testdata/seam-parity.json
+  s_988a2d6d5d81c8::t_72da871c5e44d3 41-43
+docs/GOLEM.md
+  s_988a2d6d5d81c8::t_c1a5de09c88495 130-177
+thirdparty/golem/README.md
+  s_988a2d6d5d81c8::t_4a950a7970223a 250-251
+thirdparty/golem/JSON_ATTRIBUTE_REFERENCE.md
+  s_988a2d6d5d81c8::t_67742b374e7eac 594,596-601,605-653
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a11374fcdc0eb7b04ca4891a6f9b917450a8c380",
+  "prompts": {},
+  "sessions": {
+    "s_988a2d6d5d81c8": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_38e72215-9c5a-4b17-81d7-1d9280df1409",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
