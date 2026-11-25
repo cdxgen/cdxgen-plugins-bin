@@ -2773,4 +2773,114 @@ mod tests {
         VulnFilter(VulnFilter),
     }
 
+    /// Wall times of the old and new sorts, the full rebuild, and a
+    /// one-character query extension, over 50,000 components and 5,000
+    /// vulnerabilities. Run with `cargo test -- --ignored`; the numbers are
+    /// reported, not asserted.
+    #[test]
+    #[ignore = "a benchmark, not a gate: times a 50,000 component BOM"]
+    fn benchmark_50k_components() {
+        let generated = write_temp(&generated_bom_json(50_000, 5_000));
+        let mut store = BomStore::new();
+        let started = std::time::Instant::now();
+        store.load_path(generated.path()).unwrap();
+        println!("load+index: {:?}", started.elapsed());
+
+        // Filter scans. The rebuild also sorts, so each side is measured on
+        // the scan alone, over the same query that matches every row.
+        store.search_components("");
+        let started = std::time::Instant::now();
+        // A query that does not extend the previous one forces the full
+        // scan; "" extends nothing, so this one is full.
+        store.current_filter.query = "l".to_string();
+        store.rebuild_filtered_indices();
+        let full_new = started.elapsed();
+        let count = store.filtered_component_indices.len();
+        println!("full filter scan (new): {full_new:?} ({count} rows)");
+
+        let started = std::time::Instant::now();
+        let (components, services, vulns) = legacy_rebuild(&store);
+        println!(
+            "full filter scan (old): {:?} ({} components, {} services, {} vulns)",
+            started.elapsed(),
+            components.len(),
+            services.len(),
+            vulns.len()
+        );
+
+        // One-character extension, new code: only previously matching rows
+        // are re-matched.
+        store.search_components("l");
+        let started = std::time::Instant::now();
+        store.search_components("li");
+        println!("extend to 'li' (new): {:?}", started.elapsed());
+        store.search_components("lib");
+        println!("extend to 'lib' (new): {:?}", started.elapsed());
+
+        // The same extension, old code.
+        let started = std::time::Instant::now();
+        let _ = legacy_rebuild(&store);
+        println!("re-filter 'lib' (old): {:?}", started.elapsed());
+
+        // Sorts, new code.
+        for field in [
+            SortField::Name,
+            SortField::Version,
+            SortField::Purl,
+            SortField::License,
+            SortField::VulnCount,
+            SortField::MaxSeverity,
+        ] {
+            let started = std::time::Instant::now();
+            store.sort_field = field;
+            store.sort_order = SortOrder::Ascending;
+            store.sort_filtered();
+            println!("sort {:?} (new): {:?}", field, started.elapsed());
+        }
+
+        // Sorts, old code, on a copy of the same index set.
+        for field in [
+            SortField::Name,
+            SortField::Version,
+            SortField::Purl,
+            SortField::License,
+            SortField::VulnCount,
+            SortField::MaxSeverity,
+        ] {
+            let snapshot = store.filtered_component_indices.clone();
+            let started = std::time::Instant::now();
+            store.sort_field = field;
+            let sorted = legacy_sort_components(&mut store, snapshot);
+            println!(
+                "sort {:?} (old): {:?} ({} rows)",
+                field,
+                started.elapsed(),
+                sorted.len()
+            );
+        }
+
+        for field in [
+            VulnSortField::Id,
+            VulnSortField::Package,
+            VulnSortField::Fix,
+        ] {
+            let started = std::time::Instant::now();
+            store.vuln_sort_field = field;
+            store.vuln_sort_order = SortOrder::Ascending;
+            store.sort_vulnerabilities();
+            println!("vuln sort {:?} (new): {:?}", field, started.elapsed());
+        }
+        for field in [VulnSortField::Id, VulnSortField::Package] {
+            let snapshot = store.filtered_vulnerability_indices.clone();
+            let started = std::time::Instant::now();
+            store.vuln_sort_field = field;
+            let sorted = legacy_sort_vulns(&mut store, snapshot);
+            println!(
+                "vuln sort {:?} (old): {:?} ({} rows)",
+                field,
+                started.elapsed(),
+                sorted.len()
+            );
+        }
+    }
 }
