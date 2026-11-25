@@ -9,7 +9,8 @@ use indexmap::IndexMap;
 use proc_macro2::{Span, TokenTree};
 use quote::ToTokens;
 use rusi_schema::fixpoint::{
-    Dependents, KeyedTable, TrackedReads, WaveWorklist, callee_first_order, join_map, join_set,
+    Dependents, IndexedTable, TrackedIndexReads, WaveWorklist, callee_first_order, join_map,
+    join_set,
 };
 use rusi_schema::{
     AnalysisOptions, CallGraph, CallGraphEdge, CallGraphNode, CryptoComponent, CryptoEvidence,
@@ -8708,11 +8709,18 @@ fn build_data_flow(
         return_types: &ReturnTypeIndex::build(functions),
     };
     let tables = CallTables::build(functions, static_initializers, &local_index, &patterns);
-    let summaries = stats::time_phase("summary_fixpoint", || {
+    let summary_rows = stats::time_phase("summary_fixpoint", || {
         infer_summaries(functions, &tables, &indexes)
     });
     let static_source_seeds =
-        infer_static_source_seeds(functions, static_initializers, &summaries, &tables);
+        infer_static_source_seeds(functions, static_initializers, &summary_rows, &tables);
+    // Callers outside the fixpoint address summaries by declaration id, so
+    // the rows return to the keyed map before the concrete pass reads them.
+    let summaries: BTreeMap<String, FunctionSummary> = functions
+        .iter()
+        .zip(summary_rows)
+        .map(|(function, summary)| (function.declaration.id.clone(), summary))
+        .collect();
     let partials = stats::time_phase("concrete_pass", || {
         parallel_map_collect(functions, |function| {
             let mut builder = DataFlowBuilder::new(
@@ -11139,7 +11147,7 @@ struct StaticSeed {
 fn infer_static_source_seeds(
     functions: &[FunctionRecord],
     static_initializers: &[StaticInitializer],
-    summaries: &BTreeMap<String, FunctionSummary>,
+    summaries: &[FunctionSummary],
     tables: &CallTables,
 ) -> HashMap<String, Vec<StaticSeed>> {
     let mut seeds: HashMap<String, Vec<StaticSeed>> = HashMap::new();
@@ -11147,6 +11155,7 @@ fn infer_static_source_seeds(
         |name: &str, via: String, position: &Position, origins: BTreeSet<AbstractOrigin>| {
             for origin in origins {
                 if let AbstractOrigin::Source(category) = origin {
+                    let category = tables.categories.name(category).to_string();
                     let seed = StaticSeed {
                         category,
                         via: via.clone(),
@@ -11387,7 +11396,7 @@ fn infer_summaries(
     functions: &[FunctionRecord],
     tables: &CallTables,
     indexes: &TypeIndexes<'_>,
-) -> BTreeMap<String, FunctionSummary> {
+) -> Vec<FunctionSummary> {
     infer_summaries_counted(functions, tables, indexes).0
 }
 
@@ -11397,36 +11406,28 @@ fn infer_summaries_counted(
     functions: &[FunctionRecord],
     tables: &CallTables,
     indexes: &TypeIndexes<'_>,
-) -> (BTreeMap<String, FunctionSummary>, usize) {
-    let position: HashMap<String, usize> = functions
+) -> (Vec<FunctionSummary>, usize) {
+    let mut summaries: Vec<FunctionSummary> = functions
         .iter()
-        .enumerate()
-        .map(|(index, function)| (function.declaration.id.clone(), index))
-        .collect();
-    let mut summaries: BTreeMap<String, FunctionSummary> = functions
-        .iter()
-        .map(|function| (function.declaration.id.clone(), FunctionSummary::default()))
+        .map(|_| FunctionSummary::default())
         .collect();
     let call_order = callee_first_order(functions.len(), |index| {
         summary_dependencies(&functions[index], tables)
             .into_iter()
-            .filter_map(|id| position.get(&id).copied())
+            .map(|position| position as usize)
             .collect::<Vec<_>>()
     });
     let mut waves = WaveWorklist::new(&call_order);
     let mut dependents = Dependents::new(functions.len());
     while let Some(wave) = waves.pop_wave() {
         let evaluated = parallel_map_collect(&wave, |&index| {
-            let reads = TrackedReads::new(&summaries, &position);
+            let reads = TrackedIndexReads::new(&summaries);
             let summary = summarize_function(&functions[index], &reads, tables, indexes);
             (index, summary, reads.into_reads())
         });
         for (index, summary, reads) in evaluated {
             dependents.record(index, reads);
-            let entry = summaries
-                .get_mut(&functions[index].declaration.id)
-                .expect("every function has a summary");
-            if entry.join(summary) {
+            if summaries[index].join(summary) {
                 for reader in dependents.readers(index) {
                     waves.mark_dirty(reader);
                 }
@@ -11443,13 +11444,8 @@ fn infer_summaries_counted(
 /// The functions whose summaries `function`'s summary may read: every call
 /// target its operations name. Only the order of evaluation depends on
 /// this; the reads themselves are recorded.
-fn summary_dependencies(function: &FunctionRecord, tables: &CallTables) -> BTreeSet<String> {
-    fn visit(
-        expr: &SimpleExpr,
-        package_path: &str,
-        tables: &CallTables,
-        out: &mut BTreeSet<String>,
-    ) {
+fn summary_dependencies(function: &FunctionRecord, tables: &CallTables) -> BTreeSet<u32> {
+    fn visit(expr: &SimpleExpr, package_path: &str, tables: &CallTables, out: &mut BTreeSet<u32>) {
         match expr {
             SimpleExpr::Call { callee, args, .. } => {
                 out.extend(tables.resolve_target(callee, package_path));
@@ -11616,12 +11612,67 @@ fn join_concrete_env_dirty(
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum AbstractOrigin {
     Param(usize),
-    Source(String),
+    /// A source category, interned for the run. Ids are assigned in sorted
+    /// string order, so a set of origins iterates exactly as it did when an
+    /// origin carried the category text.
+    Source(u32),
+}
+
+/// The run's interned source categories.
+///
+/// An origin sits in every environment entry of every fixpoint trip, and
+/// interning keeps those copies a number instead of a category text. The
+/// universe is closed: a category becomes an origin only from a source
+/// pattern's category, from a collector-assigned parameter category, or
+/// from the forwarded-header rules, and a category a callee summary
+/// carries was itself read out of an origin. The text returns at the
+/// boundaries, when a summary is written and when a seed is recorded.
+#[derive(Debug, Clone, Default)]
+struct Categories {
+    /// Id -> category text, in sorted string order.
+    names: Vec<String>,
+    ids: HashMap<String, u32>,
+}
+
+impl Categories {
+    fn build(functions: &[FunctionRecord], patterns: &DataFlowPatternSet) -> Self {
+        let mut names: BTreeSet<String> = patterns
+            .sources
+            .iter()
+            .map(|pattern| pattern.category.clone())
+            .collect();
+        names.insert("proxy-derived".to_string());
+        for function in functions {
+            names.extend(function.param_source_categories.values().cloned());
+        }
+        let ids = names
+            .iter()
+            .enumerate()
+            .map(|(id, name)| (name.clone(), id as u32))
+            .collect();
+        Self {
+            names: names.into_iter().collect(),
+            ids,
+        }
+    }
+
+    /// The id of `name`, assigned in sorted string order.
+    fn id(&self, name: &str) -> u32 {
+        *self
+            .ids
+            .get(name)
+            .expect("a source category outside the interned universe")
+    }
+
+    /// The text of `id`.
+    fn name(&self, id: u32) -> &str {
+        self.names[id as usize].as_str()
+    }
 }
 
 fn summarize_function(
     function: &FunctionRecord,
-    summaries: &impl KeyedTable<FunctionSummary>,
+    summaries: &(impl IndexedTable<FunctionSummary> + ?Sized),
     tables: &CallTables,
     indexes: &TypeIndexes<'_>,
 ) -> FunctionSummary {
@@ -11639,7 +11690,7 @@ fn summarize_function(
     for (idx, param) in function.params.iter().enumerate() {
         let mut origins = BTreeSet::from([AbstractOrigin::Param(idx)]);
         if let Some(category) = function.param_source_categories.get(&idx) {
-            origins.insert(AbstractOrigin::Source(category.clone()));
+            origins.insert(AbstractOrigin::Source(tables.categories.id(category)));
         }
         env.insert(param.clone(), origins);
     }
@@ -11669,7 +11720,14 @@ fn summarize_function(
             } => {
                 let value_taint =
                     eval_abstract_expr(value, env, summaries, &function.package_path, tables);
-                record_summary_field_write(function, target, field, &value_taint, &mut summary);
+                record_summary_field_write(
+                    function,
+                    target,
+                    field,
+                    &value_taint,
+                    &mut summary,
+                    &tables.categories,
+                );
                 let key = format!("{}.{}", target, field);
                 env.insert(key, value_taint);
             }
@@ -11688,7 +11746,7 @@ fn summarize_function(
                                     .param_written_sources
                                     .entry(index)
                                     .or_default()
-                                    .insert(category.clone());
+                                    .insert(tables.categories.name(*category).to_string());
                             }
                             AbstractOrigin::Param(from) => {
                                 summary
@@ -11711,7 +11769,9 @@ fn summarize_function(
                                 summary.param_to_return.insert(*index);
                             }
                             AbstractOrigin::Source(category) => {
-                                summary.returns_source_categories.insert(category.clone());
+                                summary
+                                    .returns_source_categories
+                                    .insert(tables.categories.name(*category).to_string());
                             }
                         }
                     }
@@ -11811,7 +11871,8 @@ fn summarize_function(
                     if matches!(expr, SimpleExpr::Call { .. })
                         && let Some(resolved) =
                             tables.resolve_target(callee, &function.package_path)
-                        && let Some(callee_summary) = summaries.lookup(&resolved).cloned()
+                        && let Some(callee_summary) =
+                            summaries.lookup_index(resolved as usize).cloned()
                     {
                         for (sink_category, parameter_indexes) in callee_summary.param_to_sink {
                             for parameter_index in parameter_indexes {
@@ -11883,6 +11944,7 @@ fn record_summary_write(
     origins: &BTreeSet<AbstractOrigin>,
     env: &mut FunctionEnv<BTreeSet<AbstractOrigin>>,
     summary: &mut FunctionSummary,
+    categories: &Categories,
 ) {
     if origins.is_empty() {
         return;
@@ -11898,7 +11960,7 @@ fn record_summary_write(
                     .param_written_sources
                     .entry(index)
                     .or_default()
-                    .insert(category.clone());
+                    .insert(categories.name(*category).to_string());
             }
             AbstractOrigin::Param(from) if *from != index => {
                 summary
@@ -11931,6 +11993,7 @@ fn record_summary_field_write(
     field: &str,
     origins: &BTreeSet<AbstractOrigin>,
     summary: &mut FunctionSummary,
+    categories: &Categories,
 ) {
     let Some(index) = field_writable_param(function, binding) else {
         return;
@@ -11943,7 +12006,7 @@ fn record_summary_field_write(
                     .param_field_written_sources
                     .entry(key)
                     .or_default()
-                    .insert(category.clone());
+                    .insert(categories.name(*category).to_string());
             }
             AbstractOrigin::Param(from) if *from != index => {
                 summary
@@ -12001,7 +12064,7 @@ fn apply_summary_call_writes(
     args: &[SimpleExpr],
     env: &mut FunctionEnv<BTreeSet<AbstractOrigin>>,
     summary: &mut FunctionSummary,
-    summaries: &impl KeyedTable<FunctionSummary>,
+    summaries: &(impl IndexedTable<FunctionSummary> + ?Sized),
     tables: &CallTables,
 ) {
     let eval = |expr: &SimpleExpr, env: &FunctionEnv<BTreeSet<AbstractOrigin>>| {
@@ -12015,26 +12078,49 @@ fn apply_summary_call_writes(
             stored.extend(eval(arg, env));
         }
         match field {
-            None => record_summary_write(function, receiver, &stored, env, summary),
+            None => record_summary_write(
+                function,
+                receiver,
+                &stored,
+                env,
+                summary,
+                &tables.categories,
+            ),
             Some(field) => {
-                record_summary_field_write(function, receiver, field, &stored, summary);
+                record_summary_field_write(
+                    function,
+                    receiver,
+                    field,
+                    &stored,
+                    summary,
+                    &tables.categories,
+                );
                 env.extend_origins(&format!("{receiver}.{field}"), stored);
             }
         }
     }
     if let Some(source_match) = tables.source_match(callee) {
-        let origins = BTreeSet::from([AbstractOrigin::Source(source_match.category)]);
+        let origins = BTreeSet::from([AbstractOrigin::Source(
+            tables.categories.id(&source_match.category),
+        )]);
         for arg in args {
             if let SimpleExpr::Reference { mutable: true, .. } = arg
                 && let Some(binding) = written_binding(arg, function)
             {
-                record_summary_write(function, binding, &origins, env, summary);
+                record_summary_write(
+                    function,
+                    binding,
+                    &origins,
+                    env,
+                    summary,
+                    &tables.categories,
+                );
             }
         }
     }
     let Some(callee_summary) = tables
         .resolve_target(callee, &function.package_path)
-        .and_then(|resolved| summaries.lookup(&resolved))
+        .and_then(|resolved| summaries.lookup_index(resolved as usize))
     else {
         return;
     };
@@ -12045,9 +12131,16 @@ fn apply_summary_call_writes(
         {
             let origins = categories
                 .iter()
-                .map(|category| AbstractOrigin::Source(category.clone()))
+                .map(|category| AbstractOrigin::Source(tables.categories.id(category)))
                 .collect();
-            record_summary_write(function, binding, &origins, env, summary);
+            record_summary_write(
+                function,
+                binding,
+                &origins,
+                env,
+                summary,
+                &tables.categories,
+            );
         }
     }
     for (index, froms) in &callee_summary.param_written_params {
@@ -12061,7 +12154,14 @@ fn apply_summary_call_writes(
                     origins.extend(eval(arg, env));
                 }
             }
-            record_summary_write(function, binding, &origins, env, summary);
+            record_summary_write(
+                function,
+                binding,
+                &origins,
+                env,
+                summary,
+                &tables.categories,
+            );
         }
     }
     let mut field_writes: Vec<(String, String, BTreeSet<AbstractOrigin>)> = Vec::new();
@@ -12069,7 +12169,7 @@ fn apply_summary_call_writes(
         if let Some(binding) = summary_write_binding(args, *index, callee_summary, function) {
             let origins = categories
                 .iter()
-                .map(|category| AbstractOrigin::Source(category.clone()))
+                .map(|category| AbstractOrigin::Source(tables.categories.id(category)))
                 .collect();
             field_writes.push((binding.to_string(), field.clone(), origins));
         }
@@ -12089,7 +12189,14 @@ fn apply_summary_call_writes(
         if origins.is_empty() {
             continue;
         }
-        record_summary_field_write(function, &binding, &field, &origins, summary);
+        record_summary_field_write(
+            function,
+            &binding,
+            &field,
+            &origins,
+            summary,
+            &tables.categories,
+        );
         env.extend_origins(&format!("{binding}.{field}"), origins);
     }
 }
@@ -12097,7 +12204,7 @@ fn apply_summary_call_writes(
 fn eval_abstract_expr(
     expr: &SimpleExpr,
     env: &FunctionEnv<BTreeSet<AbstractOrigin>>,
-    summaries: &impl KeyedTable<FunctionSummary>,
+    summaries: &(impl IndexedTable<FunctionSummary> + ?Sized),
     package_path: &str,
     tables: &CallTables,
 ) -> BTreeSet<AbstractOrigin> {
@@ -12118,7 +12225,9 @@ fn eval_abstract_expr(
         }
         SimpleExpr::Call { callee, args, .. } => {
             if let Some(source_match) = tables.source_match(callee) {
-                return BTreeSet::from([AbstractOrigin::Source(source_match.category)]);
+                return BTreeSet::from([AbstractOrigin::Source(
+                    tables.categories.id(&source_match.category),
+                )]);
             }
             if tables.is_sanitizer(callee) {
                 return BTreeSet::new();
@@ -12139,10 +12248,10 @@ fn eval_abstract_expr(
 
             let mut taint = BTreeSet::new();
             if let Some(resolved) = tables.resolve_target(callee, package_path)
-                && let Some(summary) = summaries.lookup(&resolved).cloned()
+                && let Some(summary) = summaries.lookup_index(resolved as usize).cloned()
             {
-                for category in summary.returns_source_categories {
-                    taint.insert(AbstractOrigin::Source(category.clone()));
+                for category in &summary.returns_source_categories {
+                    taint.insert(AbstractOrigin::Source(tables.categories.id(category)));
                 }
                 for param_index in summary.param_to_return {
                     if let Some(arg) = args.get(param_index) {
@@ -12205,10 +12314,14 @@ fn eval_abstract_expr(
                 .cloned()
                 .collect::<Vec<_>>();
             if forwarded_method_source(&callee, receiver, args).is_some() {
-                return BTreeSet::from([AbstractOrigin::Source("proxy-derived".to_string())]);
+                return BTreeSet::from([AbstractOrigin::Source(
+                    tables.categories.id("proxy-derived"),
+                )]);
             }
             if let Some(source_match) = tables.source_match(&callee) {
-                return BTreeSet::from([AbstractOrigin::Source(source_match.category)]);
+                return BTreeSet::from([AbstractOrigin::Source(
+                    tables.categories.id(&source_match.category),
+                )]);
             }
             if tables.is_sanitizer(&callee) {
                 return BTreeSet::new();
@@ -12228,10 +12341,10 @@ fn eval_abstract_expr(
             }
             let mut taint = BTreeSet::new();
             if let Some(resolved) = tables.resolve_target(&callee, package_path)
-                && let Some(summary) = summaries.lookup(&resolved).cloned()
+                && let Some(summary) = summaries.lookup_index(resolved as usize).cloned()
             {
-                for category in summary.returns_source_categories {
-                    taint.insert(AbstractOrigin::Source(category.clone()));
+                for category in &summary.returns_source_categories {
+                    taint.insert(AbstractOrigin::Source(tables.categories.id(category)));
                 }
                 for param_index in summary.param_to_return {
                     if let Some(arg) = all_args.get(param_index) {
@@ -12731,7 +12844,8 @@ impl<'a> DataFlowBuilder<'a> {
 
                     if let Some(resolved) =
                         self.tables.resolve_target(callee, &function.package_path)
-                        && let Some(summary) = self.summaries.get(&resolved).cloned()
+                        && let Some(summary) =
+                            self.summaries.get(self.tables.target_id(resolved)).cloned()
                     {
                         for (sink_category, parameter_indexes) in &summary.param_to_sink {
                             for parameter_index in parameter_indexes {
@@ -12751,11 +12865,7 @@ impl<'a> DataFlowBuilder<'a> {
                         // (`fn load(v: &mut String) { *v = env::var(..)
                         // }`): the caller's variable at that position
                         // carries what the summary says was poured in.
-                        let callee_name = self
-                            .function_map
-                            .get(&resolved)
-                            .map(|f| f.declaration.qualified_name.clone())
-                            .unwrap_or_else(|| callee.to_string());
+                        let callee_name = self.tables.target_qualified(resolved);
                         let mut out_param_writes: Vec<(String, ConcreteTaint)> = Vec::new();
                         for (param_index, categories) in &summary.param_written_sources {
                             let Some(var_name) = args
@@ -12768,7 +12878,7 @@ impl<'a> DataFlowBuilder<'a> {
                             for category in categories {
                                 taint.paths.push(self.new_source_path(
                                     function,
-                                    &callee_name,
+                                    callee_name,
                                     category,
                                     position.clone(),
                                     None,
@@ -12808,7 +12918,7 @@ impl<'a> DataFlowBuilder<'a> {
                             for category in categories {
                                 taint.paths.push(self.new_source_path(
                                     function,
-                                    &callee_name,
+                                    callee_name,
                                     category,
                                     position.clone(),
                                     None,
@@ -12956,18 +13066,15 @@ impl<'a> DataFlowBuilder<'a> {
                     return ConcreteTaint { paths };
                 }
                 if let Some(resolved) = self.tables.resolve_target(callee, &function.package_path)
-                    && let Some(summary) = self.summaries.get(&resolved).cloned()
+                    && let Some(summary) =
+                        self.summaries.get(self.tables.target_id(resolved)).cloned()
                 {
                     let mut paths = Vec::new();
                     for category in &summary.returns_source_categories {
-                        let callee_name = self
-                            .function_map
-                            .get(&resolved)
-                            .map(|f| f.declaration.qualified_name.clone())
-                            .unwrap_or_else(|| callee.to_string());
+                        let callee_name = self.tables.target_qualified(resolved);
                         paths.push(self.new_source_path(
                             function,
-                            &callee_name,
+                            callee_name,
                             category,
                             position.clone(),
                             None,
@@ -12977,11 +13084,7 @@ impl<'a> DataFlowBuilder<'a> {
                         if let Some(arg) = args.get(*param_index) {
                             let arg_taint = self.eval_concrete_expr(function, arg, env);
                             for mut path in arg_taint.paths {
-                                let callee_name = self
-                                    .function_map
-                                    .get(&resolved)
-                                    .map(|f| f.declaration.qualified_name.clone())
-                                    .unwrap_or_else(|| callee.to_string());
+                                let callee_name = self.tables.target_qualified(resolved);
                                 let mut pos = position.clone();
                                 if pos.filename.is_empty() {
                                     pos.filename = function.file_path.clone();
@@ -12990,7 +13093,7 @@ impl<'a> DataFlowBuilder<'a> {
                                     "df-node",
                                     &[
                                         &function.declaration.id,
-                                        &callee_name,
+                                        callee_name,
                                         &format!("param-to-return-{}", param_index),
                                         &pos.line.to_string(),
                                         &pos.column.to_string(),
@@ -12999,7 +13102,7 @@ impl<'a> DataFlowBuilder<'a> {
                                 let call_node = DataFlowNode {
                                     id: node_id.clone(),
                                     kind: "call_return".to_string(),
-                                    name: callee_name.clone(),
+                                    name: callee_name.to_string(),
                                     package_path: function.package_path.clone(),
                                     purl: String::new(),
                                     function: function.declaration.qualified_name.clone(),
@@ -13114,18 +13217,15 @@ impl<'a> DataFlowBuilder<'a> {
                     return ConcreteTaint { paths };
                 }
                 if let Some(resolved) = self.tables.resolve_target(method, &function.package_path)
-                    && let Some(summary) = self.summaries.get(&resolved).cloned()
+                    && let Some(summary) =
+                        self.summaries.get(self.tables.target_id(resolved)).cloned()
                 {
                     let mut paths = Vec::new();
                     for category in &summary.returns_source_categories {
-                        let callee_name = self
-                            .function_map
-                            .get(&resolved)
-                            .map(|f| f.declaration.qualified_name.clone())
-                            .unwrap_or_else(|| method.to_string());
+                        let callee_name = self.tables.target_qualified(resolved);
                         paths.push(self.new_source_path(
                             function,
-                            &callee_name,
+                            callee_name,
                             category,
                             position.clone(),
                             None,
@@ -13599,6 +13699,11 @@ struct CallTables<'a> {
     functions: &'a [FunctionRecord],
     local_index: &'a HashMap<String, Vec<String>>,
     patterns: &'a DataFlowPatternSet,
+    /// Function position by declaration id, for the direct resolution of a
+    /// callee the build never saw.
+    position: HashMap<&'a str, u32>,
+    /// The run's interned source categories (see [`Categories`]).
+    categories: Categories,
 }
 
 /// Every callee text an expression names, in its own walk order.
@@ -13722,22 +13827,39 @@ impl<'a> CallTables<'a> {
             functions,
             local_index,
             patterns,
+            position,
+            categories: Categories::build(functions, patterns),
         }
     }
 
     /// The local function `callee` names in `package_path`, if any.
-    fn resolve_target(&self, callee: &str, package_path: &str) -> Option<String> {
+    fn resolve_target(&self, callee: &str, package_path: &str) -> Option<u32> {
         match self
             .targets
             .get(package_path)
             .and_then(|table| table.get(callee))
         {
-            Some(Some(position)) => Some(self.functions[*position as usize].declaration.id.clone()),
+            Some(Some(position)) => Some(*position),
             Some(None) => None,
             // A callee the build never saw cannot come from the operations it
             // walked; resolve it directly rather than silently dropping it.
-            None => resolve_call_target(callee, package_path, self.local_index, None),
+            None => resolve_call_target(callee, package_path, self.local_index, None)
+                .and_then(|id| self.position.get(id.as_str()).copied()),
         }
+    }
+
+    /// The declaration id of the function at `position`, the join key the
+    /// callers outside the fixpoint still address summaries by.
+    fn target_id(&self, position: u32) -> &'a str {
+        self.functions[position as usize].declaration.id.as_str()
+    }
+
+    /// The qualified name of the function at `position`.
+    fn target_qualified(&self, position: u32) -> &'a str {
+        self.functions[position as usize]
+            .declaration
+            .qualified_name
+            .as_str()
     }
 
     /// The category of the first source pattern `callee` matches.
@@ -21839,7 +21961,8 @@ pub fn run(rows: Vec<Vec<String>>) {
             start: 0,
             end: operations.len(),
         }]);
-        let source = AbstractOrigin::Source("env".to_string());
+        // The test's own opaque category id; it never crosses a summary.
+        let source = AbstractOrigin::Source(0);
         let mut env: FunctionEnv<BTreeSet<AbstractOrigin>> = FunctionEnv::new();
         let mut silent = 0;
         let mut emitted = 0;
@@ -22191,10 +22314,12 @@ pub fn run() {
         let (summaries, evaluations) = infer_summaries_counted(&records, &tables, &indexes);
         assert_eq!(evaluations, depth);
         let top = record(&records, "f00");
+        let top_index = records
+            .iter()
+            .position(|candidate| candidate.declaration.id == top.declaration.id)
+            .expect("the record is one of the analyzed functions");
         assert_eq!(
-            summaries[&top.declaration.id]
-                .param_to_sink
-                .get("process-exec"),
+            summaries[top_index].param_to_sink.get("process-exec"),
             Some(&BTreeSet::from([0]))
         );
     }
