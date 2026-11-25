@@ -2,7 +2,9 @@ package analyzer
 
 import (
 	"path/filepath"
+	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 
@@ -193,23 +195,39 @@ func assertCgoPointerCaseDetails(t *testing.T, caseName, mode string, report *mo
 			}
 		}
 	case "plain-struct":
-		if signal, ok := signals["main.go:27:9"]; ok && (signal.Severity != "medium" || len(signal.Properties) != 0) {
-			t.Errorf("plain-struct: finding at main.go:27 has severity %q and properties %v; a struct without pointer fields stays medium",
-				signal.Severity, signal.Properties)
+		// Line 40 reaches the struct through a *plain: the scanned object is
+		// the plain value, so it must not read as a pointer slot.
+		for _, key := range []string{"27:9", "40:9"} {
+			signal, ok := signals["main.go:"+key]
+			if !ok {
+				t.Errorf("plain-struct: no compiled finding at main.go:%s", key)
+				continue
+			}
+			if signal.Severity != "medium" || len(signal.Properties) != 0 {
+				t.Errorf("plain-struct: finding at main.go:%s has severity %q and properties %v; a struct without pointer fields stays medium",
+					key, signal.Severity, signal.Properties)
+			}
 		}
 	case "c-memory":
-		if _, ok := signals["main.go:23:9"]; ok {
+		if _, ok := signals["main.go:25:9"]; ok {
 			t.Error("c-memory: C.free over a C.CString result produced a finding; the runtime stops at non-Go memory")
 		}
-		if _, ok := signals["main.go:32:9"]; ok {
+		if _, ok := signals["main.go:34:9"]; ok {
 			t.Error("c-memory: handing C-owned memory to another C function produced a finding")
 		}
-		if signal, ok := signals["main.go:43:9"]; ok {
+		if signal, ok := signals["main.go:45:9"]; ok {
 			if signal.Severity != "medium" {
 				t.Errorf("c-memory: the Go-memory contrast finding has severity %q, want medium: a byte slice holds no pointers", signal.Severity)
 			}
 		} else {
 			t.Error("c-memory: the Go-memory contrast produced no compiled finding")
+		}
+		if signal, ok := signals["main.go:80:9"]; ok {
+			if signal.Severity != "low" || signal.Properties["memoryOwner"] != "unknown" {
+				t.Errorf("c-memory: the parameter finding has severity %q properties %v, want low with memoryOwner=unknown", signal.Severity, signal.Properties)
+			}
+		} else {
+			t.Error("c-memory: the unsafe.Pointer parameter produced no compiled finding")
 		}
 	case "pin-state":
 		if signal, ok := signals["main.go:30:9"]; ok {
@@ -219,13 +237,31 @@ func assertCgoPointerCaseDetails(t *testing.T, caseName, mode string, report *mo
 		} else {
 			t.Error("pin-state: the unpinned call produced no compiled finding")
 		}
-		if signal, ok := signals["main.go:47:9"]; ok {
+		if signal, ok := signals["main.go:48:9"]; ok {
 			if signal.Severity != "medium" || signal.Properties["pinned"] != "true" {
-				t.Errorf("pin-state: the pinned finding has severity %q properties %v, want medium with pinned=true: a pinned object cannot panic the scan",
+				t.Errorf("pin-state: the pinned finding has severity %q properties %v, want medium with pinned=true: every pointer the scan meets is pinned",
 					signal.Severity, signal.Properties)
 			}
 		} else {
 			t.Error("pin-state: the pinned call produced no compiled finding")
+		}
+		// Pin(&s.other) pins s, not s.other's target, and panics at run time.
+		if signal, ok := signals["main.go:67:9"]; ok {
+			if signal.Severity != "high" || signal.Properties["panicRisk"] != "true" || signal.Properties["pinned"] != "" {
+				t.Errorf("pin-state: the wrong-pin finding has severity %q properties %v, want high with panicRisk and no pinned",
+					signal.Severity, signal.Properties)
+			}
+		} else {
+			t.Error("pin-state: the wrong-pin call produced no compiled finding")
+		}
+		pinnedArgs := map[int]bool{}
+		for _, site := range report.Cgo.CallSites {
+			for _, argument := range site.Arguments {
+				pinnedArgs[site.Position.Line] = argument.Pinned
+			}
+		}
+		if pinnedArgs[30] || !pinnedArgs[48] || pinnedArgs[67] {
+			t.Errorf("pin-state: call-site pinned flags by line = %v, want only line 48 pinned", pinnedArgs)
 		}
 	case "buffer-shapes":
 		if signal, ok := signals["main.go:59:9"]; ok {
@@ -237,8 +273,8 @@ func assertCgoPointerCaseDetails(t *testing.T, caseName, mode string, report *mo
 		}
 	}
 	// The unpinned-reachable findings of the linked-list case: the recursive
-	// type behind the first argument, and silence for the pinned and
-	// two-level calls next to it.
+	// type behind the unpinned and the head-only-pinned calls, and silence for
+	// the loop-pinned list and the two-level structures next to them.
 	if caseName == "linked-list" && mode == "compiled" {
 		var reachable []*model.SecuritySignal
 		for i := range report.SecuritySignals {
@@ -246,14 +282,30 @@ func assertCgoPointerCaseDetails(t *testing.T, caseName, mode string, report *mo
 				reachable = append(reachable, &report.SecuritySignals[i])
 			}
 		}
-		if len(reachable) != 1 || reachable[0].Range.Start.Line != 41 {
-			var lines []string
-			for _, s := range reachable {
-				lines = append(lines, strconv.Itoa(s.Range.Start.Line))
+		var lines []string
+		for _, s := range reachable {
+			lines = append(lines, strconv.Itoa(s.Range.Start.Line))
+			if s.Confidence != "type-resolved" {
+				t.Errorf("linked-list: finding at line %d has confidence %q, want type-resolved", s.Range.Start.Line, s.Confidence)
 			}
-			t.Errorf("linked-list: unpinned-reachable findings at lines %v, want exactly line 41", lines)
-		} else if reachable[0].Confidence != "type-resolved" {
-			t.Errorf("linked-list: finding confidence %q, want type-resolved", reachable[0].Confidence)
+			// The list is recursive; the c0 chain is finite and three levels
+			// deep, one more than the check follows.
+			wantProps := map[string]string{"recursive": "true"}
+			if s.Range.Start.Line == 113 {
+				wantProps = map[string]string{"pointerChainDepth": "3"}
+			}
+			for key, value := range wantProps {
+				if s.Properties[key] != value {
+					t.Errorf("linked-list: finding at line %d has properties %v, want %s=%s", s.Range.Start.Line, s.Properties, key, value)
+				}
+			}
+		}
+		sort.Strings(lines)
+		if strings.Join(lines, ",") != "113,41,53" {
+			t.Errorf("linked-list: unpinned-reachable findings at lines %v, want exactly 41, 53 and 113", lines)
+		}
+		if got := report.Cgo.UnpinnedReachableCount; got != len(reachable) {
+			t.Errorf("linked-list: unpinnedReachableCount = %d, want %d, one per finding", got, len(reachable))
 		}
 	}
 }
@@ -315,6 +367,8 @@ func TestCgoGocheckEnvHelpers(t *testing.T) {
 		{"GODEBUG=cgocheck=1"},
 		{"GODEBUG=asyncpreemptoff=1"},
 		{"GODEBUG=cgocheck=011"},
+		{"GODEBUG=cgocheck=0,cgocheck=1"},
+		{"GODEBUG=nocgocheck=0"},
 		{"GODEBUG="},
 		{"CGO_ENABLED=1"},
 		nil,
@@ -333,17 +387,44 @@ func TestCgoGocheckEnvHelpers(t *testing.T) {
 	if gocheck2EnabledInEnv("simd", []string{"GOEXPERIMENT=notcgocheck2"}) {
 		t.Error("a non-cgocheck2 experiment was reported as cgocheck2")
 	}
+	if !gocheck2EnabledInEnv("", []string{"GOEXPERIMENT=simd,cgocheck2"}) {
+		t.Error("cgocheck2 inside a GOEXPERIMENT list was not seen")
+	}
+	if gocheck2EnabledInEnv("cgocheck2,nocgocheck2", nil) {
+		t.Error("a later nocgocheck2 did not turn the experiment back off")
+	}
 }
 
-// goEnvOrSkip reads one go env key, skipping when the toolchain cannot be
-// asked.
-func goEnvOrSkip(t *testing.T, key string) string {
-	t.Helper()
-	value, err := goEnv(key)
-	if err != nil {
-		t.Skipf("go env %s: %v", key, err)
+// TestGocheckLineDisables covers the one-line configuration forms: shell and
+// Dockerfile assignments, compose map and list entries, and the names that
+// only contain GODEBUG.
+func TestGocheckLineDisables(t *testing.T) {
+	for _, line := range []string{
+		`ENV GODEBUG=cgocheck=0`,
+		`ENV GODEBUG cgocheck=0`,
+		`ENV A=1 GODEBUG=cgocheck=0`,
+		`export GODEBUG="madvdontneed=1,cgocheck=0"`,
+		`GODEBUG := cgocheck=0`,
+		`      GODEBUG: "cgocheck=0"`,
+		`      - GODEBUG=cgocheck=0`,
+		`GODEBUG=cgocheck=0 ./server # disable the check`,
+	} {
+		if !gocheckLineDisables(line) {
+			t.Errorf("gocheckLineDisables(%q) = false, want true", line)
+		}
 	}
-	return value
+	for _, line := range []string{
+		`# ENV GODEBUG=cgocheck=0`,
+		`ENV MY_GODEBUG=cgocheck=0`,
+		`ENV GODEBUGGER=cgocheck=0`,
+		`ENV GODEBUG=cgocheck=1`,
+		`ENV GODEBUG=cgocheck=0,cgocheck=1`,
+		`ENV GODEBUG=http2debug=1`,
+	} {
+		if gocheckLineDisables(line) {
+			t.Errorf("gocheckLineDisables(%q) = true, want false", line)
+		}
+	}
 }
 
 // TestCgoBufferTaintTextualMode runs the corpus taint case with cgo off.

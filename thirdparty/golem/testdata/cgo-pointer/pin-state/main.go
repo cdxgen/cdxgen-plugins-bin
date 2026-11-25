@@ -30,16 +30,36 @@ func unpinned() {
 	C.take(p)
 }
 
-// pinned pins the field before the same call. The runtime check still runs
-// and still scans the object, so the finding stands, but a pinned object
-// cannot panic the way an unpinned one does, and the call-site record says
-// so. The pin analysis is intraprocedural and path-insensitive: it sees what
-// one function body shows.
+// pinned pins the pointer the scan meets, s.other, before the same call.
+// The runtime check still runs and still scans the object, so the finding
+// stands, but every pointer it can meet is pinned and it cannot panic, which
+// the call-site record and the finding's pinned property say. The pin
+// analysis is intraprocedural and path-insensitive: it sees what one function
+// body shows.
 //
-// golem:want signal category=cgo-pointer-check-untyped symbol=C.take line=47
+// golem:want signal category=cgo-pointer-check-untyped symbol=C.take line=48
 func pinned() {
 	var s holder
 	var pin runtime.Pinner
+	mark := 7
+	s.other = &mark
+	pin.Pin(s.other)
+	p := unsafe.Pointer(&s.other)
+	C.take(p)
+	pin.Unpin()
+}
+
+// wrongPin pins &s.other, which pins the object s, not the int s.other points
+// to. The scan meets s.other, finds its target unpinned and panics: this is
+// the same program as pinned with one character more, and on go1.27.4 it
+// panics with "argument of cgo function has Go pointer to unpinned Go
+// pointer". It must read as unpinned, with the panic risk. s is a pointer
+// here, so the scan covers the holder the selector reaches through it.
+//
+// golem:want signal category=cgo-pointer-check-untyped symbol=C.take line=67
+func wrongPin() {
+	s := &holder{}
+	pin := runtime.Pinner{}
 	mark := 7
 	s.other = &mark
 	pin.Pin(&s.other)

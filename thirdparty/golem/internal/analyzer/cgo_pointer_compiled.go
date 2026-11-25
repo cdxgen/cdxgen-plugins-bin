@@ -41,38 +41,13 @@ type cgoCompiledCheck struct {
 	arg       ast.Expr       // the defining expression of the checked value
 	object    ast.Expr       // the object whose memory the runtime scan covers
 	owner     string         // go, c or unknown, from the generated definitions
-	pinned    bool           // the value was passed to a Pinner earlier in the function
-	addressed bool           // the argument took an address, so the object type is the pointee
+	pinned    bool           // every Go pointer stored in the scanned memory was pinned first
+	loopPin   bool           // the function pinned values inside a loop before the call
+	addressed bool           // the argument took an address
+	deref     bool           // the address went through a field or element of object, so a pointer-typed object is dereferenced first
+	reach     types.Type     // the type of the memory C receives, which bounds what C can walk
 	sym       string         // C symbol, from the closure's _Cfunc_ call
 	pkg       *packages.Package
-}
-
-// cgoPinnedBefore reports whether every identifier the expression is rooted
-// in was passed to a Pinner earlier in the same function, with no Unpin of
-// that pinner in between. Intraprocedural and path-insensitive, like the
-// textual walk's pin record.
-func cgoPinnedBefore(facts *cgoFunctionFacts, pos token.Pos, arg ast.Expr) bool {
-	bases := cgoBaseIdents(arg, &cgoCallEvent{facts: facts}, 0)
-	if len(bases) == 0 {
-		return false
-	}
-	lastUnpin := token.NoPos
-	for _, pin := range facts.pins {
-		if pin.pos >= pos {
-			break
-		}
-		if pin.unpin {
-			lastUnpin = pin.pos
-			continue
-		}
-		if lastUnpin != token.NoPos && pin.pos < lastUnpin {
-			continue
-		}
-		for target := range pin.targets {
-			delete(bases, target)
-		}
-	}
-	return len(bases) == 0
 }
 
 // mergeCompiledPointerChecks walks the generated files of every loaded cgo
@@ -178,6 +153,13 @@ func (a *Analyzer) collectClosureChecks(literal *ast.FuncLit, facts, functionFac
 	}
 	var checkCalls []*ast.CallExpr
 	ast.Inspect(literal.Body, func(n ast.Node) bool {
+		// A nested function literal is its own rewritten call (cgo nests them
+		// for a deferred C call and for a C call inside a closure), and the
+		// caller visits it on its own; descending here would report its
+		// checks twice.
+		if _, nested := n.(*ast.FuncLit); nested {
+			return false
+		}
 		call, ok := n.(*ast.CallExpr)
 		if !ok {
 			return true
@@ -208,11 +190,11 @@ func (a *Analyzer) collectClosureChecks(literal *ast.FuncLit, facts, functionFac
 		// defining assignment in the closure holds the original argument
 		// expression under a /*line*/ directive.
 		argIdent, _ := check.Args[0].(*ast.Ident)
-		if argIdent == nil || facts.setTwice[argIdent.Name] {
+		if argIdent == nil {
 			continue
 		}
-		arg := facts.defs[argIdent.Name]
-		if arg == nil {
+		arg, ok := facts.lookup(argIdent.Name, argIdent.Pos())
+		if !ok {
 			continue
 		}
 		untyped := false
@@ -226,7 +208,7 @@ func (a *Analyzer) collectClosureChecks(literal *ast.FuncLit, facts, functionFac
 			continue
 		}
 		event := &cgoCallEvent{facts: facts}
-		object, addressed := cgoCheckedObject(arg, event)
+		object, addressed, deref := cgoCheckedObject(arg, event)
 		owner := cgoOwnerUnknown
 		if cgoIsCRooted(arg, event, 0) {
 			owner = cgoOwnerC
@@ -235,16 +217,31 @@ func (a *Analyzer) collectClosureChecks(literal *ast.FuncLit, facts, functionFac
 			// A Go field or variable typed as a C pointer holds a C handle:
 			// the scan stops at non-Go memory even though the value never
 			// passed through a C call in this function.
-			if cgoIsCPointer(pkg.TypesInfo.TypeOf(object)) {
+			objectType := pkg.TypesInfo.TypeOf(object)
+			if cgoIsCPointer(objectType) {
 				owner = cgoOwnerC
+			} else if !addressed && objectType != nil {
+				// An unsafe.Pointer value whose origin this function does not
+				// show (a parameter, a struct field, a helper's result) may
+				// point at C memory as easily as Go memory: go-sqlite3 keeps
+				// C.malloc'd handles and buffers in exactly such fields.
+				if basic, ok := types.Unalias(objectType).Underlying().(*types.Basic); ok && basic.Kind() == types.UnsafePointer {
+					owner = cgoOwnerUnknown
+				}
 			}
 		}
-		// The pin state the same function body shows: a value pinned before
-		// the check cannot panic the scan, which is what the escalation
-		// records.
+		// The pin state the same function body shows. A bounded check needs
+		// the pointer stored at the passed address pinned; an untyped check
+		// scans the whole object, so it needs every pointer field of that
+		// object pinned, which only the types can enumerate.
+		pinnedSet, loopPin := functionFacts.pinnedBefore(check.Pos())
 		pinned := false
 		if owner == cgoOwnerGo {
-			pinned = cgoPinnedBefore(functionFacts, check.Pos(), arg)
+			if untyped {
+				pinned = cgoScanPinned(pkg.TypesInfo, object, addressed, deref, pinnedSet)
+			} else {
+				pinned = cgoStoredPointerPinned(arg, facts, argIdent.Pos(), pinnedSet)
+			}
 		}
 		*found = true
 		*out = append(*out, cgoCompiledCheck{
@@ -257,7 +254,10 @@ func (a *Analyzer) collectClosureChecks(literal *ast.FuncLit, facts, functionFac
 			object:    object,
 			owner:     owner,
 			pinned:    pinned,
+			loopPin:   loopPin,
+			reach:     cgoReachType(pkg.TypesInfo, arg, facts),
 			addressed: addressed,
+			deref:     deref,
 			sym:       sym,
 			pkg:       pkg,
 		})
@@ -297,43 +297,47 @@ func (a *Analyzer) mergeFileCompiledChecks(record *cgoFile, checks []cgoCompiled
 			}
 		}
 	}
-	confirmed := map[key]bool{}
+	// seen marks the arguments cgo emitted any check for; finding marks the
+	// ones that are findings: a nil-typed check of memory that is not C's.
+	// A textual finding is kept only where the compiled check agrees, so a
+	// bounded check or a C-owned argument refutes it.
+	seen := map[key]bool{}
+	finding := map[key]bool{}
 	// Additions are held apart from the record's signals until every
 	// confirmation is done: appending during the loop could reallocate the
-	// backing array and leave the textual map pointing at a stale copy, the
-	// bug this ordering exists to avoid.
+	// backing array and leave the textual map pointing at a stale copy.
 	var additions []model.SecuritySignal
 	for _, check := range checks {
 		k := key{check.line, check.col}
-		if signal, ok := textual[k]; ok {
-			// The textual finding was right; the compiled record upgrades it.
-			signal.Confidence = "high"
-			signal.PackagePath = check.pkg.PkgPath
-			if check.sym != "" {
-				signal.Symbol = "C." + check.sym
+		seen[k] = true
+		if check.untyped && check.owner != cgoOwnerC {
+			finding[k] = true
+			if signal, ok := textual[k]; ok {
+				// The textual finding was right; the compiled record upgrades it.
+				signal.Confidence = "high"
+				signal.PackagePath = check.pkg.PkgPath
+				if check.sym != "" {
+					signal.Symbol = "C." + check.sym
+				}
+				signal.Properties = map[string]string{}
+				a.escalate(check, &signal.Severity, signal.Properties)
+			} else {
+				// The approximation could not see this one; the compiled
+				// record wins.
+				additions = append(additions, a.compiledFinding(check, argsByPos[k]))
 			}
-			signal.Properties = map[string]string{}
-			a.escalate(check, &signal.Severity, signal.Properties)
-			confirmed[k] = true
-		} else if check.untyped && check.owner != cgoOwnerC {
-			// No textual finding here and the check is nil-typed: the
-			// approximation could not see it and the compiled record wins.
-			// C-owned arguments are never findings: the runtime stops at
-			// non-Go memory, whatever check cgo emitted.
-			argument := argsByPos[k]
-			additions = append(additions, a.compiledFinding(check, argument))
-			confirmed[k] = true
-		} else {
-			// A bounded check the textual shape already describes.
-			confirmed[k] = true
 		}
 		if argument, ok := argsByPos[k]; ok {
 			if check.untyped {
 				argument.Shape = cgoShapeUntyped
+			} else if argument.Shape == cgoShapeUntyped || argument.Shape == cgoShapeNoCheck {
+				// cgo bounded the check where the text could not tell.
+				argument.Shape, _ = cgoCheckShape(check.arg)
 			}
 			if check.owner != cgoOwnerUnknown {
 				argument.Owner = check.owner
 			}
+			argument.Pinned = check.owner == cgoOwnerGo && check.pinned
 			if site := siteByArg[k]; site != nil {
 				site.Confidence = "high"
 			}
@@ -342,8 +346,9 @@ func (a *Analyzer) mergeFileCompiledChecks(record *cgoFile, checks []cgoCompiled
 	if len(additions) > 0 {
 		record.pointer.signals = append(record.pointer.signals, additions...)
 	}
-	// A textual finding whose argument no compiled check covers is the
-	// approximation over-firing, final on a file whose cgo step ran.
+	// On a file whose cgo step ran, the compiled checks are the whole truth:
+	// an argument with no check was not checked, and a textual finding the
+	// compiled pass did not keep is the approximation over-firing.
 	if covered {
 		for si := range record.pointer.callSites {
 			site := &record.pointer.callSites[si]
@@ -352,7 +357,7 @@ func (a *Analyzer) mergeFileCompiledChecks(record *cgoFile, checks []cgoCompiled
 				if argument.Position == nil || argument.Shape != cgoShapeUntyped {
 					continue
 				}
-				if !confirmed[key{argument.Position.Line, argument.Position.Column}] {
+				if !seen[key{argument.Position.Line, argument.Position.Column}] {
 					argument.Shape = cgoShapeNoCheck
 					argument.Owner = cgoOwnerUnknown
 				}
@@ -360,10 +365,8 @@ func (a *Analyzer) mergeFileCompiledChecks(record *cgoFile, checks []cgoCompiled
 		}
 		kept := record.pointer.signals[:0]
 		for _, signal := range record.pointer.signals {
-			if signal.Category == CgoCategoryUntypedCheck {
-				if !confirmed[key{signal.Range.Start.Line, signal.Range.Start.Column}] {
-					continue
-				}
+			if signal.Category == CgoCategoryUntypedCheck && !finding[key{signal.Range.Start.Line, signal.Range.Start.Column}] {
+				continue
 			}
 			kept = append(kept, signal)
 		}
@@ -402,17 +405,6 @@ func (a *Analyzer) compiledFinding(check cgoCompiledCheck, argument *model.Nativ
 	}
 }
 
-// escalateCompiledSignal upgrades a confirmed textual finding with the type
-// information the generated files carry.
-func (a *Analyzer) escalateCompiledSignal(signal *model.SecuritySignal, check cgoCompiledCheck) {
-	props := signal.Properties
-	if props == nil {
-		props = map[string]string{}
-		signal.Properties = props
-	}
-	a.escalate(check, &signal.Severity, props)
-}
-
 // escalate sets the severity and properties of one finding from the type of
 // the object behind the checked argument: an object with pointer-shaped
 // slots can panic the runtime scan (severity high, panicRisk), and the slot
@@ -424,25 +416,31 @@ func (a *Analyzer) escalate(check cgoCompiledCheck, severity *string, props map[
 		// nothing to scan and nothing to panic on.
 		return
 	}
+	if check.owner == cgoOwnerUnknown {
+		// cgo emits the untyped check, but whether the runtime scans anything
+		// depends on memory the analysis cannot attribute; if it is C's, the
+		// check returns at once. Reported, at low severity, so the reader can
+		// see the call and decide.
+		*severity = "low"
+		props["memoryOwner"] = cgoOwnerUnknown
+		return
+	}
 	if check.pkg != nil && check.pkg.TypesInfo != nil && check.object != nil {
 		if cgoIsCPointer(check.pkg.TypesInfo.TypeOf(check.object)) {
 			return
 		}
 	}
 	if check.pinned {
-		// A pinned object cannot panic the scan; the expensive scan still
-		// runs, so the finding stays, at medium severity.
+		// Every pointer the scan can meet was pinned, so it cannot panic; the
+		// expensive scan still runs, so the finding stays, at medium severity.
 		props["pinned"] = "true"
 		return
 	}
-	if check.pkg == nil || check.pkg.TypesInfo == nil || check.object == nil {
-		return
-	}
-	t := check.pkg.TypesInfo.TypeOf(check.object)
+	t := check.scannedType()
 	if t == nil {
 		return
 	}
-	slots, hasPointer, bounded := cgoObjectPointerSlots(types.Unalias(t), map[types.Type]bool{}, 0)
+	slots, hasPointer, bounded := cgoObjectPointerSlots(t, map[types.Type]bool{}, 0)
 	if hasPointer {
 		*severity = "high"
 		props["panicRisk"] = "true"
@@ -463,18 +461,25 @@ func (a *Analyzer) escalate(check cgoCompiledCheck, severity *string, props map[
 // a, and a C-rooted chase stops, because Go never scans C memory. An
 // identifier without a visible definition names itself, which is what a
 // function parameter looks like to the intraprocedural read.
-func cgoCheckedObject(arg ast.Expr, event *cgoCallEvent) (object ast.Expr, addressed bool) {
+func cgoCheckedObject(arg ast.Expr, event *cgoCallEvent) (object ast.Expr, addressed, deref bool) {
 	expr := arg
 	for depth := 0; depth < 8; depth++ {
 		switch e := expr.(type) {
 		case *ast.Ident:
-			if event.facts != nil {
-				if def, ok := event.facts.lookup(e.Name); ok {
+			// Before an address is taken the identifier holds the pointer
+			// (p := unsafe.Pointer(&s.f)) and its definition leads on. After
+			// it, the identifier is the object whose memory is scanned, and
+			// its definition (s := &T{}) is how it was made, not what it is.
+			// A definition that is a function's result (buf := buffer()) says
+			// nothing more than the identifier's own type does, so the chase
+			// stops at the identifier there too.
+			if !addressed && event.facts != nil {
+				if def, ok := event.facts.lookup(e.Name, e.Pos()); ok && cgoIsPointerExpr(def) {
 					expr = def
 					continue
 				}
 			}
-			return e, addressed
+			return e, addressed, deref
 		case *ast.CallExpr:
 			// A C wrapper call result is C memory; the chase stops. Any
 			// other single-argument call is a conversion to unwrap.
@@ -482,7 +487,7 @@ func cgoCheckedObject(arg ast.Expr, event *cgoCallEvent) (object ast.Expr, addre
 				expr = e.Args[0]
 				continue
 			}
-			return nil, addressed
+			return nil, addressed, deref
 		case *ast.ParenExpr:
 			expr = e.X
 		case *ast.UnaryExpr:
@@ -491,27 +496,174 @@ func cgoCheckedObject(arg ast.Expr, event *cgoCallEvent) (object ast.Expr, addre
 				addressed = true
 				continue
 			}
-			return nil, addressed
+			return nil, addressed, deref
 		case *ast.SelectorExpr:
-			// &s.f scans s: the object is the receiver. Without an address
-			// of, though, the selector IS the value C receives (a handle
-			// field such as c.db), and its own type is the pointee.
+			// &s.f scans s: the object is the receiver, and when s is a
+			// pointer the selector dereferenced it, so the scanned memory is
+			// *s. Without an address of, the selector IS the value C receives
+			// (a handle field such as c.db), and its own type is the pointee.
 			if !addressed {
-				return e, addressed
+				return e, addressed, deref
 			}
 			expr = e.X
+			deref = true
 		case *ast.IndexExpr:
-			// &a[i] scans a's backing array.
+			// &a[i] scans a's backing array, through a pointer to an array
+			// the same way a selector goes through a pointer to a struct.
 			expr = e.X
 			addressed = true
+			deref = true
 		case *ast.SliceExpr:
 			expr = e.X
 			addressed = true
+			deref = true
 		default:
-			return nil, addressed
+			return nil, addressed, deref
 		}
 	}
-	return nil, addressed
+	return nil, addressed, deref
+}
+
+// scannedType is the type of the memory the runtime check covers. An
+// addressed argument scans the object it took the address in, dereferenced
+// when it reached a field or element through a pointer-typed object
+// (s := &T{}; &s.f scans a T, not a *T). An argument that is itself a pointer
+// value scans what it points to: a *T scans a T, and an unsafe.Pointer scans
+// memory whose type the analysis cannot know, so it answers nil and no
+// escalation is claimed.
+func (check cgoCompiledCheck) scannedType() types.Type {
+	if check.pkg == nil || check.pkg.TypesInfo == nil || check.object == nil {
+		return nil
+	}
+	return cgoScannedType(check.pkg.TypesInfo.TypeOf(check.object), check.addressed, check.deref)
+}
+
+func cgoScannedType(t types.Type, addressed, deref bool) types.Type {
+	if t == nil {
+		return nil
+	}
+	t = types.Unalias(t)
+	if addressed && !deref {
+		return t
+	}
+	switch u := t.Underlying().(type) {
+	case *types.Pointer:
+		return types.Unalias(u.Elem())
+	case *types.Basic:
+		if u.Kind() == types.UnsafePointer {
+			return nil
+		}
+	}
+	return t
+}
+
+// cgoReachType is the type of the memory C receives: for &E the type of E
+// (the field or variable, not the object around it, because C is handed
+// that field), for a slice the element type, and for a pointer value its
+// pointee. An unsafe.Pointer value whose origin the function does not show
+// has no knowable pointee and answers nil.
+func cgoReachType(info *types.Info, arg ast.Expr, facts *cgoFunctionFacts) types.Type {
+	if info == nil {
+		return nil
+	}
+	expr := arg
+	for depth := 0; depth < 8; depth++ {
+		expr = cgoUnparen(expr)
+		switch e := expr.(type) {
+		case *ast.CallExpr:
+			if len(e.Args) == 1 && (cgoIsType(e.Fun) || cgoIsUnsafeData(e.Fun, false)) {
+				expr = e.Args[0]
+				continue
+			}
+		case *ast.UnaryExpr:
+			if e.Op == token.AND {
+				if t := info.TypeOf(e.X); t != nil {
+					return types.Unalias(t)
+				}
+				return nil
+			}
+		case *ast.Ident:
+			if facts != nil {
+				if def, ok := facts.lookup(e.Name, e.Pos()); ok {
+					expr = def
+					continue
+				}
+			}
+		}
+		t := info.TypeOf(expr)
+		if t == nil {
+			return nil
+		}
+		switch u := types.Unalias(t).Underlying().(type) {
+		case *types.Pointer:
+			return types.Unalias(u.Elem())
+		case *types.Slice:
+			return types.Unalias(u.Elem())
+		}
+		return nil
+	}
+	return nil
+}
+
+// cgoScanPinned reports whether an untyped check of object cannot meet an
+// unpinned Go pointer: the scanned type is a struct whose every pointer-shaped
+// field is a plain pointer the function pinned as Pin(object.field) before
+// the call. A field of any other pointer-shaped kind (a slice, a string, a
+// map, an interface, a nested struct holding pointers) cannot be verified
+// from one function body, so it answers false; a type with no pointer at all
+// answers false too, because there is nothing to pin and escalate already
+// keeps it at medium.
+func cgoScanPinned(info *types.Info, object ast.Expr, addressed, deref bool, pinned map[string]bool) bool {
+	if info == nil || object == nil || len(pinned) == 0 {
+		return false
+	}
+	t := cgoScannedType(info.TypeOf(object), addressed, deref)
+	if t == nil {
+		return false
+	}
+	st, ok := t.Underlying().(*types.Struct)
+	if !ok {
+		return false
+	}
+	base := types.ExprString(cgoUnparen(object))
+	fields := 0
+	for i := 0; i < st.NumFields(); i++ {
+		field := st.Field(i)
+		_, hasPointer, _ := cgoObjectPointerSlots(field.Type(), map[types.Type]bool{}, 0)
+		if !hasPointer {
+			continue
+		}
+		if _, isPtr := types.Unalias(field.Type()).Underlying().(*types.Pointer); !isPtr {
+			return false
+		}
+		if !pinned[base+"."+field.Name()] {
+			return false
+		}
+		fields++
+	}
+	return fields > 0
+}
+
+// cgoIsPointerExpr reports whether a definition derives a pointer from
+// another value the chase can follow: an address, a conversion, a field, an
+// element, a slice, another name, or a C call (whose result ends the chase
+// as C memory).
+func cgoIsPointerExpr(expr ast.Expr) bool {
+	switch e := cgoUnparen(expr).(type) {
+	case *ast.UnaryExpr:
+		return e.Op == token.AND
+	case *ast.CallExpr:
+		if isCgoWrapperCall(e) {
+			return true
+		}
+		if _, ok := cgoCallOf(e); ok {
+			return true
+		}
+		return len(e.Args) == 1 && (cgoIsType(e.Fun) || cgoIsUnsafeData(e.Fun, false))
+	case *ast.Ident, *ast.SelectorExpr, *ast.IndexExpr, *ast.SliceExpr:
+		return true
+	}
+	return false
 }
 
 // isCgoWrapperCall reports whether the call invokes one of the _Cfunc_
@@ -610,26 +762,24 @@ func trimCgoWrapperName(name string) (string, bool) {
 // medium and the confidence says type-resolved: the types are exact, the pin
 // analysis is the intraprocedural one.
 func (a *Analyzer) maybeUnpinnedReachableFinding(record *cgoFile, check cgoCompiledCheck) {
-	if check.owner != cgoOwnerGo || check.pinned || check.object == nil {
+	if check.owner != cgoOwnerGo || check.reach == nil {
 		return
 	}
-	if check.pkg == nil || check.pkg.TypesInfo == nil {
-		return
-	}
-	t := check.pkg.TypesInfo.TypeOf(check.object)
-	if t == nil {
-		return
-	}
-	// The object type is the pointee when the argument took an address, and
-	// reaching its contents is the first hop; a value passed directly starts
-	// its chain at its own type.
-	startHops := 0
-	if check.addressed {
-		startHops = 1
-	}
-	recursive := cgoTypeRecursive(types.Unalias(t), map[types.Type]bool{}, 0)
-	depth := cgoPointerChainDepth(types.Unalias(t), map[types.Type]bool{}, startHops, 0)
+	t := check.reach
+	// The pointers stored in the memory C receives are the first level the
+	// check follows; their targets' pointers are the second.
+	recursive := cgoTypeRecursive(t, map[types.Type]bool{}, 0)
+	depth := cgoPointerChainDepth(t, map[types.Type]bool{}, 0, 0)
 	if !recursive && depth <= cgoCheckFollowsLevels {
+		return
+	}
+	// Pinning the first node does not cover the rest of a recursive
+	// structure; pinning inside a loop is how code walks a list to pin every
+	// node, so that, and only that, silences a recursive type. A finite chain
+	// deeper than the check needs its third level pinned, which one function
+	// body cannot be shown to do from the pins the check itself requires, so
+	// it is always reported.
+	if recursive && check.loopPin {
 		return
 	}
 	signal := model.SecuritySignal{
@@ -664,7 +814,28 @@ func cgoIsCType(t types.Type) bool {
 	if !ok {
 		return false
 	}
-	return strings.HasPrefix(named.Obj().Name(), "_Ctype_")
+	if strings.HasPrefix(named.Obj().Name(), "_Ctype_") {
+		return true
+	}
+	// `type SQLiteContext C.sqlite3_context` gives a Go name to a C struct:
+	// go/types shares the underlying struct between the two names, so the
+	// identity of that struct is what still marks the memory as C's. Only
+	// structs are matched; a basic underlying type such as int32 is shared
+	// with every Go type of that kind.
+	st, ok := named.Underlying().(*types.Struct)
+	if !ok || named.Obj().Pkg() == nil {
+		return false
+	}
+	scope := named.Obj().Pkg().Scope()
+	for _, name := range scope.Names() {
+		if !strings.HasPrefix(name, "_Ctype_") {
+			continue
+		}
+		if obj, ok := scope.Lookup(name).(*types.TypeName); ok && obj.Type().Underlying() == st {
+			return true
+		}
+	}
+	return false
 }
 
 // cgoIsCPointer reports whether the type is a pointer to a C type, directly

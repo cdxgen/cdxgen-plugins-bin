@@ -48,3 +48,26 @@ func parenthesized() {
 	var s pair
 	C.take(unsafe.Pointer((&s.data)))
 }
+
+// reusedName is viaVariable twice, in two switch cases that each define their
+// own p. Real code reuses short names this way; the read must pick the p each
+// call sees, not give up because the name is assigned more than once.
+//
+// golem:want signal category=cgo-pointer-check-untyped symbol=C.take line=64
+// golem:want signal category=cgo-pointer-check-untyped symbol=C.take line=67
+// golem:want-not signal category=cgo-pointer-check-untyped line=70
+func reusedName(mode int) {
+	var s pair
+	switch mode {
+	case 0:
+		p := unsafe.Pointer(&s.data)
+		C.take(p)
+	case 1:
+		p := unsafe.Pointer((&s.data))
+		C.take(p)
+	default:
+		p := C.malloc(8)
+		C.take(p)
+		C.free(p)
+	}
+}

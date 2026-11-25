@@ -649,7 +649,7 @@ points into; the findings themselves are the security signals.
 | `index`    | number  | Argument position.                                                                            |
 | `shape`    | string  | `addr`, `index` or `slice` when cgo bounds the check to that memory; `untyped` when the runtime scans the whole heap object; `unchecked` when cgo emits no check. |
 | `owner`    | string  | `go`, `c` or `unknown`: whose memory the argument points into.                                |
-| `pinned`   | boolean | The enclosing function passed the value to `(*runtime.Pinner).Pin` before the call (intraprocedural, path-insensitive). |
+| `pinned`   | boolean | Every Go pointer stored in the memory the check covers was passed to `(*runtime.Pinner).Pin` earlier in the function: `Pin(E)` for an `&E` argument, `Pin(o.f)` for each pointer field of an object an untyped check scans. `Pin(&s.f)` pins `s`, not the target of `s.f`, and does not count (intraprocedural, path-insensitive). |
 | `position` | object  | Position of the argument expression, the join key between the textual and compiled views.     |
 
 ### `cgo.packages[]` fields

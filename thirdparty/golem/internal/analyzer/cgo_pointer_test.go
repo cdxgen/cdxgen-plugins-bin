@@ -4,6 +4,8 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"go/types"
+	"strings"
 	"testing"
 )
 
@@ -149,7 +151,74 @@ func parseTestExpr(t *testing.T, expr string) ast.Expr {
 	return found
 }
 
-func mustShape(arg ast.Expr) string {
-	s, _ := cgoCheckShape(arg)
-	return s
+// cParamType reduces a C parameter declaration to its type, and array
+// parameters decay to pointers whatever their bound.
+func TestCParamType(t *testing.T) {
+	for _, tt := range []struct{ param, want string }{
+		{"void *p", "void *"},
+		{"const char *s", "char *"},
+		{"int n", "int"},
+		{"int", "int"},
+		{"int arr[4]", "int *"},
+		{"int arr[8]", "int *"},
+		{"int grid[2][3]", "int **"},
+		{"void *v[]", "void **"},
+		{"struct node *head", "node *"},
+	} {
+		if got := cParamType(tt.param); got != tt.want {
+			t.Errorf("cParamType(%q) = %q, want %q", tt.param, got, tt.want)
+		}
+	}
+}
+
+// The reaching-definition lookup separates names reused in sibling blocks
+// and reads the latest straight-line assignment before a use.
+func TestCgoFactsLookupScopes(t *testing.T) {
+	src := `package p
+
+func f(mode int) {
+	p := a0
+	switch mode {
+	case 0:
+		p := a1
+		use(p)
+	case 1:
+		p := a2
+		use(p)
+	}
+	use(p)
+	p = a3
+	use(p)
+	p = g(p)
+}
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "p.go", src, parser.SkipObjectResolution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := file.Decls[0].(*ast.FuncDecl).Body
+	facts := cgoCollectFacts(body)
+	var got []string
+	ast.Inspect(body, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok || len(call.Args) != 1 {
+			return true
+		}
+		id, ok := call.Args[0].(*ast.Ident)
+		if !ok || id.Name != "p" {
+			return true
+		}
+		def, ok := facts.lookup("p", id.Pos())
+		if !ok {
+			got = append(got, "?")
+			return true
+		}
+		got = append(got, types.ExprString(def))
+		return true
+	})
+	want := "a1 a2 a0 a3 a3"
+	if strings.Join(got, " ") != want {
+		t.Errorf("lookups = %v, want %s", got, want)
+	}
 }

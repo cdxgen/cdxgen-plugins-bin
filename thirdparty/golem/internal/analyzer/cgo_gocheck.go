@@ -76,19 +76,25 @@ func scanGocheckConfig(path, kind string) []cgoGocheckHit {
 				continue
 			}
 			for j := i + 1; j < len(lines) && j <= i+3; j++ {
-				if gocheckValueDisables(lines[j]) {
+				_, value, ok := strings.Cut(lines[j], "value:")
+				if ok && gocheckValueDisables(value) {
 					hits = append(hits, cgoGocheckHit{path: path, line: j + 1, source: "yaml"})
 					break
 				}
 			}
 		}
-	default:
-		for i, line := range lines {
-			if !gocheckLineDisables(line) {
-				continue
-			}
-			hits = append(hits, cgoGocheckHit{path: path, line: i + 1, source: kind})
+	}
+	// Every kind, YAML included, can carry the setting on one line: a compose
+	// `GODEBUG: cgocheck=0` map entry or `- GODEBUG=cgocheck=0` list entry.
+	reported := map[int]bool{}
+	for _, hit := range hits {
+		reported[hit.line] = true
+	}
+	for i, line := range lines {
+		if reported[i+1] || !gocheckLineDisables(line) {
+			continue
 		}
+		hits = append(hits, cgoGocheckHit{path: path, line: i + 1, source: kind})
 	}
 	return hits
 }
@@ -101,33 +107,48 @@ func gocheckLineDisables(line string) bool {
 	if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 		return false
 	}
-	index := strings.Index(trimmed, "GODEBUG")
-	if index < 0 {
-		return false
-	}
-	rest := trimmed[index+len("GODEBUG"):]
-	rest = strings.TrimLeft(rest, " \t=:") // ENV GODEBUG=..., export GODEBUG=..., GODEBUG := ...
-	return gocheckValueDisables(rest)
-}
-
-// gocheckValueDisables reports whether a GODEBUG value string sets cgocheck
-// to 0. The value is never reported; only the fact answers here.
-func gocheckValueDisables(value string) bool {
-	for {
-		index := strings.Index(value, "cgocheck=")
+	for rest := trimmed; ; {
+		index := strings.Index(rest, "GODEBUG")
 		if index < 0 {
 			return false
 		}
-		rest := value[index+len("cgocheck="):]
-		digits := 0
-		for digits < len(rest) && rest[digits] >= '0' && rest[digits] <= '9' {
-			digits++
+		// The name must stand alone: MY_GODEBUG or GODEBUGGER is another
+		// variable.
+		before := index == 0 || !isCIdentifier(rest[index-1:index]) && rest[index-1] != '_'
+		rest = rest[index+len("GODEBUG"):]
+		if !before || (rest != "" && (isCIdentifier(rest[:1]) || rest[0] >= '0' && rest[0] <= '9')) {
+			continue
 		}
-		if digits > 0 && rest[:digits] == "0" {
+		// ENV GODEBUG=..., ENV GODEBUG ..., export GODEBUG=..., GODEBUG := ...,
+		// GODEBUG: "..." (compose), - GODEBUG=... (compose list form).
+		value := strings.TrimLeft(rest, " \t=:\"'")
+		if gocheckValueDisables(value) {
 			return true
 		}
-		value = rest
 	}
+}
+
+// gocheckValueDisables reports whether a GODEBUG value string leaves cgocheck
+// at 0. The value is a comma-separated list of key=value settings, and the
+// runtime applies them in order, so the last cgocheck setting wins:
+// `cgocheck=0,cgocheck=1` keeps the check on. Quotes and trailing shell or
+// YAML punctuation around the value are ignored. The value is never reported;
+// only the fact answers here.
+func gocheckValueDisables(value string) bool {
+	value = strings.TrimSpace(value)
+	if end := strings.IndexAny(value, " \t#;"); end >= 0 {
+		value = value[:end]
+	}
+	value = strings.Trim(value, "\"'`")
+	disabled := false
+	for _, setting := range strings.Split(value, ",") {
+		key, val, ok := strings.Cut(strings.TrimSpace(setting), "=")
+		if !ok || key != "cgocheck" {
+			continue
+		}
+		disabled = val == "0"
+	}
+	return disabled
 }
 
 // scanGocheckSetenv finds os.Setenv calls that set GODEBUG with cgocheck=0
@@ -179,16 +200,31 @@ func gocheckDisabledInEnv(environ []string) bool {
 // gocheck2EnabledInEnv reports whether the environment asks for the
 // cgocheck2 experiment, which turns the stronger whole-program check on.
 func gocheck2EnabledInEnv(experiment string, environ []string) bool {
-	if strings.TrimSpace(experiment) == "cgocheck2" {
+	if experimentListHas(experiment, "cgocheck2") {
 		return true
 	}
 	for _, entry := range environ {
 		key, value, ok := strings.Cut(entry, "=")
-		if ok && key == "GOEXPERIMENT" && strings.TrimSpace(value) == "cgocheck2" {
+		if ok && key == "GOEXPERIMENT" && experimentListHas(value, "cgocheck2") {
 			return true
 		}
 	}
 	return false
+}
+
+// experimentListHas reports whether a comma-separated GOEXPERIMENT value
+// turns name on. A later "noname" turns it back off.
+func experimentListHas(list, name string) bool {
+	on := false
+	for _, item := range strings.Split(list, ",") {
+		switch strings.TrimSpace(item) {
+		case name:
+			on = true
+		case "no" + name:
+			on = false
+		}
+	}
+	return on
 }
 
 // cgoReportCategories returns the cgocheck categories a cgo evidence object

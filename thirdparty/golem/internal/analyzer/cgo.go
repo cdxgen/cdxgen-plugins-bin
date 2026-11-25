@@ -577,10 +577,13 @@ func (a *Analyzer) assembleCgoReport(collected *cgoEvidence, mode, toolchainVers
 			// package; the counts and the category name go on the cgo object
 			// so a consumer can roll them up without reading the signals.
 			evidence.CallSites = append(evidence.CallSites, record.pointer.callSites...)
-			untyped := 0
+			untyped, reachable := 0, 0
 			for _, signal := range record.pointer.signals {
-				if signal.Category == CgoCategoryUntypedCheck {
+				switch signal.Category {
+				case CgoCategoryUntypedCheck:
 					untyped++
+				case CgoCategoryUnpinnedReachable:
+					reachable++
 				}
 				if signal.Category == CgoCategoryUntypedCheck || signal.Category == CgoCategoryUnpinnedReachable {
 					if summary := collected.packages[record.packagePath]; summary != nil {
@@ -590,6 +593,7 @@ func (a *Analyzer) assembleCgoReport(collected *cgoEvidence, mode, toolchainVers
 				}
 			}
 			evidence.UntypedPointerCheckCount += untyped
+			evidence.UnpinnedReachableCount += reachable
 		}
 		if record.packagePath != "" {
 			attachment.directivesByPackage[record.packagePath] = append(attachment.directivesByPackage[record.packagePath], record.directives...)

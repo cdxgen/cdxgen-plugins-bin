@@ -115,25 +115,12 @@ func cgoIsType(t ast.Expr) bool {
 		if !ok {
 			return false
 		}
-		if id.Name == "unsafe" && t.Sel.Name == "Pointer" {
+		// cgo's generated code spells unsafe.Pointer as _cgo_unsafe.Pointer.
+		if (id.Name == "unsafe" || id.Name == "_cgo_unsafe") && t.Sel.Name == "Pointer" {
 			return true
 		}
 		if id.Name == "C" {
-			name := t.Sel.Name
-			if cgoBaseTypeNames[name] || strings.HasPrefix(name, "_Ctype_") ||
-				strings.HasPrefix(name, "struct_") || strings.HasPrefix(name, "union_") ||
-				strings.HasPrefix(name, "enum_") {
-				return true
-			}
-			// The stdint and sys(types) names, size_t and friends, are
-			// typedefs by C convention and can never name a function, so a
-			// call spelled C.<name>_t is a conversion whatever the preamble
-			// says. Without this, C.uintptr_t(...) in the syscall wrappers
-			// of the module cache reads as a C call and its argument is
-			// checked as if cgo would check it.
-			if strings.HasSuffix(name, "_t") {
-				return true
-			}
+			return cgoIsCTypeSelector(t.Sel.Name, nil)
 		}
 		return false
 	case *ast.Ident:

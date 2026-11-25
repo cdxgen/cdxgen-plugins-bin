@@ -3,6 +3,8 @@ package analyzer
 import (
 	"go/ast"
 	"go/token"
+	"go/types"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -112,10 +114,18 @@ type cgoCallEvent struct {
 // The pin analysis is intraprocedural: a value pinned in one function is
 // invisible to another, and a pin on a path the walker cannot see (an
 // if-branch it walked but which does not dominate the call) still counts.
+//
+// Pin(v) pins the object v points to. What cgo's check asks about is the Go
+// pointers STORED in the memory it scans, so the targets are the rendered
+// pinned expressions (`s.other` for Pin(s.other)), which the classification
+// compares with the expressions that load those stored pointers. Pin(&s.other)
+// pins s itself and leaves s.other's target unpinned; the runtime panics on
+// it, and the different rendering keeps it from reading as pinned.
 type cgoPinEvent struct {
 	pos     token.Pos
 	unpin   bool
-	targets map[string]bool // the base identifiers of the pinned expression
+	inLoop  bool            // the call sits inside a for or range statement
+	targets map[string]bool // rendered pinned expressions, plus their single definitions
 }
 
 // cgoPreamble is what the walker could read out of the C preamble text: the
@@ -252,12 +262,20 @@ func cParamType(param string) string {
 	}
 	for i, field := range typeFields {
 		if strings.Contains(field, "[") {
-			// An array parameter decays to a pointer.
-			typeFields[i] = strings.ReplaceAll(field, "[4]", "*")
+			// An array parameter decays to a pointer: `arr[8]` and `*v[]`
+			// keep their stars, lose the name, and gain one star per
+			// dimension.
+			stars := strings.Count(field, "[")
+			field = cArrayDims.ReplaceAllString(field, "")
+			field = strings.TrimRight(field, "_abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+			typeFields[i] = field + strings.Repeat("*", stars)
 		}
 	}
-	return strings.Join(typeFields, " ")
+	return strings.TrimSpace(strings.Join(typeFields, " "))
 }
+
+// cArrayDims matches the array dimensions of a C parameter declarator.
+var cArrayDims = regexp.MustCompile(`\[[^\]]*\]`)
 
 // cgoParseTypedef reads `typedef int myint;` and records the name it declares,
 // so C.<name> conversions can be recognised the way gcc.go's isType recognises
@@ -341,15 +359,13 @@ func cCParamNeedsCheck(paramType string) bool {
 	return true
 }
 
-// cgoFunctionFacts is what one function body shows about its values: the
-// single-assignment definitions, the names assigned more than once, the
-// identifiers rooted in C-owned memory, and the Pinner calls in source order.
-// The textual walk and the compiled pass over cgo-generated files both
-// collect it, which is why it is a structure and not local state.
+// cgoFunctionFacts is what one function body shows about its values: every
+// assignment with the block it happened in, the runtime.Pinner variables,
+// and the Pinner calls in source order. The textual walk and the compiled
+// pass over cgo-generated files both collect it, which is why it is a
+// structure and not local state.
 type cgoFunctionFacts struct {
-	defs       map[string]ast.Expr
-	setTwice   map[string]bool
-	cOwned     map[string]bool
+	defs       map[string][]cgoDef
 	pinnerVars map[string]bool
 	pins       []cgoPinEvent
 	// parent is the enclosing scope's facts, set when the compiled pass
@@ -358,49 +374,142 @@ type cgoFunctionFacts struct {
 	parent *cgoFunctionFacts
 }
 
-// lookup finds the single defining expression of name, falling through to
-// the parent scope. A name assigned twice resolves to nothing.
-func (f *cgoFunctionFacts) lookup(name string) (ast.Expr, bool) {
+// cgoDef is one assignment to a name, with the innermost block-like node it
+// happened in. The block bounds where the assignment can be the one a later
+// use reads.
+type cgoDef struct {
+	pos   token.Pos
+	expr  ast.Expr
+	scope ast.Node
+}
+
+// lookup finds the assignment of name that a use at pos reads: the latest
+// one before pos whose block encloses pos, falling through to the parent
+// scope. This is a path-insensitive reaching definition. A `:=` is bounded
+// by its block, which separates the `p := ...` of two switch cases; a `=`
+// is visible to every later use, because it writes a variable declared
+// further out. The latest assignment wins, so when two branches both assign
+// a name the later one in the source is read. A use with no position
+// resolves only a name assigned exactly once.
+func (f *cgoFunctionFacts) lookup(name string, pos token.Pos) (ast.Expr, bool) {
 	for scope := f; scope != nil; scope = scope.parent {
-		if scope.setTwice[name] {
+		defs := scope.defs[name]
+		if len(defs) == 0 {
+			continue
+		}
+		if pos == token.NoPos {
+			if len(defs) == 1 {
+				return defs[0].expr, true
+			}
 			return nil, false
 		}
-		if def, ok := scope.defs[name]; ok {
-			return def, true
+		var best *cgoDef
+		for i := range defs {
+			def := &defs[i]
+			if def.pos >= pos {
+				continue
+			}
+			if def.scope != nil && (pos < def.scope.Pos() || pos >= def.scope.End()) {
+				continue
+			}
+			if best == nil || def.pos > best.pos {
+				best = def
+			}
 		}
+		if best != nil {
+			return best.expr, true
+		}
+		// Assigned in this scope but not before the use: the use reads a
+		// parameter or an outer variable, which the parent may know.
 	}
 	return nil, false
 }
 
-// isCOwned reports whether name was defined from a C call result.
-func (f *cgoFunctionFacts) isCOwned(name string) bool {
-	for scope := f; scope != nil; scope = scope.parent {
-		if scope.cOwned[name] {
-			return true
+// pinnedBefore returns the rendered expressions pinned before pos. An Unpin
+// call releases everything: the walker does not tell two pinners apart, and
+// treating the later pins as the only live ones is the safe reading.
+func (f *cgoFunctionFacts) pinnedBefore(pos token.Pos) (pinned map[string]bool, loopPin bool) {
+	pinned = map[string]bool{}
+	for _, pin := range f.pins {
+		if pin.pos >= pos {
+			break
 		}
+		if pin.unpin {
+			pinned = map[string]bool{}
+			loopPin = false
+			continue
+		}
+		for target := range pin.targets {
+			pinned[target] = true
+		}
+		loopPin = loopPin || pin.inLoop
+	}
+	return pinned, loopPin
+}
+
+// cgoIsScopeNode reports whether n opens a block that bounds the assignments
+// made in it.
+func cgoIsScopeNode(n ast.Node) bool {
+	switch n.(type) {
+	case *ast.BlockStmt, *ast.CaseClause, *ast.CommClause, *ast.IfStmt,
+		*ast.ForStmt, *ast.RangeStmt, *ast.SwitchStmt, *ast.TypeSwitchStmt, *ast.FuncLit:
+		return true
 	}
 	return false
 }
 
 // cgoCollectFacts walks one function body and collects its facts.
-// Definitions are collected per function rather than per block: a name
-// assigned twice anywhere in the function is ambiguous and resolves to
-// nothing, which is the safe reading, and a closure variable that shadows an
-// outer one is the known limit of that choice.
 func cgoCollectFacts(body ast.Node) *cgoFunctionFacts {
 	facts := &cgoFunctionFacts{
-		defs:       map[string]ast.Expr{},
-		setTwice:   map[string]bool{},
-		cOwned:     map[string]bool{},
+		defs:       map[string][]cgoDef{},
 		pinnerVars: map[string]bool{},
 	}
+	// The ancestors of the node being visited, for the block of each
+	// assignment and the loop test of each Pin call.
+	var stack []ast.Node
+	innermostScope := func() ast.Node {
+		for i := len(stack) - 1; i >= 0; i-- {
+			if cgoIsScopeNode(stack[i]) {
+				return stack[i]
+			}
+		}
+		return nil
+	}
+	inLoop := func() bool {
+		for i := len(stack) - 1; i >= 0; i-- {
+			switch stack[i].(type) {
+			case *ast.ForStmt, *ast.RangeStmt:
+				return true
+			case *ast.FuncLit:
+				return false
+			}
+		}
+		return false
+	}
 	ast.Inspect(body, func(n ast.Node) bool {
+		if n == nil {
+			stack = stack[:len(stack)-1]
+			return true
+		}
 		switch node := n.(type) {
 		case *ast.AssignStmt:
 			if len(node.Lhs) == len(node.Rhs) {
+				// `:=` declares a name that lives in its block. `=` writes a
+				// variable declared further out, and the value stays after the
+				// block closes: `var p *T; if n > 0 { p = &b[0] }; C.f(p)`
+				// reads the assignment made inside the if.
+				scope := innermostScope()
+				if node.Tok != token.DEFINE {
+					scope = nil
+				}
 				for i, lhs := range node.Lhs {
-					if id, ok := lhs.(*ast.Ident); ok && id.Name != "_" {
-						facts.record(id.Name, node.Rhs[i])
+					id, ok := lhs.(*ast.Ident)
+					if !ok || id.Name == "_" {
+						continue
+					}
+					facts.record(id, node.Rhs[i], scope)
+					if cgoIsPinnerValue(node.Rhs[i]) {
+						facts.pinnerVars[id.Name] = true
 					}
 				}
 			}
@@ -410,14 +519,17 @@ func cgoCollectFacts(body ast.Node) *cgoFunctionFacts {
 				if !ok {
 					continue
 				}
-				if cgoIsPinnerType(node, valueSpec) {
+				if node.Tok == token.VAR && cgoIsPinnerTypeExpr(valueSpec.Type) {
 					for _, name := range valueSpec.Names {
 						facts.pinnerVars[name.Name] = true
 					}
 				}
 				for i, name := range valueSpec.Names {
 					if i < len(valueSpec.Values) {
-						facts.record(name.Name, valueSpec.Values[i])
+						facts.record(name, valueSpec.Values[i], innermostScope())
+						if cgoIsPinnerValue(valueSpec.Values[i]) {
+							facts.pinnerVars[name.Name] = true
+						}
 					}
 				}
 			}
@@ -427,13 +539,11 @@ func cgoCollectFacts(body ast.Node) *cgoFunctionFacts {
 					switch sel.Sel.Name {
 					case "Pin":
 						if len(node.Args) == 1 {
-							// Pin(&s.other) pins s.other, Pin(p) pins p: the
-							// targets are the base identifiers of the pinned
-							// expression, chased through single definitions.
-							targets := cgoBaseIdents(node.Args[0], nil, 0)
-							if len(targets) > 0 {
-								facts.pins = append(facts.pins, cgoPinEvent{pos: node.Pos(), targets: targets})
-							}
+							facts.pins = append(facts.pins, cgoPinEvent{
+								pos:     node.Pos(),
+								inLoop:  inLoop(),
+								targets: facts.pinTargets(node.Args[0], node.Pos()),
+							})
 						}
 					case "Unpin":
 						facts.pins = append(facts.pins, cgoPinEvent{pos: node.Pos(), unpin: true})
@@ -441,18 +551,43 @@ func cgoCollectFacts(body ast.Node) *cgoFunctionFacts {
 				}
 			}
 		}
+		stack = append(stack, n)
 		return true
 	})
 	return facts
 }
 
-func (f *cgoFunctionFacts) record(name string, expr ast.Expr) {
-	if _, seen := f.defs[name]; seen {
-		f.setTwice[name] = true
+// record notes one assignment. Its position is the end of the assigned
+// expression, so `p = f(p)` reads the previous p inside f(p) and the new one
+// after the statement.
+func (f *cgoFunctionFacts) record(id *ast.Ident, expr ast.Expr, scope ast.Node) {
+	f.defs[id.Name] = append(f.defs[id.Name], cgoDef{pos: expr.End(), expr: expr, scope: scope})
+}
+
+// pinTargets renders the pinned expression, and its definition when it is a
+// name assigned before the pin, so `n := head.next; pin.Pin(n)` covers a
+// later load of head.next. Conversions are stripped: Pin(unsafe.Pointer(p))
+// pins what p points to.
+func (f *cgoFunctionFacts) pinTargets(arg ast.Expr, pos token.Pos) map[string]bool {
+	targets := map[string]bool{}
+	expr := cgoUnparen(cgoStripConversions(arg))
+	targets[types.ExprString(expr)] = true
+	if id, ok := expr.(*ast.Ident); ok {
+		if def, ok := f.lookup(id.Name, pos); ok {
+			targets[types.ExprString(cgoUnparen(cgoStripConversions(def)))] = true
+		}
 	}
-	f.defs[name] = expr
-	if cgoIsCRooted(expr, nil, 0) {
-		f.cOwned[name] = true
+	return targets
+}
+
+// cgoUnparen removes the parentheses around an expression.
+func cgoUnparen(expr ast.Expr) ast.Expr {
+	for {
+		paren, ok := expr.(*ast.ParenExpr)
+		if !ok {
+			return expr
+		}
+		expr = paren.X
 	}
 }
 
@@ -477,22 +612,33 @@ func (w *cgoPointerWalker) walkFunction(fn *ast.FuncDecl, preamble *cgoPreamble)
 	}
 }
 
-// cgoIsPinnerType reports whether a declaration introduces a runtime.Pinner
-// variable.
-func cgoIsPinnerType(decl *ast.GenDecl, spec *ast.ValueSpec) bool {
-	if decl.Tok != token.VAR {
+// cgoIsPinnerTypeExpr reports whether a type expression names runtime.Pinner.
+func cgoIsPinnerTypeExpr(t ast.Expr) bool {
+	if star, ok := t.(*ast.StarExpr); ok {
+		t = star.X
+	}
+	sel, ok := t.(*ast.SelectorExpr)
+	if !ok {
 		return false
 	}
-	if sel, ok := typeOfSpec(spec).(*ast.SelectorExpr); ok {
-		if id, ok := sel.X.(*ast.Ident); ok && id.Name == "runtime" && sel.Sel.Name == "Pinner" {
-			return true
+	id, ok := sel.X.(*ast.Ident)
+	return ok && id.Name == "runtime" && sel.Sel.Name == "Pinner"
+}
+
+// cgoIsPinnerValue reports whether an initialiser creates a runtime.Pinner:
+// runtime.Pinner{}, &runtime.Pinner{} or new(runtime.Pinner).
+func cgoIsPinnerValue(expr ast.Expr) bool {
+	switch e := cgoUnparen(expr).(type) {
+	case *ast.CompositeLit:
+		return cgoIsPinnerTypeExpr(e.Type)
+	case *ast.UnaryExpr:
+		return e.Op == token.AND && cgoIsPinnerValue(e.X)
+	case *ast.CallExpr:
+		if id, ok := e.Fun.(*ast.Ident); ok && id.Name == "new" && len(e.Args) == 1 {
+			return cgoIsPinnerTypeExpr(e.Args[0])
 		}
 	}
 	return false
-}
-
-func typeOfSpec(spec *ast.ValueSpec) ast.Expr {
-	return spec.Type
 }
 
 // cgoCallClassification holds the state of classifying one call event.
@@ -575,20 +721,55 @@ func (c *cgoCallClassification) classifyArgument(event *cgoCallEvent, index int,
 		return argument
 	}
 	if argument.Owner == cgoOwnerGo && argument.Shape != cgoShapeUntyped {
-		argument.Pinned = c.argumentPinned(event, arg)
+		// A bounded check covers the memory at the passed address. Without
+		// types the read can only see the one stored pointer &E names; the
+		// compiled pass answers for untyped checks, which scan a whole object.
+		pinned, _ := event.facts.pinnedBefore(event.pos)
+		argument.Pinned = cgoStoredPointerPinned(arg, event.facts, arg.Pos(), pinned)
 	}
 	return argument
 }
 
+// cgoStoredPointerPinned reports whether the pointer stored at the address
+// the argument passes was pinned: the argument resolves, through conversions
+// and the assignments that reach it, to &E, and E was pinned (Pin(E)). That
+// is the condition cgo's check enforces for an addressed value, and it is
+// deliberately not "the object containing E was pinned": Pin(&s.other) pins
+// s and leaves s.other's target unpinned, and the runtime panics on it.
+func cgoStoredPointerPinned(arg ast.Expr, facts *cgoFunctionFacts, pos token.Pos, pinned map[string]bool) bool {
+	if len(pinned) == 0 || facts == nil {
+		return false
+	}
+	expr := arg
+	for depth := 0; depth < 8; depth++ {
+		expr = cgoUnparen(cgoStripConversions(cgoUnparen(expr)))
+		switch e := expr.(type) {
+		case *ast.Ident:
+			def, ok := facts.lookup(e.Name, pos)
+			if !ok {
+				return false
+			}
+			expr, pos = def, def.Pos()
+		case *ast.UnaryExpr:
+			if e.Op != token.AND {
+				return false
+			}
+			return pinned[types.ExprString(cgoUnparen(e.X))]
+		default:
+			return false
+		}
+	}
+	return false
+}
+
 // cgoPointerCarrying approximates needsPointerCheck without the C prototype:
-// the argument's expression, or the single assignment that defines an
-// identifier argument in the same function, must contain an
-// unsafe.Pointer(...) of an expression that is not itself a C call result. A
-// defined identifier assigned twice resolves to nothing, the safe reading.
+// the argument's expression, or the assignment that reaches an identifier
+// argument in the same function, must contain an unsafe.Pointer(...) of an
+// expression that is not itself a C call result.
 func cgoPointerCarrying(arg ast.Expr, event *cgoCallEvent) bool {
 	expr := arg
 	if id, ok := arg.(*ast.Ident); ok && event != nil && event.facts != nil {
-		if def, ok := event.facts.lookup(id.Name); ok {
+		if def, ok := event.facts.lookup(id.Name, id.Pos()); ok {
 			expr = def
 		} else {
 			return false
@@ -608,7 +789,7 @@ func cgoContainsUnsafePointer(expr ast.Expr, event *cgoCallEvent, depth int) boo
 	case *ast.CallExpr:
 		if sel, ok := e.Fun.(*ast.SelectorExpr); ok {
 			if id, ok := sel.X.(*ast.Ident); ok && id.Name == "unsafe" && sel.Sel.Name == "Pointer" && len(e.Args) == 1 {
-				if !cgoIsCRooted(e.Args[0], event, depth+1) {
+				if !cgoIsCRooted(e.Args[0], event, depth+1) && cgoDerivesGoAddress(e.Args[0], event, depth+1) {
 					return true
 				}
 			}
@@ -635,6 +816,43 @@ func cgoContainsUnsafePointer(expr ast.Expr, event *cgoCallEvent, depth int) boo
 	return false
 }
 
+// cgoDerivesGoAddress reports whether expr takes the address of Go memory
+// somewhere the function shows: &x, &x[i], a slice expression, or
+// unsafe.SliceData / unsafe.StringData of a Go value, through conversions and
+// the assignments that reach a name. An unsafe.Pointer of a struct field, a
+// parameter or a helper's result has no visible origin; libraries keep C
+// handles in exactly those places (go-sqlite3's argBuf, colvals and
+// newHandle results), so the text leaves them to the compiled pass, which
+// sees their types.
+func cgoDerivesGoAddress(expr ast.Expr, event *cgoCallEvent, depth int) bool {
+	if depth > 8 {
+		return false
+	}
+	switch e := cgoUnparen(expr).(type) {
+	case *ast.UnaryExpr:
+		return e.Op == token.AND
+	case *ast.SliceExpr:
+		return true
+	case *ast.CallExpr:
+		if len(e.Args) != 1 {
+			return false
+		}
+		if cgoIsUnsafeData(e.Fun, false) {
+			return true
+		}
+		if cgoIsType(e.Fun) {
+			return cgoDerivesGoAddress(e.Args[0], event, depth+1)
+		}
+	case *ast.Ident:
+		if event != nil && event.facts != nil {
+			if def, ok := event.facts.lookup(e.Name, e.Pos()); ok {
+				return cgoDerivesGoAddress(def, event, depth+1)
+			}
+		}
+	}
+	return false
+}
+
 // cgoIsCRooted reports whether expr evaluates to memory C owns: the result of
 // a C call, or something a C-owned identifier already points into.
 func cgoIsCRooted(expr ast.Expr, event *cgoCallEvent, depth int) bool {
@@ -651,6 +869,21 @@ func cgoIsCRooted(expr ast.Expr, event *cgoCallEvent, depth int) bool {
 		if isCgoWrapperCall(e) {
 			return true
 		}
+		// A C call with checked arguments is rewritten into an immediately
+		// invoked closure that returns the wrapper's result:
+		// ptr := func() T { ...; return _Cfunc_f(...) }().
+		if literal, ok := cgoUnparen(e.Fun).(*ast.FuncLit); ok && len(e.Args) == 0 {
+			rooted := false
+			ast.Inspect(literal.Body, func(n ast.Node) bool {
+				if ret, ok := n.(*ast.ReturnStmt); ok && len(ret.Results) == 1 {
+					if call, ok := cgoUnparen(ret.Results[0]).(*ast.CallExpr); ok && isCgoWrapperCall(call) {
+						rooted = true
+					}
+				}
+				return !rooted
+			})
+			return rooted
+		}
 		if len(e.Args) == 1 {
 			return cgoIsCRooted(e.Args[0], event, depth+1)
 		}
@@ -659,10 +892,7 @@ func cgoIsCRooted(expr ast.Expr, event *cgoCallEvent, depth int) bool {
 		if event == nil || event.facts == nil {
 			return false
 		}
-		if event.facts.isCOwned(e.Name) {
-			return true
-		}
-		if def, ok := event.facts.lookup(e.Name); ok {
+		if def, ok := event.facts.lookup(e.Name, e.Pos()); ok {
 			return cgoIsCRooted(def, event, depth+1)
 		}
 		return false
@@ -702,77 +932,6 @@ func (c *cgoCallClassification) argumentOwner(event *cgoCallEvent, arg ast.Expr)
 		return cgoOwnerUnknown
 	}
 	return cgoOwnerGo
-}
-
-// argumentPinned reports whether every identifier the argument is rooted in
-// was passed to a Pinner before the call, with no Unpin of that pinner in
-// between. Only what one function body shows can count; this is the
-// intraprocedural limit the report states.
-func (c *cgoCallClassification) argumentPinned(event *cgoCallEvent, arg ast.Expr) bool {
-	bases := cgoBaseIdents(arg, nil, 0)
-	if len(bases) == 0 {
-		return false
-	}
-	var lastUnpin token.Pos
-	for _, pin := range event.facts.pins {
-		if pin.pos >= event.pos {
-			break
-		}
-		if pin.unpin {
-			lastUnpin = pin.pos
-			continue
-		}
-		if pin.pos < lastUnpin {
-			continue
-		}
-		for target := range pin.targets {
-			delete(bases, target)
-		}
-	}
-	return len(bases) == 0
-}
-
-// cgoBaseIdents collects the identifiers an expression is rooted in, chasing
-// single definitions so a pinned variable's alias still reads as pinned.
-func cgoBaseIdents(expr ast.Expr, event *cgoCallEvent, depth int) map[string]bool {
-	out := map[string]bool{}
-	var collect func(ast.Expr, int)
-	collect = func(e ast.Expr, d int) {
-		if d > 8 {
-			return
-		}
-		switch v := e.(type) {
-		case *ast.Ident:
-			if event != nil && event.facts != nil {
-				if def, ok := event.facts.lookup(v.Name); ok {
-					// A resolved variable stands for its definition: Pin(&s)
-					// covers p := unsafe.Pointer(&s) even though p itself
-					// was never named by Pin.
-					collect(def, d+1)
-					return
-				}
-			}
-			out[v.Name] = true
-		case *ast.ParenExpr:
-			collect(v.X, d+1)
-		case *ast.StarExpr:
-			collect(v.X, d+1)
-		case *ast.UnaryExpr:
-			collect(v.X, d+1)
-		case *ast.CallExpr:
-			for _, sub := range v.Args {
-				collect(sub, d+1)
-			}
-		case *ast.IndexExpr:
-			collect(v.X, d+1)
-		case *ast.SliceExpr:
-			collect(v.X, d+1)
-		case *ast.SelectorExpr:
-			collect(v.X, d+1)
-		}
-	}
-	collect(expr, depth)
-	return out
 }
 
 // untypedFinding builds the signal for one argument cgo checks with no type
