@@ -344,6 +344,22 @@ fn loop_forest(regions: &[LoopRegion]) -> Vec<LoopNode> {
     roots
 }
 
+/// A positional view over the keyed summaries the concrete pass reads, for
+/// the rare contextual re-summary: [`summarize_in_context`] addresses rows
+/// by position, and the concrete pass holds the keyed map the fixpoint
+/// returned.
+struct KeyedRows<'a> {
+    functions: &'a [FunctionRecord],
+    map: &'a BTreeMap<String, FunctionSummary>,
+}
+
+impl IndexedTable<FunctionSummary> for KeyedRows<'_> {
+    fn lookup_index(&self, index: usize) -> Option<&FunctionSummary> {
+        let id = &self.functions.get(index)?.declaration.id;
+        self.map.get(id)
+    }
+}
+
 /// The cost of one whole-state copy, as the number of entries it carries.
 /// The `--stats-json` counters use it so a clone of a large environment
 /// counts by its size rather than counting as one unit.
@@ -687,6 +703,13 @@ struct FunctionSummary {
     /// Whether parameter 0 is a `self` receiver, whose caller-side binding is
     /// the method call's receiver rather than a `&mut` argument.
     self_receiver: bool,
+    /// A receiver-typed sink pattern matched this function by callee name but
+    /// could not fire because the receiver's type was not known here: the
+    /// receiver is a type parameter or an unresolvable chain. A caller that
+    /// knows the concrete type can have the callee re-summarized in that
+    /// context (see the context-sensitive summaries note in
+    /// docs/ANALYSIS_ARCHITECTURE.md).
+    receiver_type_pending: bool,
 }
 
 impl FunctionSummary {
@@ -716,6 +739,10 @@ impl FunctionSummary {
         );
         if other.self_receiver && !self.self_receiver {
             self.self_receiver = true;
+            changed = true;
+        }
+        if other.receiver_type_pending && !self.receiver_type_pending {
+            self.receiver_type_pending = true;
             changed = true;
         }
         changed
@@ -11676,16 +11703,36 @@ fn summarize_function(
     tables: &CallTables,
     indexes: &TypeIndexes<'_>,
 ) -> FunctionSummary {
+    summarize_in_context(function, summaries, tables, indexes, None)
+}
+
+/// [`summarize_function`], with the receiver parameter's type supplied by a
+/// caller. A context never recovers a pending receiver itself (contexts do
+/// not nest), which is what keeps the re-summary graph one level deep; see
+/// the context-sensitive summaries note in docs/ANALYSIS_ARCHITECTURE.md.
+#[allow(clippy::too_many_arguments)]
+fn summarize_in_context(
+    function: &FunctionRecord,
+    summaries: &(impl IndexedTable<FunctionSummary> + ?Sized),
+    tables: &CallTables,
+    indexes: &TypeIndexes<'_>,
+    receiver_context: Option<&str>,
+) -> FunctionSummary {
     // Same type bindings the concrete pass uses, so a receiver-typed sink
     // pattern (`Command::arg`) is visible here too. Without them a wrapper
     // function whose whole body is `cmd.arg(value)` summarized as reaching no
     // sink, and taint flowing into it through a parameter was lost.
-    let type_bindings = infer_type_bindings(
+    let mut type_bindings = infer_type_bindings(
         function,
         indexes.field_types,
         indexes.field_element_types,
         indexes.return_types,
     );
+    if let Some(receiver_type) = receiver_context
+        && let Some(receiver_param) = function.params.first()
+    {
+        type_bindings.insert(receiver_param.clone(), receiver_type.to_string());
+    }
     let mut env: FunctionEnv<BTreeSet<AbstractOrigin>> = FunctionEnv::new();
     for (idx, param) in function.params.iter().enumerate() {
         let mut origins = BTreeSet::from([AbstractOrigin::Param(idx)]);
@@ -11699,6 +11746,10 @@ fn summarize_function(
         self_receiver: function.params.first().is_some_and(|param| param == "self"),
         ..FunctionSummary::default()
     };
+    // Contextual re-summaries this evaluation computed, keyed on the callee
+    // position and the one type that was missing. See the free-call branch
+    // below.
+    let mut contextual_memo: HashMap<(u32, String), FunctionSummary> = HashMap::new();
     let loops = loop_forest(&function.loop_regions);
     // The summary only ever collects, and each state a fixpoint walk sees is
     // contained in the one the emitting walk sees at the same operation, so
@@ -11846,6 +11897,16 @@ fn summarize_function(
                                 }
                             }
                         }
+                    } else if tables.sink_blocked_on_receiver(
+                        callee,
+                        args,
+                        receiver_type.as_deref(),
+                    ) {
+                        // The pattern matches by name and context; only the
+                        // receiver's type was missing. A caller that knows it
+                        // can have this function re-summarized in that
+                        // context.
+                        summary.receiver_type_pending = true;
                     }
 
                     // The writes the concrete pass models, so a helper's
@@ -11891,6 +11952,62 @@ fn summarize_function(
                                                 .entry(sink_category.clone())
                                                 .or_default()
                                                 .insert(param_index);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        // The callee could not decide a receiver-typed sink
+                        // because the receiver's type was a parameter. Here,
+                        // at the call site, the caller's bindings may name
+                        // it: re-summarize the callee with that one type
+                        // supplied, memoized on callee position and type,
+                        // which is the whole key because nothing else about
+                        // the caller reaches the callee's body. Contexts do
+                        // not nest, so this is skipped inside a contextual
+                        // evaluation.
+                        if callee_summary.receiver_type_pending
+                            && receiver_context.is_none()
+                            && let Some(receiver_arg) = args.first()
+                            && let Some(receiver_type) = infer_expr_type(
+                                receiver_arg,
+                                &type_bindings,
+                                indexes.field_types,
+                                indexes.return_types,
+                            )
+                        {
+                            let key = (resolved, receiver_type.clone());
+                            let contextual = if let Some(cached) = contextual_memo.get(&key) {
+                                cached.clone()
+                            } else {
+                                let computed = summarize_in_context(
+                                    &tables.functions[resolved as usize],
+                                    summaries,
+                                    tables,
+                                    indexes,
+                                    Some(receiver_type.as_str()),
+                                );
+                                contextual_memo.insert(key, computed.clone());
+                                computed
+                            };
+                            for (sink_category, parameter_indexes) in contextual.param_to_sink {
+                                for parameter_index in parameter_indexes {
+                                    if let Some(arg) = args.get(parameter_index) {
+                                        let arg_taint = eval_abstract_expr(
+                                            arg,
+                                            env,
+                                            summaries,
+                                            &function.package_path,
+                                            tables,
+                                        );
+                                        for origin in arg_taint {
+                                            if let AbstractOrigin::Param(param_index) = origin {
+                                                summary
+                                                    .param_to_sink
+                                                    .entry(sink_category.clone())
+                                                    .or_default()
+                                                    .insert(param_index);
+                                            }
                                         }
                                     }
                                 }
@@ -12402,6 +12519,10 @@ struct DataFlowBuilder<'a> {
     /// Per-run call resolution and pattern matches, built once before the
     /// fixpoint (see [`CallTables`]).
     tables: &'a CallTables<'a>,
+    /// Contextual re-summaries computed while materializing the current
+    /// function, keyed on callee position and the receiver type that was
+    /// missing from the callee's own summary.
+    contextual_memo: HashMap<(u32, String), FunctionSummary>,
     /// Type bindings of the function currently being materialized.
     current_bindings: HashMap<String, String>,
     nodes: IndexMap<String, DataFlowNode>,
@@ -12433,6 +12554,7 @@ impl<'a> DataFlowBuilder<'a> {
             indexes,
             static_source_seeds,
             tables,
+            contextual_memo: HashMap::new(),
             current_bindings: HashMap::new(),
             nodes: IndexMap::new(),
             edges: IndexMap::new(),
@@ -12461,6 +12583,7 @@ impl<'a> DataFlowBuilder<'a> {
             self.indexes.field_element_types,
             self.indexes.return_types,
         );
+        self.contextual_memo.clear();
         let mut env: FunctionEnv<ConcreteTaint> = FunctionEnv::new();
         for (idx, param) in function.params.iter().enumerate() {
             let category = function
@@ -12858,6 +12981,52 @@ impl<'a> DataFlowBuilder<'a> {
                                         sink_category,
                                         position,
                                     );
+                                }
+                            }
+                        }
+                        // The same receiver recovery the summary pass makes:
+                        // the callee could not decide a receiver-typed sink
+                        // on its own, and this site knows the type. The memo
+                        // bounds the re-summaries per materialized function.
+                        if summary.receiver_type_pending
+                            && let Some(receiver_arg) = args.first()
+                            && let Some(receiver_type) = infer_expr_type(
+                                receiver_arg,
+                                &self.current_bindings,
+                                self.indexes.field_types,
+                                self.indexes.return_types,
+                            )
+                        {
+                            let key = (resolved, receiver_type.clone());
+                            let contextual = if let Some(cached) = self.contextual_memo.get(&key) {
+                                cached.clone()
+                            } else {
+                                let rows = KeyedRows {
+                                    functions: self.tables.functions,
+                                    map: self.summaries,
+                                };
+                                let computed = summarize_in_context(
+                                    &self.tables.functions[resolved as usize],
+                                    &rows,
+                                    self.tables,
+                                    self.indexes,
+                                    Some(receiver_type.as_str()),
+                                );
+                                self.contextual_memo.insert(key, computed.clone());
+                                computed
+                            };
+                            for (sink_category, parameter_indexes) in &contextual.param_to_sink {
+                                for parameter_index in parameter_indexes {
+                                    if let Some(arg) = args.get(*parameter_index) {
+                                        let taint = self.eval_concrete_expr(function, arg, env);
+                                        self.emit_sink_slices(
+                                            function,
+                                            &taint,
+                                            callee,
+                                            sink_category,
+                                            position,
+                                        );
+                                    }
                                 }
                             }
                         }
@@ -13908,6 +14077,34 @@ impl<'a> CallTables<'a> {
             }
         }
         None
+    }
+
+    /// Whether a sink pattern matches `callee` by name and context but its
+    /// receiver-type restriction is the one thing that kept it from firing,
+    /// because the receiver's type was not resolved at this call site.
+    fn sink_blocked_on_receiver(
+        &self,
+        callee: &str,
+        args: &[SimpleExpr],
+        receiver_type: Option<&str>,
+    ) -> bool {
+        if receiver_type.is_some() {
+            // The type was resolved and excluded the pattern: that is a
+            // decision, not a gap.
+            return false;
+        }
+        let normalized = normalized_callee(callee);
+        let Some(normalized) = normalized else {
+            return false;
+        };
+        let Some(candidates) = self.sink_candidates.get(normalized.as_ref()) else {
+            return false;
+        };
+        candidates.iter().any(|index| {
+            let pattern = &self.patterns.sinks[*index];
+            pattern.receiver_type.is_some()
+                && sink_pattern_context_confident(normalized.as_ref(), args, pattern)
+        })
     }
 
     /// The SQL sink pattern `callee` matches on name and receiver but not on
