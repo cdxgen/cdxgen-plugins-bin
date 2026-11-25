@@ -12,6 +12,14 @@
 //! about what the key was: both take the same struct, and there is no way to
 //! call one of them with a subset of the fields.
 //!
+//! The key is computed twice: cdxgen's `lib/inventory/fetchDiskCache.js` mirrors
+//! `CACHE_SCHEMA_VERSION` and this exact hash construction (fields, order,
+//! length prefixes, truncation) so the JavaScript batch pool reads and writes
+//! the same entries. Any change to what goes into the hash, including
+//! canonicalizing the URL before hashing, must change `CACHE_SCHEMA_VERSION`
+//! here and in that mirror in the same release, with the same derivation on
+//! both sides, or the two implementations silently stop sharing entries.
+//!
 //! Loopback hosts (`127.0.0.0/8`, `::1`, `localhost`) are never cached: their
 //! entries are keyed by ephemeral ports that will never be reused. Set
 //! `CDXGEN_CACHE_LOOPBACK=1` to override (used by `contrib/bench-fetch.js`).
