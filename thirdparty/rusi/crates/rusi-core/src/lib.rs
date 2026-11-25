@@ -395,6 +395,125 @@ impl<T> StateSize for BTreeSet<T> {
     }
 }
 
+/// The per-function environment one pass evaluates over: the value keyed
+/// under each name, plus the field paths recorded for the base variables
+/// (`x.f = v` inserts `x.f`).
+///
+/// A whole-variable read (`x`) must see the taint of every `x.f` access
+/// path, and reads run on every evaluation of every operation of every
+/// fixpoint trip, so the type keeps an index from base name to its field
+/// keys and a read visits only that base's entries. Scanning the whole
+/// environment instead made a function with many locals cost the product of
+/// its reads and its environment size.
+#[derive(Debug, Clone)]
+struct FunctionEnv<V> {
+    values: HashMap<String, V>,
+    /// Base name -> the dotted keys recorded under it, in insertion order.
+    field_keys: HashMap<String, Vec<String>>,
+    /// Total entries `field_keys` holds, so the stats counter can price a
+    /// whole-state clone by the entries it copies.
+    field_key_count: usize,
+}
+
+impl<V> FunctionEnv<V> {
+    fn new() -> Self {
+        Self {
+            values: HashMap::new(),
+            field_keys: HashMap::new(),
+            field_key_count: 0,
+        }
+    }
+
+    /// The value stored under `key`, whatever it names.
+    fn get(&self, key: &str) -> Option<&V> {
+        self.values.get(key)
+    }
+
+    /// Inserts `value` under `key`. A dotted key is a field path of its base
+    /// (the part before the first dot) and joins that base's index.
+    fn insert(&mut self, key: String, value: V) {
+        if let Some((base, _)) = key.split_once('.') {
+            let keys = self.field_keys.entry(base.to_string()).or_default();
+            if !keys.contains(&key) {
+                keys.push(key.clone());
+                self.field_key_count += 1;
+            }
+        }
+        self.values.insert(key, value);
+    }
+
+    /// The entry `key` maps to, inserting the default when absent, so a
+    /// dotted key's index entry is created with it.
+    fn get_or_insert_default(&mut self, key: &str) -> &mut V
+    where
+        V: Default,
+    {
+        if !self.values.contains_key(key) {
+            self.insert(key.to_string(), V::default());
+        }
+        self.values
+            .get_mut(key)
+            .expect("the entry was just ensured")
+    }
+
+    /// The whole value of `base` followed by the values of its field paths:
+    /// everything a whole-variable read of `base` sees.
+    fn read_with_fields(&self, base: &str) -> impl Iterator<Item = &V> + '_ {
+        let whole = self.values.get(base);
+        let fields = self
+            .field_keys
+            .get(base)
+            .into_iter()
+            .flatten()
+            .filter_map(move |key| self.values.get(key));
+        whole.into_iter().chain(fields)
+    }
+
+    /// How many entries a whole-variable read of `base` visits, for the
+    /// `--stats-json` counter.
+    fn read_cost(&self, base: &str) -> u64 {
+        let fields = self
+            .field_keys
+            .get(base)
+            .map(|keys| keys.len())
+            .unwrap_or(0);
+        usize::from(self.values.contains_key(base)) as u64 + fields as u64
+    }
+
+    /// Every entry, for the loop-head joins and the stats counters.
+    fn iter(&self) -> impl Iterator<Item = (&String, &V)> {
+        self.values.iter()
+    }
+
+    /// Entries the environment holds in total: its values plus the entries
+    /// of its field index.
+    fn entry_count(&self) -> usize {
+        self.values.len() + self.field_key_count
+    }
+}
+
+impl<V: Default> StateSize for FunctionEnv<V> {
+    fn state_size(&self) -> usize {
+        self.entry_count()
+    }
+}
+
+impl FunctionEnv<BTreeSet<AbstractOrigin>> {
+    /// Unions `origins` into the set under `key`, creating it when absent.
+    fn extend_origins(&mut self, key: &str, origins: impl IntoIterator<Item = AbstractOrigin>) {
+        match self.values.get_mut(key) {
+            Some(existing) => existing.extend(origins),
+            None => {
+                let mut set = BTreeSet::new();
+                set.extend(origins);
+                if !set.is_empty() {
+                    self.insert(key.to_string(), set);
+                }
+            }
+        }
+    }
+}
+
 fn run_operations<S: Clone + StateSize>(
     operations: &[Operation],
     loops: &[LoopNode],
@@ -11014,7 +11133,7 @@ fn infer_static_source_seeds(
     for initializer in static_initializers {
         let origins = eval_abstract_expr(
             &initializer.value,
-            &HashMap::new(),
+            &FunctionEnv::new(),
             summaries,
             &initializer.package_path,
             local_index,
@@ -11028,7 +11147,7 @@ fn infer_static_source_seeds(
         );
     }
     for function in functions {
-        let eval = |value: &SimpleExpr, env: &HashMap<String, BTreeSet<AbstractOrigin>>| {
+        let eval = |value: &SimpleExpr, env: &FunctionEnv<BTreeSet<AbstractOrigin>>| {
             eval_abstract_expr(
                 value,
                 env,
@@ -11046,7 +11165,7 @@ fn infer_static_source_seeds(
             }
             position
         };
-        let mut env: HashMap<String, BTreeSet<AbstractOrigin>> = HashMap::new();
+        let mut env: FunctionEnv<BTreeSet<AbstractOrigin>> = FunctionEnv::new();
         for operation in &function.operations {
             let expr = match operation {
                 Operation::Assign { target, value } | Operation::AssignDeref { target, value } => {
@@ -11363,18 +11482,23 @@ fn summary_dependencies(
 
 /// Loop-head join for the summary pass: unions each name's origins.
 fn join_abstract_env(
-    head: &mut HashMap<String, BTreeSet<AbstractOrigin>>,
-    body: &HashMap<String, BTreeSet<AbstractOrigin>>,
+    head: &mut FunctionEnv<BTreeSet<AbstractOrigin>>,
+    body: &FunctionEnv<BTreeSet<AbstractOrigin>>,
 ) -> bool {
-    stats::work()
-        .join_entries_visited_summary
-        .fetch_add(body.len() as u64, std::sync::atomic::Ordering::Relaxed);
+    stats::work().join_entries_visited_summary.fetch_add(
+        body.entry_count() as u64,
+        std::sync::atomic::Ordering::Relaxed,
+    );
     let mut changed = false;
-    for (name, origins) in body {
+    for (name, origins) in body.iter() {
         if origins.is_empty() {
             continue;
         }
-        let entry = head.entry(name.clone()).or_default();
+        let Some(entry) = head.values.get_mut(name) else {
+            head.insert(name.clone(), origins.clone());
+            changed = true;
+            continue;
+        };
         let before = entry.len();
         entry.extend(origins.iter().cloned());
         changed |= entry.len() != before;
@@ -11387,16 +11511,17 @@ fn join_abstract_env(
 /// origin, so another trip around the loop never trades it for a longer one,
 /// and the join only grows while new origins arrive.
 fn join_concrete_env(
-    head: &mut HashMap<String, ConcreteTaint>,
-    body: &HashMap<String, ConcreteTaint>,
+    head: &mut FunctionEnv<ConcreteTaint>,
+    body: &FunctionEnv<ConcreteTaint>,
 ) -> bool {
-    stats::work()
-        .join_entries_visited_concrete
-        .fetch_add(body.len() as u64, std::sync::atomic::Ordering::Relaxed);
+    stats::work().join_entries_visited_concrete.fetch_add(
+        body.entry_count() as u64,
+        std::sync::atomic::Ordering::Relaxed,
+    );
     let mut changed = false;
-    for (name, taint) in body {
+    for (name, taint) in body.iter() {
         for path in &taint.paths {
-            let entry = head.entry(name.clone()).or_default();
+            let entry = head.get_or_insert_default(name);
             if !entry
                 .paths
                 .iter()
@@ -11433,7 +11558,7 @@ fn summarize_function(
         indexes.field_element_types,
         indexes.return_types,
     );
-    let mut env: HashMap<String, BTreeSet<AbstractOrigin>> = HashMap::new();
+    let mut env: FunctionEnv<BTreeSet<AbstractOrigin>> = FunctionEnv::new();
     for (idx, param) in function.params.iter().enumerate() {
         let mut origins = BTreeSet::from([AbstractOrigin::Param(idx)]);
         if let Some(category) = function.param_source_categories.get(&idx) {
@@ -11705,15 +11830,13 @@ fn record_summary_write(
     function: &FunctionRecord,
     binding: &str,
     origins: &BTreeSet<AbstractOrigin>,
-    env: &mut HashMap<String, BTreeSet<AbstractOrigin>>,
+    env: &mut FunctionEnv<BTreeSet<AbstractOrigin>>,
     summary: &mut FunctionSummary,
 ) {
     if origins.is_empty() {
         return;
     }
-    env.entry(binding.to_string())
-        .or_default()
-        .extend(origins.iter().cloned());
+    env.extend_origins(binding, origins.iter().cloned());
     let Some(index) = function.params.iter().position(|param| param == binding) else {
         return;
     };
@@ -11826,13 +11949,13 @@ fn apply_summary_call_writes(
     function: &FunctionRecord,
     callee: &str,
     args: &[SimpleExpr],
-    env: &mut HashMap<String, BTreeSet<AbstractOrigin>>,
+    env: &mut FunctionEnv<BTreeSet<AbstractOrigin>>,
     summary: &mut FunctionSummary,
     summaries: &impl KeyedTable<FunctionSummary>,
     local_index: &HashMap<String, Vec<String>>,
     patterns: &DataFlowPatternSet,
 ) {
-    let eval = |expr: &SimpleExpr, env: &HashMap<String, BTreeSet<AbstractOrigin>>| {
+    let eval = |expr: &SimpleExpr, env: &FunctionEnv<BTreeSet<AbstractOrigin>>| {
         eval_abstract_expr(
             expr,
             env,
@@ -11853,9 +11976,7 @@ fn apply_summary_call_writes(
             None => record_summary_write(function, receiver, &stored, env, summary),
             Some(field) => {
                 record_summary_field_write(function, receiver, field, &stored, summary);
-                env.entry(format!("{receiver}.{field}"))
-                    .or_default()
-                    .extend(stored);
+                env.extend_origins(&format!("{receiver}.{field}"), stored);
             }
         }
     }
@@ -11927,15 +12048,13 @@ fn apply_summary_call_writes(
             continue;
         }
         record_summary_field_write(function, &binding, &field, &origins, summary);
-        env.entry(format!("{binding}.{field}"))
-            .or_default()
-            .extend(origins);
+        env.extend_origins(&format!("{binding}.{field}"), origins);
     }
 }
 
 fn eval_abstract_expr(
     expr: &SimpleExpr,
-    env: &HashMap<String, BTreeSet<AbstractOrigin>>,
+    env: &FunctionEnv<BTreeSet<AbstractOrigin>>,
     summaries: &impl KeyedTable<FunctionSummary>,
     package_path: &str,
     local_index: &HashMap<String, Vec<String>>,
@@ -11949,13 +12068,10 @@ fn eval_abstract_expr(
             // flow through subsequent whole-object reads. The
             // asymmetric direction (field reads do NOT inherit sibling
             // field taints) is handled in the `SimpleExpr::Field` arm.
-            let mut taint = env.get(name).cloned().unwrap_or_default();
-            let prefix = format!("{}.", name);
-            stats::record_env_scan(stats::AnalysisPass::Summary, env.len() as u64);
-            for (key, value) in env {
-                if key.starts_with(&prefix) {
-                    taint.extend(value.iter().cloned());
-                }
+            stats::record_env_scan(stats::AnalysisPass::Summary, env.read_cost(name));
+            let mut taint = BTreeSet::new();
+            for origins in env.read_with_fields(name) {
+                taint.extend(origins.iter().cloned());
             }
             taint
         }
@@ -12194,7 +12310,7 @@ impl<'a> DataFlowBuilder<'a> {
             self.indexes.field_element_types,
             self.indexes.return_types,
         );
-        let mut env: HashMap<String, ConcreteTaint> = HashMap::new();
+        let mut env: FunctionEnv<ConcreteTaint> = FunctionEnv::new();
         for (idx, param) in function.params.iter().enumerate() {
             let category = function
                 .param_source_categories
@@ -12271,7 +12387,7 @@ impl<'a> DataFlowBuilder<'a> {
         &mut self,
         function: &FunctionRecord,
         operation: &Operation,
-        env: &mut HashMap<String, ConcreteTaint>,
+        env: &mut FunctionEnv<ConcreteTaint>,
         emit: bool,
     ) {
         self.emitting = emit;
@@ -12700,7 +12816,7 @@ impl<'a> DataFlowBuilder<'a> {
         &mut self,
         function: &FunctionRecord,
         expr: &SimpleExpr,
-        env: &HashMap<String, ConcreteTaint>,
+        env: &FunctionEnv<ConcreteTaint>,
     ) -> ConcreteTaint {
         self.eval_concrete_expr_inner(function, expr, env).bounded()
     }
@@ -12709,22 +12825,16 @@ impl<'a> DataFlowBuilder<'a> {
         &mut self,
         function: &FunctionRecord,
         expr: &SimpleExpr,
-        env: &HashMap<String, ConcreteTaint>,
+        env: &FunctionEnv<ConcreteTaint>,
     ) -> ConcreteTaint {
         match expr {
             SimpleExpr::Var(name) => {
                 // P3.5: whole-object read — include per-field writes so a
                 // subsequent sink on the whole object still slices.
-                let mut taint = env
-                    .get(name)
-                    .cloned()
-                    .unwrap_or(ConcreteTaint { paths: vec![] });
-                let prefix = format!("{}.", name);
-                stats::record_env_scan(stats::AnalysisPass::Concrete, env.len() as u64);
-                for (key, value) in env {
-                    if key.starts_with(&prefix) {
-                        taint.paths.extend(value.paths.iter().cloned());
-                    }
+                stats::record_env_scan(stats::AnalysisPass::Concrete, env.read_cost(name));
+                let mut taint = ConcreteTaint { paths: vec![] };
+                for value in env.read_with_fields(name) {
+                    taint.paths.extend(value.paths.iter().cloned());
                 }
                 taint.bounded()
             }
@@ -21316,10 +21426,10 @@ mod fixpoint_tests {
     use syn::visit::Visit;
 
     use super::{
-        AbstractOrigin, CfgEvaluator, FileContext, FunctionRecord, LoopNode, LoopRegion, Operation,
-        ReturnTypeIndex, SimpleExpr, SourceCollector, TypeIndexes, build_local_function_index,
-        built_in_dataflow_patterns, infer_summaries_counted, infer_type_bindings,
-        join_abstract_env, loop_forest, run_operations,
+        AbstractOrigin, CfgEvaluator, FileContext, FunctionEnv, FunctionRecord, LoopNode,
+        LoopRegion, Operation, ReturnTypeIndex, SimpleExpr, SourceCollector, TypeIndexes,
+        build_local_function_index, built_in_dataflow_patterns, infer_summaries_counted,
+        infer_type_bindings, join_abstract_env, loop_forest, run_operations,
     };
     use crate::macro_expand;
 
@@ -21487,7 +21597,7 @@ pub fn run(rows: Vec<Vec<String>>) {
             end: operations.len(),
         }]);
         let source = AbstractOrigin::Source("env".to_string());
-        let mut env: HashMap<String, BTreeSet<AbstractOrigin>> = HashMap::new();
+        let mut env: FunctionEnv<BTreeSet<AbstractOrigin>> = FunctionEnv::new();
         let mut silent = 0;
         let mut emitted = 0;
         let mut emitted_untainted = 0;
@@ -21514,7 +21624,7 @@ pub fn run(rows: Vec<Vec<String>>) {
             join_abstract_env,
             crate::stats::AnalysisPass::Summary,
         );
-        assert!(env["x0"].contains(&source));
+        assert!(env.get("x0").expect("the head holds x0").contains(&source));
         // The first trip reads the source into `x{links}`; one more trip per
         // link carries it down to `x0`, and a last one sees nothing change.
         assert_eq!(silent, operations.len() * (links + 2));

@@ -114,7 +114,6 @@ fn loop_nest_source(depth: usize, env_size: usize) -> String {
 }
 
 #[test]
-#[ignore = "quadratic whole-variable reads are still in place; un-ignored by the fix"]
 fn work_counters_stay_near_linear() {
     // Whole-variable reads: the work at 1000 locals must be at most about
     // 4.5 times the work at 250, which is what a per-variable index costs,
