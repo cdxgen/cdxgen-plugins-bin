@@ -8707,26 +8707,22 @@ fn build_data_flow(
         field_element_types,
         return_types: &ReturnTypeIndex::build(functions),
     };
+    let tables = CallTables::build(functions, static_initializers, &local_index, &patterns);
     let summaries = stats::time_phase("summary_fixpoint", || {
-        infer_summaries(functions, &local_index, &patterns, &indexes)
+        infer_summaries(functions, &tables, &indexes)
     });
-    let static_source_seeds = infer_static_source_seeds(
-        functions,
-        static_initializers,
-        &summaries,
-        &local_index,
-        &patterns,
-    );
+    let static_source_seeds =
+        infer_static_source_seeds(functions, static_initializers, &summaries, &tables);
     let partials = stats::time_phase("concrete_pass", || {
         parallel_map_collect(functions, |function| {
             let mut builder = DataFlowBuilder::new(
                 mode,
                 &patterns,
                 &summaries,
-                &local_index,
                 &function_map,
                 &indexes,
                 &static_source_seeds,
+                &tables,
             );
             builder.materialize_function(function);
             builder
@@ -8736,10 +8732,10 @@ fn build_data_flow(
         mode,
         &patterns,
         &summaries,
-        &local_index,
         &function_map,
         &indexes,
         &static_source_seeds,
+        &tables,
     );
     for partial in partials {
         builder.merge_materialized(partial);
@@ -11144,8 +11140,7 @@ fn infer_static_source_seeds(
     functions: &[FunctionRecord],
     static_initializers: &[StaticInitializer],
     summaries: &BTreeMap<String, FunctionSummary>,
-    local_index: &HashMap<String, Vec<String>>,
-    patterns: &DataFlowPatternSet,
+    tables: &CallTables,
 ) -> HashMap<String, Vec<StaticSeed>> {
     let mut seeds: HashMap<String, Vec<StaticSeed>> = HashMap::new();
     let mut record =
@@ -11173,8 +11168,7 @@ fn infer_static_source_seeds(
             &FunctionEnv::new(),
             summaries,
             &initializer.package_path,
-            local_index,
-            patterns,
+            tables,
         );
         record(
             &initializer.name,
@@ -11185,14 +11179,7 @@ fn infer_static_source_seeds(
     }
     for function in functions {
         let eval = |value: &SimpleExpr, env: &FunctionEnv<BTreeSet<AbstractOrigin>>| {
-            eval_abstract_expr(
-                value,
-                env,
-                summaries,
-                &function.package_path,
-                local_index,
-                patterns,
-            )
+            eval_abstract_expr(value, env, summaries, &function.package_path, tables)
         };
         let located = |value: &SimpleExpr| {
             let mut position =
@@ -11398,19 +11385,17 @@ fn first_named_use(operations: &[Operation], name: &str) -> Option<Position> {
 /// [`FunctionSummary::join`]), so no round limit is needed.
 fn infer_summaries(
     functions: &[FunctionRecord],
-    local_index: &HashMap<String, Vec<String>>,
-    patterns: &DataFlowPatternSet,
+    tables: &CallTables,
     indexes: &TypeIndexes<'_>,
 ) -> BTreeMap<String, FunctionSummary> {
-    infer_summaries_counted(functions, local_index, patterns, indexes).0
+    infer_summaries_counted(functions, tables, indexes).0
 }
 
 /// [`infer_summaries`], also returning how many function evaluations the
 /// fixpoint took.
 fn infer_summaries_counted(
     functions: &[FunctionRecord],
-    local_index: &HashMap<String, Vec<String>>,
-    patterns: &DataFlowPatternSet,
+    tables: &CallTables,
     indexes: &TypeIndexes<'_>,
 ) -> (BTreeMap<String, FunctionSummary>, usize) {
     let position: HashMap<String, usize> = functions
@@ -11423,7 +11408,7 @@ fn infer_summaries_counted(
         .map(|function| (function.declaration.id.clone(), FunctionSummary::default()))
         .collect();
     let call_order = callee_first_order(functions.len(), |index| {
-        summary_dependencies(&functions[index], local_index)
+        summary_dependencies(&functions[index], tables)
             .into_iter()
             .filter_map(|id| position.get(&id).copied())
             .collect::<Vec<_>>()
@@ -11433,8 +11418,7 @@ fn infer_summaries_counted(
     while let Some(wave) = waves.pop_wave() {
         let evaluated = parallel_map_collect(&wave, |&index| {
             let reads = TrackedReads::new(&summaries, &position);
-            let summary =
-                summarize_function(&functions[index], &reads, local_index, patterns, indexes);
+            let summary = summarize_function(&functions[index], &reads, tables, indexes);
             (index, summary, reads.into_reads())
         });
         for (index, summary, reads) in evaluated {
@@ -11459,21 +11443,18 @@ fn infer_summaries_counted(
 /// The functions whose summaries `function`'s summary may read: every call
 /// target its operations name. Only the order of evaluation depends on
 /// this; the reads themselves are recorded.
-fn summary_dependencies(
-    function: &FunctionRecord,
-    local_index: &HashMap<String, Vec<String>>,
-) -> BTreeSet<String> {
+fn summary_dependencies(function: &FunctionRecord, tables: &CallTables) -> BTreeSet<String> {
     fn visit(
         expr: &SimpleExpr,
         package_path: &str,
-        local_index: &HashMap<String, Vec<String>>,
+        tables: &CallTables,
         out: &mut BTreeSet<String>,
     ) {
         match expr {
             SimpleExpr::Call { callee, args, .. } => {
-                out.extend(resolve_call_target(callee, package_path, local_index, None));
+                out.extend(tables.resolve_target(callee, package_path));
                 for arg in args {
-                    visit(arg, package_path, local_index, out);
+                    visit(arg, package_path, tables, out);
                 }
             }
             SimpleExpr::MethodCall {
@@ -11482,19 +11463,19 @@ fn summary_dependencies(
                 args,
                 ..
             } => {
-                out.extend(resolve_call_target(method, package_path, local_index, None));
-                visit(receiver, package_path, local_index, out);
+                out.extend(tables.resolve_target(method, package_path));
+                visit(receiver, package_path, tables, out);
                 for arg in args {
-                    visit(arg, package_path, local_index, out);
+                    visit(arg, package_path, tables, out);
                 }
             }
             SimpleExpr::Compose(items) => {
                 for item in items {
-                    visit(item, package_path, local_index, out);
+                    visit(item, package_path, tables, out);
                 }
             }
             SimpleExpr::Field { base, .. } | SimpleExpr::Reference { expr: base, .. } => {
-                visit(base, package_path, local_index, out)
+                visit(base, package_path, tables, out)
             }
             SimpleExpr::Var(_) | SimpleExpr::Literal { .. } | SimpleExpr::Unknown => {}
         }
@@ -11506,12 +11487,9 @@ fn summary_dependencies(
             | Operation::AssignField { value, .. }
             | Operation::AssignDeref { value, .. }
             | Operation::Expr(value)
-            | Operation::Return(value) => visit(
-                value,
-                &function.package_path,
-                local_index,
-                &mut dependencies,
-            ),
+            | Operation::Return(value) => {
+                visit(value, &function.package_path, tables, &mut dependencies)
+            }
         }
     }
     dependencies
@@ -11644,8 +11622,7 @@ enum AbstractOrigin {
 fn summarize_function(
     function: &FunctionRecord,
     summaries: &impl KeyedTable<FunctionSummary>,
-    local_index: &HashMap<String, Vec<String>>,
-    patterns: &DataFlowPatternSet,
+    tables: &CallTables,
     indexes: &TypeIndexes<'_>,
 ) -> FunctionSummary {
     // Same type bindings the concrete pass uses, so a receiver-typed sink
@@ -11681,14 +11658,8 @@ fn summarize_function(
         &mut env,
         &mut |operation, env, _emit| match operation {
             Operation::Assign { target, value } => {
-                let value_taint = eval_abstract_expr(
-                    value,
-                    env,
-                    summaries,
-                    &function.package_path,
-                    local_index,
-                    patterns,
-                );
+                let value_taint =
+                    eval_abstract_expr(value, env, summaries, &function.package_path, tables);
                 env.insert(target.clone(), value_taint);
             }
             Operation::AssignField {
@@ -11696,27 +11667,15 @@ fn summarize_function(
                 field,
                 value,
             } => {
-                let value_taint = eval_abstract_expr(
-                    value,
-                    env,
-                    summaries,
-                    &function.package_path,
-                    local_index,
-                    patterns,
-                );
+                let value_taint =
+                    eval_abstract_expr(value, env, summaries, &function.package_path, tables);
                 record_summary_field_write(function, target, field, &value_taint, &mut summary);
                 let key = format!("{}.{}", target, field);
                 env.insert(key, value_taint);
             }
             Operation::AssignDeref { target, value } => {
-                let value_taint = eval_abstract_expr(
-                    value,
-                    env,
-                    summaries,
-                    &function.package_path,
-                    local_index,
-                    patterns,
-                );
+                let value_taint =
+                    eval_abstract_expr(value, env, summaries, &function.package_path, tables);
                 env.insert(target.clone(), value_taint.clone());
                 // A write through a parameter's dereference is visible in
                 // the CALLER's variable; the summary records what pours in
@@ -11743,14 +11702,8 @@ fn summarize_function(
                 }
             }
             Operation::Expr(expr) | Operation::Return(expr) => {
-                let value_taint = eval_abstract_expr(
-                    expr,
-                    env,
-                    summaries,
-                    &function.package_path,
-                    local_index,
-                    patterns,
-                );
+                let value_taint =
+                    eval_abstract_expr(expr, env, summaries, &function.package_path, tables);
                 if matches!(operation, Operation::Return(_)) {
                     for origin in &value_taint {
                         match origin {
@@ -11811,7 +11764,7 @@ fn summarize_function(
                     let callee = &callee;
                     let args = args.as_slice();
                     if let Some(sink_match) =
-                        find_sink_pattern(callee, args, receiver_type.as_deref(), &patterns.sinks)
+                        tables.sink_match(callee, args, receiver_type.as_deref())
                     {
                         for index in &sink_match.relevant_arguments {
                             if let Some(arg) = args.get(*index) {
@@ -11820,8 +11773,7 @@ fn summarize_function(
                                     env,
                                     summaries,
                                     &function.package_path,
-                                    local_index,
-                                    patterns,
+                                    tables,
                                 );
                                 for origin in arg_taint {
                                     if let AbstractOrigin::Param(param_index) = origin {
@@ -11849,8 +11801,7 @@ fn summarize_function(
                             env,
                             &mut summary,
                             summaries,
-                            local_index,
-                            patterns,
+                            tables,
                         );
                     }
 
@@ -11859,7 +11810,7 @@ fn summarize_function(
                     // would propagate through any same-named function.
                     if matches!(expr, SimpleExpr::Call { .. })
                         && let Some(resolved) =
-                            resolve_call_target(callee, &function.package_path, local_index, None)
+                            tables.resolve_target(callee, &function.package_path)
                         && let Some(callee_summary) = summaries.lookup(&resolved).cloned()
                     {
                         for (sink_category, parameter_indexes) in callee_summary.param_to_sink {
@@ -11870,8 +11821,7 @@ fn summarize_function(
                                         env,
                                         summaries,
                                         &function.package_path,
-                                        local_index,
-                                        patterns,
+                                        tables,
                                     );
                                     for origin in arg_taint {
                                         if let AbstractOrigin::Param(param_index) = origin {
@@ -12045,7 +11995,6 @@ fn container_write_receiver(receiver: &SimpleExpr) -> Option<(&str, Option<&str>
 
 /// The abstract counterpart of the concrete pass's call-site writes: what a
 /// call stores into its receiver or into its `&mut` arguments.
-#[allow(clippy::too_many_arguments)]
 fn apply_summary_call_writes(
     function: &FunctionRecord,
     callee: &str,
@@ -12053,18 +12002,10 @@ fn apply_summary_call_writes(
     env: &mut FunctionEnv<BTreeSet<AbstractOrigin>>,
     summary: &mut FunctionSummary,
     summaries: &impl KeyedTable<FunctionSummary>,
-    local_index: &HashMap<String, Vec<String>>,
-    patterns: &DataFlowPatternSet,
+    tables: &CallTables,
 ) {
     let eval = |expr: &SimpleExpr, env: &FunctionEnv<BTreeSet<AbstractOrigin>>| {
-        eval_abstract_expr(
-            expr,
-            env,
-            summaries,
-            &function.package_path,
-            local_index,
-            patterns,
-        )
+        eval_abstract_expr(expr, env, summaries, &function.package_path, tables)
     };
     if RECEIVER_MUTATING_METHODS.contains(&callee)
         && let Some((receiver, field)) = args.first().and_then(container_write_receiver)
@@ -12081,7 +12022,7 @@ fn apply_summary_call_writes(
             }
         }
     }
-    if let Some(source_match) = find_source_pattern(callee, &patterns.sources) {
+    if let Some(source_match) = tables.source_match(callee) {
         let origins = BTreeSet::from([AbstractOrigin::Source(source_match.category)]);
         for arg in args {
             if let SimpleExpr::Reference { mutable: true, .. } = arg
@@ -12091,9 +12032,9 @@ fn apply_summary_call_writes(
             }
         }
     }
-    let Some(callee_summary) =
-        resolve_call_target(callee, &function.package_path, local_index, None)
-            .and_then(|resolved| summaries.lookup(&resolved))
+    let Some(callee_summary) = tables
+        .resolve_target(callee, &function.package_path)
+        .and_then(|resolved| summaries.lookup(&resolved))
     else {
         return;
     };
@@ -12158,8 +12099,7 @@ fn eval_abstract_expr(
     env: &FunctionEnv<BTreeSet<AbstractOrigin>>,
     summaries: &impl KeyedTable<FunctionSummary>,
     package_path: &str,
-    local_index: &HashMap<String, Vec<String>>,
-    patterns: &DataFlowPatternSet,
+    tables: &CallTables,
 ) -> BTreeSet<AbstractOrigin> {
     match expr {
         SimpleExpr::Var(name) => {
@@ -12177,13 +12117,13 @@ fn eval_abstract_expr(
             taint
         }
         SimpleExpr::Call { callee, args, .. } => {
-            if let Some(source_match) = find_source_pattern(callee, &patterns.sources) {
-                return BTreeSet::from([AbstractOrigin::Source(source_match.category.to_string())]);
+            if let Some(source_match) = tables.source_match(callee) {
+                return BTreeSet::from([AbstractOrigin::Source(source_match.category)]);
             }
-            if is_sanitizer_call(callee) {
+            if tables.is_sanitizer(callee) {
                 return BTreeSet::new();
             }
-            if has_passthrough_pattern(callee, &patterns.passthroughs) {
+            if tables.is_passthrough(callee) {
                 let mut taint = BTreeSet::new();
                 for arg in args {
                     taint.extend(eval_abstract_expr(
@@ -12191,15 +12131,14 @@ fn eval_abstract_expr(
                         env,
                         summaries,
                         package_path,
-                        local_index,
-                        patterns,
+                        tables,
                     ));
                 }
                 return taint;
             }
 
             let mut taint = BTreeSet::new();
-            if let Some(resolved) = resolve_call_target(callee, package_path, local_index, None)
+            if let Some(resolved) = tables.resolve_target(callee, package_path)
                 && let Some(summary) = summaries.lookup(&resolved).cloned()
             {
                 for category in summary.returns_source_categories {
@@ -12212,8 +12151,7 @@ fn eval_abstract_expr(
                             env,
                             summaries,
                             package_path,
-                            local_index,
-                            patterns,
+                            tables,
                         ));
                     }
                 }
@@ -12228,8 +12166,7 @@ fn eval_abstract_expr(
                     env,
                     summaries,
                     package_path,
-                    local_index,
-                    patterns,
+                    tables,
                 ));
             }
             taint
@@ -12253,7 +12190,7 @@ fn eval_abstract_expr(
                 // whole-base read. Nested access paths are tracked at
                 // P3.1 (compiler side); stable keeps the conservative
                 // join here.
-                eval_abstract_expr(base, env, summaries, package_path, local_index, patterns)
+                eval_abstract_expr(base, env, summaries, package_path, tables)
             }
         }
         SimpleExpr::MethodCall {
@@ -12270,13 +12207,13 @@ fn eval_abstract_expr(
             if forwarded_method_source(&callee, receiver, args).is_some() {
                 return BTreeSet::from([AbstractOrigin::Source("proxy-derived".to_string())]);
             }
-            if let Some(source_match) = find_source_pattern(&callee, &patterns.sources) {
-                return BTreeSet::from([AbstractOrigin::Source(source_match.category.to_string())]);
+            if let Some(source_match) = tables.source_match(&callee) {
+                return BTreeSet::from([AbstractOrigin::Source(source_match.category)]);
             }
-            if is_sanitizer_call(&callee) {
+            if tables.is_sanitizer(&callee) {
                 return BTreeSet::new();
             }
-            if has_passthrough_pattern(&callee, &patterns.passthroughs) {
+            if tables.is_passthrough(&callee) {
                 let mut taint = BTreeSet::new();
                 for arg in &all_args {
                     taint.extend(eval_abstract_expr(
@@ -12284,14 +12221,13 @@ fn eval_abstract_expr(
                         env,
                         summaries,
                         package_path,
-                        local_index,
-                        patterns,
+                        tables,
                     ));
                 }
                 return taint;
             }
             let mut taint = BTreeSet::new();
-            if let Some(resolved) = resolve_call_target(&callee, package_path, local_index, None)
+            if let Some(resolved) = tables.resolve_target(&callee, package_path)
                 && let Some(summary) = summaries.lookup(&resolved).cloned()
             {
                 for category in summary.returns_source_categories {
@@ -12304,8 +12240,7 @@ fn eval_abstract_expr(
                             env,
                             summaries,
                             package_path,
-                            local_index,
-                            patterns,
+                            tables,
                         ));
                     }
                 }
@@ -12317,7 +12252,7 @@ fn eval_abstract_expr(
             // mutable flag is consulted by the out-param propagation
             // heuristic in the concrete pass; here it does not change
             // the read semantics.
-            eval_abstract_expr(expr, env, summaries, package_path, local_index, patterns)
+            eval_abstract_expr(expr, env, summaries, package_path, tables)
         }
         SimpleExpr::Literal { .. } | SimpleExpr::Unknown => BTreeSet::new(),
     }
@@ -12345,13 +12280,15 @@ struct DataFlowBuilder<'a> {
     // references keeps a single copy across all workers.
     patterns: &'a DataFlowPatternSet,
     summaries: &'a BTreeMap<String, FunctionSummary>,
-    local_index: &'a HashMap<String, Vec<String>>,
     function_map: &'a HashMap<String, &'a FunctionRecord>,
     indexes: &'a TypeIndexes<'a>,
     /// Sources poured into global carriers anywhere in the analysis
     /// (`TOKEN.set(env::var(..))`), keyed by the static's name: reads of the
     /// same name carry them in every function.
     static_source_seeds: &'a HashMap<String, Vec<StaticSeed>>,
+    /// Per-run call resolution and pattern matches, built once before the
+    /// fixpoint (see [`CallTables`]).
+    tables: &'a CallTables<'a>,
     /// Type bindings of the function currently being materialized.
     current_bindings: HashMap<String, String>,
     nodes: IndexMap<String, DataFlowNode>,
@@ -12370,19 +12307,19 @@ impl<'a> DataFlowBuilder<'a> {
         mode: &'a str,
         patterns: &'a DataFlowPatternSet,
         summaries: &'a BTreeMap<String, FunctionSummary>,
-        local_index: &'a HashMap<String, Vec<String>>,
         function_map: &'a HashMap<String, &'a FunctionRecord>,
         indexes: &'a TypeIndexes<'a>,
         static_source_seeds: &'a HashMap<String, Vec<StaticSeed>>,
+        tables: &'a CallTables<'a>,
     ) -> Self {
         Self {
             mode,
             patterns,
             summaries,
-            local_index,
             function_map,
             indexes,
             static_source_seeds,
+            tables,
             current_bindings: HashMap::new(),
             nodes: IndexMap::new(),
             edges: IndexMap::new(),
@@ -12622,12 +12559,10 @@ impl<'a> DataFlowBuilder<'a> {
                 let args = &args;
                 let position = &position;
                 {
-                    if let Some(sink_match) = find_sink_pattern(
-                        callee,
-                        args,
-                        receiver_type.as_deref(),
-                        &self.patterns.sinks,
-                    ) {
+                    if let Some(sink_match) =
+                        self.tables
+                            .sink_match(callee, args, receiver_type.as_deref())
+                    {
                         for index in &sink_match.relevant_arguments {
                             if let Some(arg) = args.get(*index) {
                                 let taint = self.eval_concrete_expr(function, arg, env);
@@ -12640,11 +12575,10 @@ impl<'a> DataFlowBuilder<'a> {
                                 );
                             }
                         }
-                    } else if let Some(sink_match) = find_unconfident_sql_sink_pattern(
-                        callee,
-                        receiver_type.as_deref(),
-                        &self.patterns.sinks,
-                    ) {
+                    } else if let Some(sink_match) = self
+                        .tables
+                        .unconfident_sql_match(callee, receiver_type.as_deref())
+                    {
                         // No syntax says SQL; the value may: only
                         // witnesses built from a SQL-looking template
                         // count (`let q = format!("DELETE .. {}", t);
@@ -12673,8 +12607,7 @@ impl<'a> DataFlowBuilder<'a> {
                     // value the callee read is the untrusted input and it
                     // lands in the caller's variable, not in the call's
                     // (discarded) result.
-                    if let Some(source_match) = find_source_pattern(callee, &self.patterns.sources)
-                    {
+                    if let Some(source_match) = self.tables.source_match(callee) {
                         for arg in args {
                             if let SimpleExpr::Reference {
                                 expr,
@@ -12797,7 +12730,7 @@ impl<'a> DataFlowBuilder<'a> {
                     }
 
                     if let Some(resolved) =
-                        resolve_call_target(callee, &function.package_path, self.local_index, None)
+                        self.tables.resolve_target(callee, &function.package_path)
                         && let Some(summary) = self.summaries.get(&resolved).cloned()
                     {
                         for (sink_category, parameter_indexes) in &summary.param_to_sink {
@@ -12950,7 +12883,7 @@ impl<'a> DataFlowBuilder<'a> {
                 {
                     return taint.clone();
                 }
-                if let Some(source_match) = find_source_pattern(callee, &self.patterns.sources) {
+                if let Some(source_match) = self.tables.source_match(callee) {
                     let path = self.new_source_path(
                         function,
                         callee,
@@ -12963,7 +12896,7 @@ impl<'a> DataFlowBuilder<'a> {
                 if is_sanitizer_call(callee) {
                     return ConcreteTaint { paths: vec![] };
                 }
-                if has_passthrough_pattern(callee, &self.patterns.passthroughs) {
+                if self.tables.is_passthrough(callee) {
                     let mut paths = Vec::new();
                     for arg in args {
                         let arg_taint = self.eval_concrete_expr(function, arg, env);
@@ -13022,8 +12955,7 @@ impl<'a> DataFlowBuilder<'a> {
                     }
                     return ConcreteTaint { paths };
                 }
-                if let Some(resolved) =
-                    resolve_call_target(callee, &function.package_path, self.local_index, None)
+                if let Some(resolved) = self.tables.resolve_target(callee, &function.package_path)
                     && let Some(summary) = self.summaries.get(&resolved).cloned()
                 {
                     let mut paths = Vec::new();
@@ -13156,7 +13088,7 @@ impl<'a> DataFlowBuilder<'a> {
                     );
                     return ConcreteTaint { paths: vec![path] };
                 }
-                if let Some(source_match) = find_source_pattern(method, &self.patterns.sources) {
+                if let Some(source_match) = self.tables.source_match(method) {
                     let path = self.new_source_path(
                         function,
                         method,
@@ -13173,7 +13105,7 @@ impl<'a> DataFlowBuilder<'a> {
                     .chain(args.iter())
                     .cloned()
                     .collect::<Vec<_>>();
-                if has_passthrough_pattern(method, &self.patterns.passthroughs) {
+                if self.tables.is_passthrough(method) {
                     let mut paths = Vec::new();
                     for arg in &all_args {
                         let arg_taint = self.eval_concrete_expr(function, arg, env);
@@ -13181,8 +13113,7 @@ impl<'a> DataFlowBuilder<'a> {
                     }
                     return ConcreteTaint { paths };
                 }
-                if let Some(resolved) =
-                    resolve_call_target(method, &function.package_path, self.local_index, None)
+                if let Some(resolved) = self.tables.resolve_target(method, &function.package_path)
                     && let Some(summary) = self.summaries.get(&resolved).cloned()
                 {
                     let mut paths = Vec::new();
@@ -13638,6 +13569,260 @@ fn forwarded_method_source(
     }
 }
 
+/// Per-run answers to what a call resolves to and matches, for everything
+/// that does not depend on the fixpoint state: which local function a
+/// callee text names in this workspace, and which source, sanitizer,
+/// passthrough, and sink patterns it matches.
+///
+/// The questions used to be answered per evaluation, once per fixpoint trip
+/// of every call: `resolve_call_target` normalized the callee path and
+/// walked up to five hash tables, and the pattern lookups re-normalized
+/// every pattern on every scan. The tables are built once, before the
+/// summary fixpoint starts, from every callee text the workspace writes,
+/// each resolved and matched once. The fixpoint evaluates in parallel, so
+/// nothing here fills lazily; a callee the build never saw, which only a
+/// synthesized text could produce, resolves directly.
+struct CallTables<'a> {
+    /// Package path -> callee text -> position of the local function the
+    /// call resolves to, `None` when the call is external.
+    targets: HashMap<String, HashMap<String, Option<u32>>>,
+    /// Callee text -> source category of the first matching source pattern.
+    sources: HashMap<String, Option<String>>,
+    /// Callee texts that match a passthrough pattern.
+    passthroughs: HashSet<String>,
+    /// Callee text -> the sink patterns matching it by name, in pattern
+    /// order. The receiver-type and context checks read the argument list
+    /// and the receiver type, so they stay per call site.
+    sink_candidates: HashMap<String, Vec<usize>>,
+    /// Callee texts matching a sanitizer pattern.
+    sanitizers: HashSet<String>,
+    functions: &'a [FunctionRecord],
+    local_index: &'a HashMap<String, Vec<String>>,
+    patterns: &'a DataFlowPatternSet,
+}
+
+/// Every callee text an expression names, in its own walk order.
+fn collect_callee_texts(expr: &SimpleExpr, out: &mut Vec<String>) {
+    match expr {
+        SimpleExpr::Call { callee, args, .. } => {
+            out.push(callee.clone());
+            for arg in args {
+                collect_callee_texts(arg, out);
+            }
+        }
+        SimpleExpr::MethodCall {
+            receiver,
+            method,
+            args,
+            ..
+        } => {
+            out.push(method.clone());
+            collect_callee_texts(receiver, out);
+            for arg in args {
+                collect_callee_texts(arg, out);
+            }
+        }
+        SimpleExpr::Compose(items) => {
+            for item in items {
+                collect_callee_texts(item, out);
+            }
+        }
+        SimpleExpr::Field { base, .. } | SimpleExpr::Reference { expr: base, .. } => {
+            collect_callee_texts(base, out)
+        }
+        SimpleExpr::Var(_) | SimpleExpr::Literal { .. } | SimpleExpr::Unknown => {}
+    }
+}
+
+impl<'a> CallTables<'a> {
+    fn build(
+        functions: &'a [FunctionRecord],
+        static_initializers: &[StaticInitializer],
+        local_index: &'a HashMap<String, Vec<String>>,
+        patterns: &'a DataFlowPatternSet,
+    ) -> Self {
+        let mut pairs: BTreeSet<(String, String)> = BTreeSet::new();
+        let mut texts = BTreeSet::new();
+        let mut collect = |package_path: &str, value: &SimpleExpr| {
+            let mut callees = Vec::new();
+            collect_callee_texts(value, &mut callees);
+            for callee in callees {
+                pairs.insert((package_path.to_string(), callee.clone()));
+                texts.insert(normalize_pattern_text(&callee));
+            }
+        };
+        for function in functions {
+            for operation in &function.operations {
+                match operation {
+                    Operation::Assign { value, .. }
+                    | Operation::AssignField { value, .. }
+                    | Operation::AssignDeref { value, .. }
+                    | Operation::Expr(value)
+                    | Operation::Return(value) => collect(&function.package_path, value),
+                }
+            }
+        }
+        for initializer in static_initializers {
+            collect(&initializer.package_path, &initializer.value);
+        }
+
+        let position: HashMap<&str, u32> = functions
+            .iter()
+            .enumerate()
+            .map(|(index, function)| (function.declaration.id.as_str(), index as u32))
+            .collect();
+        let mut targets: HashMap<String, HashMap<String, Option<u32>>> = HashMap::new();
+        for (package_path, callee) in pairs {
+            let resolved = resolve_call_target(&callee, &package_path, local_index, None)
+                .and_then(|id| position.get(id.as_str()).copied());
+            targets
+                .entry(package_path)
+                .or_default()
+                .insert(callee, resolved);
+        }
+
+        let mut sources = HashMap::new();
+        let mut passthroughs = HashSet::new();
+        let mut sink_candidates = HashMap::new();
+        let mut sanitizers = HashSet::new();
+        for text in &texts {
+            // The pattern match the fixpoint used to run per evaluation of
+            // every call happens here, once per distinct callee text.
+            sources.insert(
+                text.clone(),
+                find_source_pattern(text, &patterns.sources).map(|matched| matched.category),
+            );
+            if has_passthrough_pattern(text, &patterns.passthroughs) {
+                passthroughs.insert(text.clone());
+            }
+            stats::work()
+                .find_sink_pattern_calls
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let candidates: Vec<usize> = patterns
+                .sinks
+                .iter()
+                .enumerate()
+                .filter(|(_, pattern)| pattern_matches_callee(text, &pattern.pattern))
+                .map(|(index, _)| index)
+                .collect();
+            if !candidates.is_empty() {
+                sink_candidates.insert(text.clone(), candidates);
+            }
+            if is_sanitizer_call(text) {
+                sanitizers.insert(text.clone());
+            }
+        }
+
+        Self {
+            targets,
+            sources,
+            passthroughs,
+            sink_candidates,
+            sanitizers,
+            functions,
+            local_index,
+            patterns,
+        }
+    }
+
+    /// The local function `callee` names in `package_path`, if any.
+    fn resolve_target(&self, callee: &str, package_path: &str) -> Option<String> {
+        match self
+            .targets
+            .get(package_path)
+            .and_then(|table| table.get(callee))
+        {
+            Some(Some(position)) => Some(self.functions[*position as usize].declaration.id.clone()),
+            Some(None) => None,
+            // A callee the build never saw cannot come from the operations it
+            // walked; resolve it directly rather than silently dropping it.
+            None => resolve_call_target(callee, package_path, self.local_index, None),
+        }
+    }
+
+    /// The category of the first source pattern `callee` matches.
+    fn source_match(&self, callee: &str) -> Option<SourcePatternMatch> {
+        normalized_callee(callee).and_then(|normalized| {
+            self.sources
+                .get(normalized.as_ref())
+                .and_then(|category| category.as_ref())
+                .map(|category| SourcePatternMatch {
+                    category: category.clone(),
+                })
+        })
+    }
+
+    /// Whether `callee` matches a passthrough pattern.
+    fn is_passthrough(&self, callee: &str) -> bool {
+        normalized_callee(callee)
+            .is_some_and(|normalized| self.passthroughs.contains(normalized.as_ref()))
+    }
+
+    /// Whether `callee` matches a sanitizer pattern.
+    fn is_sanitizer(&self, callee: &str) -> bool {
+        normalized_callee(callee)
+            .is_some_and(|normalized| self.sanitizers.contains(normalized.as_ref()))
+    }
+
+    /// The first sink pattern `callee` matches with its receiver type and
+    /// its arguments' context, the checks that read the call site.
+    fn sink_match(
+        &self,
+        callee: &str,
+        args: &[SimpleExpr],
+        receiver_type: Option<&str>,
+    ) -> Option<SinkPatternMatch> {
+        let normalized = normalized_callee(callee)?;
+        let candidates = self.sink_candidates.get(normalized.as_ref())?;
+        for index in candidates {
+            let pattern = &self.patterns.sinks[*index];
+            if receiver_type_matches(pattern, receiver_type)
+                && sink_pattern_context_confident(normalized.as_ref(), args, pattern)
+            {
+                return Some(SinkPatternMatch {
+                    category: pattern.category.clone(),
+                    relevant_arguments: pattern.relevant_arguments.clone(),
+                });
+            }
+        }
+        None
+    }
+
+    /// The SQL sink pattern `callee` matches on name and receiver but not on
+    /// context (see [`SQL_TEMPLATE_CALLEE`]).
+    fn unconfident_sql_match(
+        &self,
+        callee: &str,
+        receiver_type: Option<&str>,
+    ) -> Option<SinkPatternMatch> {
+        let normalized = normalized_callee(callee)?;
+        let candidates = self.sink_candidates.get(normalized.as_ref())?;
+        for index in candidates {
+            let pattern = &self.patterns.sinks[*index];
+            if pattern.category == "sql-query" && receiver_type_matches(pattern, receiver_type) {
+                return Some(SinkPatternMatch {
+                    category: pattern.category.clone(),
+                    relevant_arguments: pattern.relevant_arguments.clone(),
+                });
+            }
+        }
+        None
+    }
+}
+
+/// The callee text with its spaces removed, without allocating when there
+/// are none to remove.
+fn normalized_callee(callee: &str) -> Option<std::borrow::Cow<'_, str>> {
+    if callee.is_empty() {
+        return None;
+    }
+    Some(if callee.contains(' ') {
+        std::borrow::Cow::Owned(callee.replace(' ', ""))
+    } else {
+        std::borrow::Cow::Borrowed(callee)
+    })
+}
+
 fn find_source_pattern(callee: &str, patterns: &[DataFlowPattern]) -> Option<SourcePatternMatch> {
     stats::work()
         .find_source_pattern_calls
@@ -13648,29 +13833,6 @@ fn find_source_pattern(callee: &str, patterns: &[DataFlowPattern]) -> Option<Sou
         .find(|pattern| pattern_matches_callee(&normalized, &pattern.pattern))
         .map(|pattern| SourcePatternMatch {
             category: pattern.category.clone(),
-        })
-}
-
-fn find_sink_pattern(
-    callee: &str,
-    args: &[SimpleExpr],
-    receiver_type: Option<&str>,
-    patterns: &[DataFlowPattern],
-) -> Option<SinkPatternMatch> {
-    stats::work()
-        .find_sink_pattern_calls
-        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let normalized = normalize_pattern_text(callee);
-    patterns
-        .iter()
-        .find(|pattern| {
-            pattern_matches_callee(&normalized, &pattern.pattern)
-                && receiver_type_matches(pattern, receiver_type)
-                && sink_pattern_context_confident(&normalized, args, pattern)
-        })
-        .map(|pattern| SinkPatternMatch {
-            category: pattern.category.clone(),
-            relevant_arguments: pattern.relevant_arguments.clone(),
         })
 }
 
@@ -13685,28 +13847,6 @@ fn receiver_type_matches(pattern: &DataFlowPattern, receiver_type: Option<&str>)
         None => true,
         Some(required) => receiver_type == Some(required),
     }
-}
-
-/// A SQL sink pattern the call matches on name and receiver but not on
-/// context: its value, not its syntax, has to show it is SQL (see
-/// [`SQL_TEMPLATE_CALLEE`]).
-fn find_unconfident_sql_sink_pattern(
-    callee: &str,
-    receiver_type: Option<&str>,
-    patterns: &[DataFlowPattern],
-) -> Option<SinkPatternMatch> {
-    let normalized = normalize_pattern_text(callee);
-    patterns
-        .iter()
-        .find(|pattern| {
-            pattern.category == "sql-query"
-                && pattern_matches_callee(&normalized, &pattern.pattern)
-                && receiver_type_matches(pattern, receiver_type)
-        })
-        .map(|pattern| SinkPatternMatch {
-            category: pattern.category.clone(),
-            relevant_arguments: pattern.relevant_arguments.clone(),
-        })
 }
 
 /// The pseudo-callee a `format!` lowers to when its template reads as SQL.
@@ -21528,8 +21668,8 @@ mod fixpoint_tests {
     use syn::visit::Visit;
 
     use super::{
-        AbstractOrigin, CfgEvaluator, FileContext, FunctionEnv, FunctionRecord, LoopNode,
-        LoopRegion, Operation, ReturnTypeIndex, SimpleExpr, SourceCollector, TypeIndexes,
+        AbstractOrigin, CallTables, CfgEvaluator, FileContext, FunctionEnv, FunctionRecord,
+        LoopNode, LoopRegion, Operation, ReturnTypeIndex, SimpleExpr, SourceCollector, TypeIndexes,
         build_local_function_index, built_in_dataflow_patterns, infer_summaries_counted,
         infer_type_bindings, join_abstract_env, join_abstract_env_dirty, loop_forest,
         run_operations,
@@ -22047,8 +22187,8 @@ pub fn run() {
             field_element_types: &empty,
             return_types: &return_types,
         };
-        let (summaries, evaluations) =
-            infer_summaries_counted(&records, &local_index, &patterns, &indexes);
+        let tables = CallTables::build(&records, &[], &local_index, &patterns);
+        let (summaries, evaluations) = infer_summaries_counted(&records, &tables, &indexes);
         assert_eq!(evaluations, depth);
         let top = record(&records, "f00");
         assert_eq!(
