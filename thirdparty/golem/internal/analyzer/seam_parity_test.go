@@ -83,7 +83,7 @@ func analyzeWithEngine(t *testing.T, dir, mode, engine string) *model.Report {
 	// A case whose files import "C" needs the load to run with cgo, which the
 	// parallel-test option carries (an annotation must never turn cgo on).
 	if caseImportsC(dir) {
-		options.cgoEnabled = "1"
+		options.CgoEnabled = "1"
 	}
 	report, err := Analyze(options)
 	if err != nil {

@@ -45,7 +45,7 @@ func analyzeCorpusCase(t *testing.T, dir, mode string) *model.Report {
 		ToolVersion:           "test",
 	}
 	if caseImportsC(dir) {
-		options.cgoEnabled = "1"
+		options.CgoEnabled = "1"
 	}
 	report, err := Analyze(options)
 	if err != nil {

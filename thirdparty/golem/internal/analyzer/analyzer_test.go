@@ -369,7 +369,7 @@ func TestAnalyzeSemanticDataFlowSlices(t *testing.T) {
 	// Runs on the default engine deliberately: rule metadata is part of the
 	// published slice schema, so whichever engine is the default has to fill
 	// it. Both are asserted below.
-	report, err := Analyze(Options{Dir: filepath.Join("..", "..", "testdata", "dataflow"), cgoEnabled: "1", IncludeLocal: true, CallGraphMode: "none", DataFlowMode: "all", DataFlowCallGraphMode: "cha", DataFlowMax: 100, ToolVersion: "test"})
+	report, err := Analyze(Options{Dir: filepath.Join("..", "..", "testdata", "dataflow"), CgoEnabled: "1", IncludeLocal: true, CallGraphMode: "none", DataFlowMode: "all", DataFlowCallGraphMode: "cha", DataFlowMax: 100, ToolVersion: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -534,7 +534,7 @@ func TestSyntheticHTTPVerbRegistration(t *testing.T) {
 // symbol, so asserting the source notation here would lock in a pattern that
 // silently finds nothing.
 func TestDataFlowConfigurableBudgetsAndPatternMetadata(t *testing.T) {
-	report, err := Analyze(Options{Dir: filepath.Join("..", "..", "testdata", "dataflow"), cgoEnabled: "1", IncludeLocal: true, CallGraphMode: "none", DataFlowMode: "security", DataFlowCallGraphMode: "none", DataFlowMax: 10, DataFlowLargeRepoFunctions: 7, DataFlowMaxFunctionInstructions: 33, DataFlowMaxTraceNodes: 11, DataFlowMaxTraceEdges: 12, DataFlowSkipGenerated: true, DataFlowSkipTests: true, ToolVersion: "test"})
+	report, err := Analyze(Options{Dir: filepath.Join("..", "..", "testdata", "dataflow"), CgoEnabled: "1", IncludeLocal: true, CallGraphMode: "none", DataFlowMode: "security", DataFlowCallGraphMode: "none", DataFlowMax: 10, DataFlowLargeRepoFunctions: 7, DataFlowMaxFunctionInstructions: 33, DataFlowMaxTraceNodes: 11, DataFlowMaxTraceEdges: 12, DataFlowSkipGenerated: true, DataFlowSkipTests: true, ToolVersion: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -848,7 +848,7 @@ func TestDataFlowTestLikeFunctionPredicate(t *testing.T) {
 }
 
 func TestAnalyzeDataFlowSliceLimitDiagnostics(t *testing.T) {
-	report, err := Analyze(Options{Dir: filepath.Join("..", "..", "testdata", "dataflow"), cgoEnabled: "1", IncludeLocal: true, CallGraphMode: "none", DataFlowMode: "all", DataFlowCallGraphMode: "none", DataFlowMax: 1, DataFlowWorkers: 1, ToolVersion: "test"})
+	report, err := Analyze(Options{Dir: filepath.Join("..", "..", "testdata", "dataflow"), CgoEnabled: "1", IncludeLocal: true, CallGraphMode: "none", DataFlowMode: "all", DataFlowCallGraphMode: "none", DataFlowMax: 1, DataFlowWorkers: 1, ToolVersion: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -931,7 +931,7 @@ func TestApplyRuntimeLimitsMemoryLimitBehavior(t *testing.T) {
 
 func TestAnalyzeProgressAndResourceOptions(t *testing.T) {
 	var logs bytes.Buffer
-	report, err := Analyze(Options{Dir: filepath.Join("..", "..", "testdata", "dataflow"), cgoEnabled: "1", IncludeLocal: true, CallGraphMode: "none", DataFlowMode: "security", DataFlowCallGraphMode: "none", DataFlowMax: 10, DataFlowWorkers: 2, MaxProcs: 1, MemoryLimit: 256 << 20, Progress: true, ProgressInterval: time.Nanosecond, ProgressWriter: &logs, ToolVersion: "test"})
+	report, err := Analyze(Options{Dir: filepath.Join("..", "..", "testdata", "dataflow"), CgoEnabled: "1", IncludeLocal: true, CallGraphMode: "none", DataFlowMode: "security", DataFlowCallGraphMode: "none", DataFlowMax: 10, DataFlowWorkers: 2, MaxProcs: 1, MemoryLimit: 256 << 20, Progress: true, ProgressInterval: time.Nanosecond, ProgressWriter: &logs, ToolVersion: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -955,7 +955,7 @@ func TestAnalyzeInvalidDataFlowRegexDiagnostic(t *testing.T) {
 	if err := os.WriteFile(patternFile, []byte(`{"sources":[{"kind":"function","match":"regex","pattern":"[","category":"broken"}]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	report, err := Analyze(Options{Dir: filepath.Join("..", "..", "testdata", "dataflow"), cgoEnabled: "1", IncludeLocal: true, CallGraphMode: "none", DataFlowMode: "security", DataFlowCallGraphMode: "none", DataFlowConfig: patternFile, TaintEngine: "legacy", ToolVersion: "test"})
+	report, err := Analyze(Options{Dir: filepath.Join("..", "..", "testdata", "dataflow"), CgoEnabled: "1", IncludeLocal: true, CallGraphMode: "none", DataFlowMode: "security", DataFlowCallGraphMode: "none", DataFlowConfig: patternFile, TaintEngine: "legacy", ToolVersion: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}

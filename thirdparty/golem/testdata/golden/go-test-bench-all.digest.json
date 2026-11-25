@@ -2,42 +2,43 @@
   "fixture": "go-test-bench",
   "commit": "92445700823205281369911a72b7127f18c8c9ed",
   "config": "all",
-  "schemaVersion": "https://cdxgen.github.io/cdxgen-plugins-bin/golem/schema/v6",
+  "schemaVersion": "https://cdxgen.github.io/cdxgen-plugins-bin/golem/schema/v7",
+  "cgoMode": "disabled",
   "counts": {
     "apiEndpoints": 8,
-    "buildDirectives": 4,
+    "buildDirectives": 78,
     "declarations": 846,
-    "files": 121,
+    "files": 161,
     "imports": 536,
     "modules": 38,
     "nativeArtifacts": 0,
     "packages": 31,
-    "securitySignals": 100,
+    "securitySignals": 141,
     "usages": 2189
   },
   "callGraph": {
     "algorithm": "rta",
-    "nodeCount": 1147,
-    "edgeCount": 6640,
+    "nodeCount": 1105,
+    "edgeCount": 7153,
     "nodesByKind": {
-      "function": 1147
+      "function": 1105
     },
     "edgesByCallType": {
-      "defer": 223,
-      "func-value": 1815,
-      "interface": 3631,
-      "static": 971
+      "defer": 45,
+      "func-value": 2556,
+      "interface": 3649,
+      "static": 903
     },
-    "nodeSetHash": "cd22ee93b4211423",
-    "edgeSetHash": "16781935f3275eaa",
-    "syntheticNodes": 304,
+    "nodeSetHash": "2aec2b3620226158",
+    "edgeSetHash": "aa2ec46f33bb22ef",
+    "syntheticNodes": 305,
     "stdlibNodes": 0,
-    "externalNodes": 558
+    "externalNodes": 516
   },
   "dataFlow": {
     "mode": "all",
-    "nodeCount": 821,
-    "edgeCount": 954,
+    "nodeCount": 794,
+    "edgeCount": 925,
     "sliceCount": 184,
     "uniqueFlowCount": 160,
     "summaryCount": 0,

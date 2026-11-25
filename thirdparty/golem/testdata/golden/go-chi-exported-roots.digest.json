@@ -2,7 +2,8 @@
   "fixture": "go-chi",
   "commit": "71307f9b7e4e9527638bc951c42b782cd1560331",
   "config": "exported-roots",
-  "schemaVersion": "https://cdxgen.github.io/cdxgen-plugins-bin/golem/schema/v6",
+  "schemaVersion": "https://cdxgen.github.io/cdxgen-plugins-bin/golem/schema/v7",
+  "cgoMode": "disabled",
   "counts": {
     "apiEndpoints": 14,
     "buildDirectives": 2,

@@ -203,6 +203,7 @@ func mergeCgoEvidence(dst, src *model.CgoEvidence) *model.CgoEvidence {
 		copied.RiskyFlags = append([]string{}, src.RiskyFlags...)
 		copied.RiskCategories = append([]string{}, src.RiskCategories...)
 		copied.EnvOverrideNames = append([]string{}, src.EnvOverrideNames...)
+		copied.CallSites = append([]model.NativeCallSite{}, src.CallSites...)
 		return &copied
 	}
 	if dst.Mode == "" {
@@ -264,6 +265,25 @@ func mergeCgoEvidence(dst, src *model.CgoEvidence) *model.CgoEvidence {
 	dst.RiskyFlags = sortedUnique(append(dst.RiskyFlags, src.RiskyFlags...))
 	dst.RiskCategories = sortedUnique(append(dst.RiskCategories, src.RiskCategories...))
 	dst.RiskyFlagCount = len(dst.RiskyFlags)
+	// Call sites are keyed by package, path and position, which one module
+	// scan cannot produce twice, so the merge only orders them.
+	dst.CallSites = append(dst.CallSites, src.CallSites...)
+	sort.Slice(dst.CallSites, func(i, j int) bool {
+		a, b := dst.CallSites[i].Position, dst.CallSites[j].Position
+		if a.Filename != b.Filename {
+			return a.Filename < b.Filename
+		}
+		if a.Line != b.Line {
+			return a.Line < b.Line
+		}
+		return a.Column < b.Column
+	})
+	dst.UntypedPointerCheckCount += src.UntypedPointerCheckCount
+	dst.UnpinnedReachableCount += src.UnpinnedReachableCount
+	dst.GocheckDisabled = dst.GocheckDisabled || src.GocheckDisabled
+	dst.GocheckEnvDisabled = dst.GocheckEnvDisabled || src.GocheckEnvDisabled
+	dst.GocheckFileDisabledCount += src.GocheckFileDisabledCount
+	dst.Gocheck2Enabled = dst.Gocheck2Enabled || src.Gocheck2Enabled
 	return dst
 }
 

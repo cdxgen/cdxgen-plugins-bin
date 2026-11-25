@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"golang.org/x/tools/go/packages"
@@ -25,6 +26,10 @@ type cgoEvidence struct {
 	files      map[string]*cgoFile
 	packages   map[string]*model.CgoPackageSummary
 	syso       map[string]bool // path -> header looks like an object or archive
+	// gocheckHits are the configuration locations that turn cgo pointer
+	// checking off, before the module filter: a hit counts only when its
+	// module contains cgo.
+	gocheckHits []cgoGocheckHit
 }
 
 // cgoFile is one .go file that imports "C", read with go/parser rather than
@@ -37,6 +42,27 @@ type cgoFile struct {
 	directives  []model.BuildDirective
 	risks       []native.CgoFlagRisk
 	signals     []model.SecuritySignal
+	// pointer carries the per-call-site pointer-check classification; nil when
+	// the file never parsed fully (a broken file still reports its preamble).
+	pointer *cgoFilePointerCheck
+}
+
+// reattributePointerCheck moves the pointer-check records of a file whose
+// package path was only inferred after the walk onto the final attribution.
+func reattributePointerCheck(record *cgoFile, packagePath string) {
+	if record == nil || record.pointer == nil || packagePath == "" {
+		return
+	}
+	for i := range record.pointer.signals {
+		if record.pointer.signals[i].PackagePath == "" {
+			record.pointer.signals[i].PackagePath = packagePath
+		}
+	}
+	for i := range record.pointer.callSites {
+		if record.pointer.callSites[i].PackagePath == "" {
+			record.pointer.callSites[i].PackagePath = packagePath
+		}
+	}
 }
 
 // cgoModeOf resolves the cgo mode the load ran with: "disabled" when golem
@@ -158,13 +184,26 @@ func (a *Analyzer) collectCgoEvidence(pkgs []*packages.Package, moduleRoot strin
 		case strings.HasSuffix(path, ".syso"):
 			collected.syso[path] = native.SysoObjectValid(path)
 		case strings.HasSuffix(path, ".go") && !known[path]:
+			// A plain Go file the pointer walk would otherwise never read:
+			// the GODEBUG prefilter keeps the parse to the rare files that
+			// mention it at all.
+			if data, err := os.ReadFile(path); err == nil && len(data) <= cgoGocheckMaxScan && strings.Contains(string(data), "GODEBUG") {
+				fset := token.NewFileSet()
+				if parsed, err := parser.ParseFile(fset, path, data, parser.SkipObjectResolution); err == nil {
+					collected.gocheckHits = append(collected.gocheckHits, scanGocheckSetenv(fset, parsed, path)...)
+				}
+			}
 			if collected.readCgoFile(path, "", "", false) {
 				record := collected.files[path]
 				if record.packagePath == "" {
 					record.packagePath, record.modulePath = collected.inferPackage(filepath.Dir(path))
+					reattributePointerCheck(record, record.packagePath)
 				}
 				collected.notePackage(record.packagePath, record.modulePath, false)
 			}
+		case gocheckConfigName(entry.Name()) != "":
+			kind := gocheckConfigName(entry.Name())
+			collected.gocheckHits = append(collected.gocheckHits, scanGocheckConfig(path, kind)...)
 		}
 		return nil
 	})
@@ -176,6 +215,10 @@ func (a *Analyzer) collectCgoEvidence(pkgs []*packages.Package, moduleRoot strin
 			return record.directives[i].Variable < record.directives[j].Variable
 		})
 	}
+	// With CGO_ENABLED=1 the generated files carry the checks cgo itself
+	// emitted; fold their verdicts into the textual records before assembly
+	// counts them.
+	a.mergeCompiledPointerChecks(collected, pkgs)
 	return collected
 }
 
@@ -195,9 +238,15 @@ func (a *Analyzer) packageCompiledWithCgo(pkg *packages.Package) bool {
 	return false
 }
 
-// readCgoFile parses one file with go/parser in ImportsOnly|ParseComments mode
-// and records it when it imports "C". Nothing in the file is ever executed;
-// the parser is the only tool that touches it.
+// readCgoFile parses one file with go/parser in full-comment mode and records
+// it when it imports "C". Nothing in the file is ever executed; the parser is
+// the only tool that touches it.
+//
+// The parse used to be ImportsOnly: the preamble needs the comment groups and
+// nothing else. The pointer-check classification walks every C.f(...) call in
+// the file, so a full parse is now attempted first, and a file that does not
+// parse completely falls back to ImportsOnly and loses the walk but keeps its
+// preamble and its native-interop signal.
 func (c *cgoEvidence) readCgoFile(path, packagePath, modulePath string, loaded bool) bool {
 	if existing, ok := c.files[path]; ok {
 		// A file can be reached from two packages (a test variant, or the
@@ -220,7 +269,11 @@ func (c *cgoEvidence) readCgoFile(path, packagePath, modulePath string, loaded b
 		return false
 	}
 	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, path, nil, parser.ImportsOnly|parser.ParseComments)
+	file, err := parser.ParseFile(fset, path, nil, parser.ParseComments|parser.SkipObjectResolution)
+	fullParse := err == nil
+	if !fullParse {
+		file, err = parser.ParseFile(fset, path, nil, parser.ImportsOnly|parser.ParseComments)
+	}
 	if err != nil || !fileImportsC(file) {
 		return false
 	}
@@ -252,6 +305,17 @@ func (c *cgoEvidence) readCgoFile(path, packagePath, modulePath string, loaded b
 			Recommendation: "Review native build flags, linked libraries, and C memory safety.",
 			Range:          model.Range{Start: model.Position{Filename: path, Line: line}, End: model.Position{Filename: path, Line: line}},
 		}}
+	}
+	if fullParse {
+		// The pointer-check classification of every C call in the file. The
+		// signals stay in record.pointer, not record.signals: the compiled
+		// pass confirms, refutes and upgrades them in place, and assembly
+		// attaches the merged set.
+		record.pointer = cgoWalkFilePointerChecks(fset, file, path, packagePath)
+		// A cgo file that calls os.Setenv with GODEBUG records intent, not
+		// effect: the runtime read GODEBUG at start-up. The hit still joins
+		// the module filter below.
+		c.gocheckHits = append(c.gocheckHits, scanGocheckSetenv(fset, file, path)...)
 	}
 	c.files[path] = record
 	return true
@@ -443,6 +507,43 @@ func (a *Analyzer) assembleCgoReport(collected *cgoEvidence, mode, toolchainVers
 	}
 	riskyFlags := map[string]bool{}
 	riskCategories := map[string]bool{}
+	// The module a file belongs to: the nearest go.mod above it, or the
+	// analysis root when none names it. cgocheck-disabled hits count only in
+	// modules that contain cgo, because a GODEBUG line in a pure-Go module
+	// cannot disable a check no code uses.
+	cgoModuleKeys := map[string]bool{}
+	for record := range collected.files {
+		cgoModuleKeys[moduleKeyOf(filepath.Dir(record), collected.moduleRoot)] = true
+	}
+	for _, hit := range collected.gocheckHits {
+		if !cgoModuleKeys[moduleKeyOf(filepath.Dir(hit.path), collected.moduleRoot)] {
+			continue
+		}
+		evidence.GocheckFileDisabledCount++
+		evidence.GocheckDisabled = true
+		riskCategories[CgoCategoryGocheckDisabled] = true
+		signal := model.SecuritySignal{
+			ID:          stableID("cgo-gocheck", hit.source, hit.path, strconv.Itoa(hit.line)),
+			Category:    CgoCategoryGocheckDisabled,
+			Severity:    "medium",
+			Confidence:  "textual",
+			Symbol:      "GODEBUG",
+			Description: "This configuration turns cgo pointer checking off with cgocheck=0, which the runtime reads at process start and which //go:debug cannot set.",
+			Range:       model.Range{Start: model.Position{Filename: hit.path, Line: hit.line}, End: model.Position{Filename: hit.path, Line: hit.line}},
+			Properties:  map[string]string{"source": hit.source},
+		}
+		if hit.source == "go-setenv" {
+			signal.Description = "This call sets GODEBUG to a value that turns cgo pointer checking off. os.Setenv after process start-up does not change the check the runtime already configured, so this records intent rather than effect."
+		}
+		owner := ownerOf(hit.path)
+		signal.PackagePath = owner
+		if summary := collected.packages[owner]; summary != nil {
+			summary.RiskCategories = append(summary.RiskCategories, CgoCategoryGocheckDisabled)
+		}
+		if owner != "" {
+			attachment.signalsByPackage[owner] = append(attachment.signalsByPackage[owner], signal)
+		}
+	}
 	for path, valid := range sysoVerdict {
 		evidence.SysoCount++
 		owner := ownerOf(path)
@@ -470,9 +571,36 @@ func (a *Analyzer) assembleCgoReport(collected *cgoEvidence, mode, toolchainVers
 		if summary := collected.packages[record.packagePath]; summary != nil {
 			summary.FileCount++
 		}
+		if record.pointer != nil {
+			// The per-call-site records and the untyped-check findings of one
+			// file. Findings join the signals the report already attaches per
+			// package; the counts and the category name go on the cgo object
+			// so a consumer can roll them up without reading the signals.
+			evidence.CallSites = append(evidence.CallSites, record.pointer.callSites...)
+			untyped, reachable := 0, 0
+			for _, signal := range record.pointer.signals {
+				switch signal.Category {
+				case CgoCategoryUntypedCheck:
+					untyped++
+				case CgoCategoryUnpinnedReachable:
+					reachable++
+				}
+				if signal.Category == CgoCategoryUntypedCheck || signal.Category == CgoCategoryUnpinnedReachable {
+					if summary := collected.packages[record.packagePath]; summary != nil {
+						summary.RiskCategories = append(summary.RiskCategories, signal.Category)
+					}
+					riskCategories[signal.Category] = true
+				}
+			}
+			evidence.UntypedPointerCheckCount += untyped
+			evidence.UnpinnedReachableCount += reachable
+		}
 		if record.packagePath != "" {
 			attachment.directivesByPackage[record.packagePath] = append(attachment.directivesByPackage[record.packagePath], record.directives...)
 			attachment.signalsByPackage[record.packagePath] = append(attachment.signalsByPackage[record.packagePath], record.signals...)
+			if record.pointer != nil {
+				attachment.signalsByPackage[record.packagePath] = append(attachment.signalsByPackage[record.packagePath], record.pointer.signals...)
+			}
 		}
 		for _, directive := range record.directives {
 			evidence.DirectiveCount++
@@ -512,7 +640,39 @@ func (a *Analyzer) assembleCgoReport(collected *cgoEvidence, mode, toolchainVers
 	evidence.RiskyFlags = sortedKeys(riskyFlags)
 	evidence.RiskCategories = sortedKeys(riskCategories)
 	evidence.RiskyFlagCount = len(evidence.RiskyFlags)
+	sort.Slice(evidence.CallSites, func(i, j int) bool {
+		a, b := evidence.CallSites[i].Position, evidence.CallSites[j].Position
+		if a.Filename != b.Filename {
+			return a.Filename < b.Filename
+		}
+		if a.Line != b.Line {
+			return a.Line < b.Line
+		}
+		return a.Column < b.Column
+	})
 	return evidence, attachment
+}
+
+// moduleKeyOf returns the directory of the nearest go.mod above dir, bounded
+// by the analysis root, which is how two files land in the same module for
+// the cgocheck filter.
+func moduleKeyOf(dir, moduleRoot string) string {
+	search := filepath.Clean(dir)
+	root := filepath.Clean(moduleRoot)
+	for len(search) >= len(root) {
+		if _, err := os.Lstat(filepath.Join(search, "go.mod")); err == nil {
+			return search
+		}
+		if search == root {
+			break
+		}
+		parent := filepath.Dir(search)
+		if parent == search {
+			break
+		}
+		search = parent
+	}
+	return root
 }
 
 func boolLabel(value bool) string {

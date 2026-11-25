@@ -127,6 +127,72 @@ paths and environment contents are never reported, only names and categories.
 Note that `CGO_CFLAGS_ALLOW` and its siblings re-open refused flags for every
 package in the build, and flags set in `CGO_CFLAGS` itself are never checked.
 
+### The cgo pointer check
+
+For every `C.f(...)` call, cgo decides per argument how much memory the
+runtime pointer check may scan: `&x[i]`, `&x` and `x[i:j]` bound the check to
+that element, field or slice, and any other argument that needs a check is
+checked with no type information, which makes the runtime scan the entire heap
+object behind the pointer and panic when any pointer field of that object
+holds an unpinned Go pointer. Golem classifies every C call argument the way
+`cmd/cgo/gcc.go` does and reports three findings.
+
+`cgo-pointer-check-untyped` is the argument checked with no type information.
+In the default mode the classification is textual: without the C prototype,
+golem treats an argument as checked when it, or the assignment in the same
+function that reaches it (the latest one before the call in an enclosing
+block, so a name reused in two switch cases resolves per case), contains an
+`unsafe.Pointer(...)` of a Go address the function itself takes (`&x`,
+`&x[i]`, a slice, `unsafe.SliceData`), and the confidence says `textual`. An
+`unsafe.Pointer` of a struct field, a parameter or a helper's result is left
+to compiled mode, because libraries keep C handles in exactly those places.
+With `CGO_ENABLED=1` the generated files carry the literal `_cgoCheckPointer`
+calls cgo chose, and their `/*line*/` positions resolve back to the original
+source, so the textual findings are confirmed, refuted or completed at the
+same argument positions and the confidence says `high`. Type information from
+the generated files adds severity: an object with pointer-shaped slots can
+panic the scan (`panicRisk`, `pointerSlots` or `pointerArray`), and an object
+whose every pointer field was pinned earlier in the function cannot
+(`pinned`). Pinned means the pointers stored in the scanned memory:
+`pin.Pin(s.other)` pins what `s.other` points to and satisfies the check,
+while `pin.Pin(&s.other)` pins `s` itself, leaves the target of `s.other`
+unpinned, and panics at run time, so golem does not count it. Arguments rooted in memory
+a C call returned, or typed as a C type (including a Go name defined as a C
+struct, such as `type Ctx C.struct_ctx`), are never findings, because
+`cgoCheckPointer` returns as soon as it sees non-Go memory. An
+`unsafe.Pointer` value whose origin the function does not show (a
+parameter, a struct field, a helper's result) is reported at `low` severity
+with `memoryOwner=unknown`: cgo does emit the untyped check, but the memory
+may well be C's, which libraries commonly keep in such fields.
+
+`cgo-unpinned-reachable` is an argument whose pointed-to type is recursive or
+whose pointer chain exceeds the two levels cgo's check follows. Pinning the
+first node does not silence a recursive type, because C can walk every node
+after it; pinning inside a loop before the call does, since that is how code
+pins a whole list. A finite chain deeper than two levels is always reported.
+Depth counts from the memory C receives: for `&s.f` that is the field, not
+the whole of `s`. It needs type information, so it
+is emitted in compiled mode only; the pin analysis is intraprocedural and
+path-insensitive, which the confidence states.
+
+`cgocheck-disabled` names where the runtime pointer check itself is turned
+off: a `GODEBUG` carrying `cgocheck=0` in the load environment, or the same
+setting in a Dockerfile, Containerfile, Kubernetes YAML, Makefile, `.env`
+file, shell script or an `os.Setenv` call, in a module that contains cgo. The
+check is a start-up setting that `//go:debug` cannot set, so a configuration
+file is the only in-repo place it can change; an `os.Setenv` after start-up
+records intent, not effect, and the signal says so. `cgocheck2-enabled`
+reports `GOEXPERIMENT=cgocheck2` as informational.
+
+Every C call the analysis walked also produces a per-call-site record on
+`cgo.callSites[]`: the position, the C symbol, and per argument the shape
+(`addr`, `index`, `slice`, `untyped`, `unchecked`), the memory owner (`go`,
+`c`, `unknown`) and whether the Go pointers in the memory the check covers
+were pinned. The corpus and fixture suites run
+the whole analysis in both cgo modes; the `golem:want signal` annotation
+grammar carries `cgo=textual` / `cgo=compiled` guards for the expectations
+that differ by mode.
+
 ## Output formats
 
 `json` is the full report. `graphml` and `gexf` export the call graph and require a call graph mode. Data-flow sidecars are written with `--dataflow-graph-out` in graphml or gexf.

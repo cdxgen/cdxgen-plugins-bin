@@ -2,6 +2,7 @@ package corpus
 
 import (
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -120,6 +121,9 @@ func EvaluateWithGroundTruth(report *model.Report, annotations []Annotation, mod
 		if !ann.AppliesTo(mode) {
 			continue
 		}
+		if !ann.AppliesToCgo(cgoModeOfReport(report)) {
+			continue
+		}
 		outcome := evaluateAnnotation(report, ann)
 		outcome.Engine = engine
 		eval.Outcomes = append(eval.Outcomes, outcome)
@@ -169,9 +173,61 @@ func evaluateAnnotation(report *model.Report, ann Annotation) Outcome {
 		return evaluateEdge(report, ann)
 	case KindReachable:
 		return evaluateReachable(report, ann)
+	case KindSignal:
+		return evaluateSignal(report, ann)
 	default:
 		return Outcome{Annotation: ann, Detail: "unsupported annotation kind " + ann.Kind}
 	}
+}
+
+// cgoModeOfReport normalises the cgo mode a report ran with into the
+// vocabulary the cgo= annotation key uses. A report with no cgo object was
+// loaded textually by definition, the default mode.
+func cgoModeOfReport(report *model.Report) string {
+	if report == nil || report.Cgo == nil {
+		return "textual"
+	}
+	switch report.Cgo.Mode {
+	case "enabled":
+		return "compiled"
+	case "disabled":
+		return "textual"
+	}
+	return "textual"
+}
+
+// evaluateSignal matches security signals against a signal expectation. Every
+// constraint is optional except the category, which the parser already checked
+// against the known vocabulary: line pins the range's start line, symbol and
+// severity and confidence narrow the match the way the flow constraints do.
+func evaluateSignal(report *model.Report, ann Annotation) Outcome {
+	if report == nil {
+		return finish(ann, 0, "report is nil")
+	}
+	matches := 0
+	var observed []string
+	for i := range report.SecuritySignals {
+		signal := &report.SecuritySignals[i]
+		observed = append(observed, fmt.Sprintf("%s@%s:%d", signal.Category, filepath.Base(signal.Range.Start.Filename), signal.Range.Start.Line))
+		if !Matches(ann.Category, signal.Category) {
+			continue
+		}
+		if ann.WantLine > 0 && signal.Range.Start.Line != ann.WantLine {
+			continue
+		}
+		if !Matches(ann.Symbol, signal.Symbol) {
+			continue
+		}
+		if !Matches(ann.Severity, signal.Severity) {
+			continue
+		}
+		if !Matches(ann.Confidence, signal.Confidence) {
+			continue
+		}
+		matches++
+	}
+	detail := fmt.Sprintf("matched %d of %d reported signals %v", matches, len(report.SecuritySignals), dedupe(observed))
+	return finish(ann, matches, detail)
 }
 
 func evaluateFlow(report *model.Report, ann Annotation) Outcome {

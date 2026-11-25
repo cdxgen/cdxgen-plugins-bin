@@ -176,7 +176,7 @@ func TestCgoRefusedFlagFamiliesListed(t *testing.T) {
 		t.Helper()
 		options := Options{Dir: filepath.Join("..", "..", "testdata", "cgo-risk"), IncludeLocal: true, ToolVersion: "test"}
 		if cgo != "" {
-			options.cgoEnabled = cgo
+			options.CgoEnabled = cgo
 		} else {
 			unsetenvCGOEnabled(t)
 		}

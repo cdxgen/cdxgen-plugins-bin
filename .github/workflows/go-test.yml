@@ -126,6 +126,22 @@ jobs:
         run: |
           files="$(gofmt -l . | grep -v testdata/ || true)"
           if [ -n "$files" ]; then echo "gofmt needed on: $files"; exit 1; fi
+      - name: golden digests
+        # Two of the four golden fixtures keep this step to about a minute:
+        # gorilla-mux for a routing library with exported roots, and
+        # shiftleft-go-demo for the taint flows and its cgo-only dependency.
+        # The bench pins cgo off itself, so the runner's CGO_ENABLED does not
+        # matter. A fixture that cannot be fetched is skipped with exit status
+        # 0, so the step also requires all four digests (two fixtures, two
+        # configurations each) to report a match.
+        run: |
+          set -o pipefail
+          go run ./cmd/golem golden --only gorilla-mux,shiftleft-go-demo 2>&1 | tee golden.log
+          matched="$(grep -c '^golden: .* matches$' golden.log || true)"
+          if [ "$matched" != 4 ]; then
+            echo "expected 4 matching golden digests, got $matched"
+            exit 1
+          fi
 
   trustinspector_test:
     name: trustinspector-cdxgen test

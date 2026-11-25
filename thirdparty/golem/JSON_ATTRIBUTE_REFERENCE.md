@@ -591,30 +591,66 @@ the values are deliberately not reported.
 `path-escape` (a path argument that is absolute or climbs with `..`),
 `module-path` (informational: a path argument inside the analysed module),
 `cgo-directive-in-source` (a `//go:cgo_*` directive in hand-written source,
-where the compiler only accepts them in cgo-generated files) and
+where the compiler only accepts them in cgo-generated files),
 `invalid-object` (a `.syso` whose first bytes are not an ELF, Mach-O, PE/COFF
-or archive header). `unloadedPackageCount` counts packages seen only textually
-because cgo was off and the loader never returned them.
+or archive header), `cgo-pointer-check-untyped` (a C call argument cgo checks
+with no type information), `cgo-unpinned-reachable` (an argument whose
+pointed-to structure C can walk past what the check covers), and
+`cgocheck-disabled` / `cgocheck2-enabled` (the runtime pointer check turned
+off, or the stronger experiment on). `unloadedPackageCount` counts packages
+seen only textually because cgo was off and the loader never returned them.
 
 ### `cgo` object fields
 
-| Field                   | Type    | Purpose                                                                     |
-| ----------------------- | ------- | --------------------------------------------------------------------------- |
-| `mode`                  | string  | `enabled` or `disabled`; the `CGO_ENABLED` the load ran with.               |
-| `toolchainVersion`      | string  | Toolchain version from the `go env` probe, e.g. `go1.27.4`.                 |
-| `toolchainPatched`      | boolean | Whether that toolchain carries the go1.26.11/go1.27.4 cgo flag fixes.       |
-| `envOverrideNames[]`    | array   | Names of `CGO_*_ALLOW` / `CGO_*FLAGS` variables in the load environment.    |
-| `packageCount`          | number  | Packages with cgo evidence, loaded or textual.                             |
-| `fileCount`             | number  | Files that import "C".                                                      |
-| `directiveCount`        | number  | `#cgo` and `//go:cgo_*` directives found.                                   |
-| `riskyFlagCount`        | number  | Distinct risky flag names.                                                  |
-| `riskyFlags[]`          | array   | Sorted unique flag NAMES, e.g. `--sysroot`. Never values.                   |
-| `riskCategories[]`      | array   | Sorted unique risk categories.                                              |
-| `pkgConfigCount`        | number  | `#cgo pkg-config:` directives.                                              |
-| `sysoCount`             | number  | `.syso` inputs classified.                                                  |
-| `sysoInvalidCount`      | number  | `.syso` inputs whose header is not an object or archive.                    |
-| `unloadedPackageCount`  | number  | Packages seen only textually because cgo was off.                           |
-| `packages[]`            | array   | Per-package summaries, see below.                                           |
+| Field                        | Type    | Purpose                                                                     |
+| ---------------------------- | ------- | --------------------------------------------------------------------------- |
+| `mode`                       | string  | `enabled` or `disabled`; the `CGO_ENABLED` the load ran with.               |
+| `toolchainVersion`           | string  | Toolchain version from the `go env` probe, e.g. `go1.27.4`.                 |
+| `toolchainPatched`           | boolean | Whether that toolchain carries the go1.26.11/go1.27.4 cgo flag fixes.       |
+| `envOverrideNames[]`         | array   | Names of `CGO_*_ALLOW` / `CGO_*FLAGS` variables in the load environment, plus `GODEBUG` when its value turns cgo checking off. |
+| `packageCount`               | number  | Packages with cgo evidence, loaded or textual.                             |
+| `fileCount`                  | number  | Files that import "C".                                                      |
+| `directiveCount`             | number  | `#cgo` and `//go:cgo_*` directives found.                                   |
+| `riskyFlagCount`             | number  | Distinct risky flag names.                                                  |
+| `riskyFlags[]`               | array   | Sorted unique flag NAMES, e.g. `--sysroot`. Never values.                   |
+| `riskCategories[]`           | array   | Sorted unique risk categories.                                              |
+| `pkgConfigCount`             | number  | `#cgo pkg-config:` directives.                                              |
+| `sysoCount`                  | number  | `.syso` inputs classified.                                                  |
+| `sysoInvalidCount`           | number  | `.syso` inputs whose header is not an object or archive.                    |
+| `unloadedPackageCount`       | number  | Packages seen only textually because cgo was off.                           |
+| `packages[]`                 | array   | Per-package summaries, see below.                                           |
+| `untypedPointerCheckCount`   | number  | C call arguments cgo checks with no type information, after C-owned memory was excluded. |
+| `unpinnedReachableCount`     | number  | Arguments whose pointed-to structure is recursive or deeper than two pointer levels and was not pinned. |
+| `callSites[]`                | array   | Per-call-site pointer-check records, see below.                             |
+| `gocheckDisabled`            | boolean | cgo pointer checking is off somewhere the analysis saw it.                  |
+| `gocheckEnvDisabled`         | boolean | The load environment carried `cgocheck=0` in `GODEBUG`.                     |
+| `gocheckFileDisabledCount`   | number  | Configuration files that turn cgo checking off.                             |
+| `gocheck2Enabled`            | boolean | `GOEXPERIMENT=cgocheck2` was seen; informational.                           |
+
+### `cgo.callSites[]` fields
+
+One record per C call the pointer-check analysis walked, ordered by position.
+They carry how cgo's check sees each argument and whose memory the argument
+points into; the findings themselves are the security signals.
+
+| Field        | Type    | Purpose                                                                 |
+| ------------ | ------- | ----------------------------------------------------------------------- |
+| `id`         | string  | Stable identifier.                                                       |
+| `packagePath`| string  | Owning package.                                                          |
+| `symbol`     | string  | The C function, as `C.name`.                                             |
+| `position`   | object  | Position of the call in the original source.                             |
+| `confidence` | string  | `textual` in the default mode; `high` when the checks cgo emitted confirmed the record. |
+| `arguments[]`| array   | One entry per argument, see below.                                       |
+
+### `cgo.callSites[].arguments[]` fields
+
+| Field      | Type    | Purpose                                                                                       |
+| ---------- | ------- | --------------------------------------------------------------------------------------------- |
+| `index`    | number  | Argument position.                                                                            |
+| `shape`    | string  | `addr`, `index` or `slice` when cgo bounds the check to that memory; `untyped` when the runtime scans the whole heap object; `unchecked` when cgo emits no check. |
+| `owner`    | string  | `go`, `c` or `unknown`: whose memory the argument points into.                                |
+| `pinned`   | boolean | Every Go pointer stored in the memory the check covers was passed to `(*runtime.Pinner).Pin` earlier in the function: `Pin(E)` for an `&E` argument, `Pin(o.f)` for each pointer field of an object an untyped check scans. `Pin(&s.f)` pins `s`, not the target of `s.f`, and does not count (intraprocedural, path-insensitive). |
+| `position` | object  | Position of the argument expression, the join key between the textual and compiled views.     |
 
 ### `cgo.packages[]` fields
 
