@@ -376,7 +376,26 @@ fn loop_forest(regions: &[LoopRegion]) -> Vec<LoopNode> {
 /// the emitting walk happens once. A loop whose head can hold `F`
 /// name–origin pairs is therefore walked at most `F + 2` times, however
 /// deeply it is nested.
-fn run_operations<S: Clone>(
+/// The cost of one whole-state copy, as the number of entries it carries.
+/// The `--stats-json` counters use it so a clone of a large environment
+/// counts by its size rather than as one unit.
+pub(crate) trait StateSize {
+    fn state_size(&self) -> usize;
+}
+
+impl<K, V> StateSize for HashMap<K, V> {
+    fn state_size(&self) -> usize {
+        self.len()
+    }
+}
+
+impl<T> StateSize for BTreeSet<T> {
+    fn state_size(&self) -> usize {
+        self.len()
+    }
+}
+
+fn run_operations<S: Clone + StateSize>(
     operations: &[Operation],
     loops: &[LoopNode],
     state: &mut S,
@@ -408,7 +427,7 @@ struct OperationWalk<'o, 'v, S> {
     settled: Vec<Option<S>>,
 }
 
-impl<S: Clone> OperationWalk<'_, '_, S> {
+impl<S: Clone + StateSize> OperationWalk<'_, '_, S> {
     fn run(&mut self, start: usize, end: usize, loops: &[LoopNode], state: &mut S, emit: bool) {
         let mut next = start;
         for node in loops {
@@ -435,18 +454,18 @@ impl<S: Clone> OperationWalk<'_, '_, S> {
         }
         while !settled {
             stats::record_loop_walks(self.pass, 1);
-            stats::record_state_clones(self.pass, 1);
+            stats::record_state_entries_cloned(self.pass, state.state_size() as u64);
             let mut body = state.clone();
             self.run(node.start, node.end, &node.children, &mut body, false);
             settled = !(self.join)(state, &body);
         }
         if emit {
             stats::record_loop_walks(self.pass, 1);
-            stats::record_state_clones(self.pass, 1);
+            stats::record_state_entries_cloned(self.pass, state.state_size() as u64);
             let mut body = state.clone();
             self.run(node.start, node.end, &node.children, &mut body, true);
         }
-        stats::record_state_clones(self.pass, 1);
+        stats::record_state_entries_cloned(self.pass, state.state_size() as u64);
         self.settled[node.index] = Some(state.clone());
     }
 }
@@ -11347,6 +11366,9 @@ fn join_abstract_env(
     head: &mut HashMap<String, BTreeSet<AbstractOrigin>>,
     body: &HashMap<String, BTreeSet<AbstractOrigin>>,
 ) -> bool {
+    stats::work()
+        .join_entries_visited_summary
+        .fetch_add(body.len() as u64, std::sync::atomic::Ordering::Relaxed);
     let mut changed = false;
     for (name, origins) in body {
         if origins.is_empty() {
@@ -11368,6 +11390,9 @@ fn join_concrete_env(
     head: &mut HashMap<String, ConcreteTaint>,
     body: &HashMap<String, ConcreteTaint>,
 ) -> bool {
+    stats::work()
+        .join_entries_visited_concrete
+        .fetch_add(body.len() as u64, std::sync::atomic::Ordering::Relaxed);
     let mut changed = false;
     for (name, taint) in body {
         for path in &taint.paths {

@@ -53,10 +53,10 @@ impl AnalysisPass {
         counter.fetch_add(amount, Ordering::Relaxed);
     }
 
-    fn add_state_clones(&self, amount: u64) {
+    fn add_state_entries_cloned(&self, amount: u64) {
         let counter = match self {
-            Self::Summary => &work().state_clones_summary,
-            Self::Concrete => &work().state_clones_concrete,
+            Self::Summary => &work().state_entries_cloned_summary,
+            Self::Concrete => &work().state_entries_cloned_concrete,
         };
         counter.fetch_add(amount, Ordering::Relaxed);
     }
@@ -75,10 +75,11 @@ pub(crate) fn record_env_scan(pass: AnalysisPass, entries_visited: u64) {
     pass.add_env_scan_entries(entries_visited);
 }
 
-/// Records whole analysis states cloned for `pass`: the per-trip body copy, the
-/// emitting body copy, and the settled head stored for the next entry.
-pub(crate) fn record_state_clones(pass: AnalysisPass, amount: u64) {
-    pass.add_state_clones(amount);
+/// Records the entry count of every whole-state clone made for `pass`: the
+/// per-trip body copy, the emitting body copy, and the settled head stored
+/// for the next entry.
+pub(crate) fn record_state_entries_cloned(pass: AnalysisPass, entries_cloned: u64) {
+    pass.add_state_entries_cloned(entries_cloned);
 }
 
 /// The work one analysis run did, in relaxed atomics.
@@ -105,10 +106,18 @@ pub struct WorkCounters {
     pub env_scan_entries_summary: AtomicU64,
     /// Same, for the concrete taint pass.
     pub env_scan_entries_concrete: AtomicU64,
-    /// Whole analysis states cloned in the summary pass.
-    pub state_clones_summary: AtomicU64,
+    /// Entries of the analysis states copied in the summary pass: every
+    /// whole-state clone adds its entry count, so a clone of a large
+    /// environment costs what it costs rather than counting as one.
+    pub state_entries_cloned_summary: AtomicU64,
     /// Same, for the concrete taint pass.
-    pub state_clones_concrete: AtomicU64,
+    pub state_entries_cloned_concrete: AtomicU64,
+    /// Environment entries the loop-head joins visited in the summary pass:
+    /// the join folds a trip's final state into the head, and today that
+    /// means walking every entry of the body state.
+    pub join_entries_visited_summary: AtomicU64,
+    /// Same, for the concrete taint pass.
+    pub join_entries_visited_concrete: AtomicU64,
 }
 
 static WORK: WorkCounters = WorkCounters {
@@ -122,8 +131,10 @@ static WORK: WorkCounters = WorkCounters {
     find_sink_pattern_calls: AtomicU64::new(0),
     env_scan_entries_summary: AtomicU64::new(0),
     env_scan_entries_concrete: AtomicU64::new(0),
-    state_clones_summary: AtomicU64::new(0),
-    state_clones_concrete: AtomicU64::new(0),
+    state_entries_cloned_summary: AtomicU64::new(0),
+    state_entries_cloned_concrete: AtomicU64::new(0),
+    join_entries_visited_summary: AtomicU64::new(0),
+    join_entries_visited_concrete: AtomicU64::new(0),
 };
 
 /// The run's counters.
@@ -205,8 +216,10 @@ pub fn snapshot_value() -> serde_json::Value {
             "find_sink_pattern_calls": load(&counters.find_sink_pattern_calls),
             "env_scan_entries_summary": load(&counters.env_scan_entries_summary),
             "env_scan_entries_concrete": load(&counters.env_scan_entries_concrete),
-            "state_clones_summary": load(&counters.state_clones_summary),
-            "state_clones_concrete": load(&counters.state_clones_concrete),
+            "state_entries_cloned_summary": load(&counters.state_entries_cloned_summary),
+            "state_entries_cloned_concrete": load(&counters.state_entries_cloned_concrete),
+            "join_entries_visited_summary": load(&counters.join_entries_visited_summary),
+            "join_entries_visited_concrete": load(&counters.join_entries_visited_concrete),
         },
         "phase_seconds": phases,
         "compiler": compiler,
