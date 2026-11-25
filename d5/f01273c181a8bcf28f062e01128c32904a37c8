@@ -1,0 +1,29 @@
+thirdparty/rusi/scripts/eval/run.py
+  s_1713225a3bc1ee::t_6709132460106b 688-696,699
+  s_1713225a3bc1ee::t_c8a184ad17a602 882-891
+  s_1713225a3bc1ee::t_a1931060af006b 247-254
+  s_1713225a3bc1ee::t_aa5f5e659d1ab4 198,215-216,233,237-244
+  s_1713225a3bc1ee::t_3dfdcd44a03f4a 514-515,518,539,547-549,557
+  s_1713225a3bc1ee::t_b6fd2f83ff7315 765-767,772-773
+  s_1713225a3bc1ee::t_3ec94b230ab000 634-687,697-698,700-708
+  s_1713225a3bc1ee::t_317becc4f52c9f 768-771
+  s_1713225a3bc1ee::t_a87b63256cb10b 550-552
+  s_1713225a3bc1ee::t_e52ae15a63c5e4 245-246
+  s_1713225a3bc1ee::t_35c6172a913e4a 764
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d5f01273c181a8bcf28f062e01128c32904a37c8",
+  "prompts": {},
+  "sessions": {
+    "s_1713225a3bc1ee": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_381088a8-962a-49b5-94f2-d6ee00d987ec",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
