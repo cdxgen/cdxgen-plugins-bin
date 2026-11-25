@@ -41,12 +41,81 @@ pub struct FilterState {
     pub component_type: Option<String>,
 }
 
+/// The display fields a sort or a search matches on, lowercased once when
+/// the row is built. Sorting used to lowercase both sides of every
+/// comparison, about 2n log n small allocations per sort, and a search
+/// re-lowercased every row on every keystroke.
+#[derive(Debug, Clone, Default)]
+pub struct ComponentKeys {
+    pub name: String,
+    pub component_type: String,
+    pub version: String,
+    pub purl: String,
+    pub license: String,
+    /// Every field a search matches, lowercased and joined with a separator
+    /// that cannot appear in a query, so a query cannot match across a
+    /// field boundary.
+    pub search_text: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct ComponentRow {
     pub component: Component,
+    pub keys: ComponentKeys,
+    /// The row's vulnerability count and highest severity, resolved once
+    /// when the vuln aggregates change. The vuln sorts used to look the
+    /// summary up on both sides of every comparison, building the purl key
+    /// variants each time.
+    pub vuln_count: usize,
+    pub vuln_max_severity: u8,
 }
 
+/// The field separator for a row's search text. It cannot appear in a
+/// query typed into the search bar, so a query cannot match across a
+/// field boundary the way a plain join would allow.
+const SEARCH_SEPARATOR: char = '\0';
+
 impl ComponentRow {
+    pub fn new(component: Component) -> Self {
+        let mut row = Self {
+            component,
+            keys: ComponentKeys::default(),
+            vuln_count: 0,
+            vuln_max_severity: 0,
+        };
+        row.refresh_keys();
+        row
+    }
+
+    /// Recomputes the precomputed keys after the component changed, as
+    /// property merging across BOM files may do.
+    pub fn refresh_keys(&mut self) {
+        let license = self.license_display();
+        let group = self.component.group.as_deref().unwrap_or("");
+        let crypto = self.crypto_algorithm().unwrap_or_default();
+        let lower = |s: &str| s.to_lowercase();
+        self.keys = ComponentKeys {
+            name: lower(self.name_display()),
+            component_type: lower(self.type_display()),
+            version: lower(self.version_display()),
+            purl: lower(self.purl_display()),
+            license: lower(&license),
+            search_text: [
+                self.name_display(),
+                self.type_display(),
+                self.version_display(),
+                self.purl_display(),
+                &license,
+                self.bom_ref_display(),
+                self.description_display(),
+                group,
+                &crypto,
+            ]
+            .map(lower)
+            .join(&SEARCH_SEPARATOR.to_string()),
+        };
+    }
+
     pub fn type_display(&self) -> &str {
         &self.component.component_type
     }
@@ -94,39 +163,50 @@ impl ComponentRow {
         })
     }
 
-    pub fn matches_query(&self, query: &str) -> bool {
-        if query.is_empty() {
-            return true;
-        }
-        let q = query.to_lowercase();
-        self.name_display().to_lowercase().contains(&q)
-            || self.type_display().to_lowercase().contains(&q)
-            || self.version_display().to_lowercase().contains(&q)
-            || self.purl_display().to_lowercase().contains(&q)
-            || self.license_display().to_lowercase().contains(&q)
-            || self.bom_ref_display().to_lowercase().contains(&q)
-            || self.description_display().to_lowercase().contains(&q)
-            || self
-                .component
-                .group
-                .as_deref()
-                .unwrap_or("")
-                .to_lowercase()
-                .contains(&q)
-            || self
-                .crypto_algorithm()
-                .unwrap_or_default()
-                .to_lowercase()
-                .contains(&q)
+    /// The query, already lowercased: the rebuild path lowercases it once
+    /// instead of once per row.
+    fn matches_lowercased(&self, query_lower: &str) -> bool {
+        self.keys.search_text.contains(query_lower)
     }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ServiceKeys {
+    pub search_text: String,
 }
 
 #[derive(Debug, Clone)]
 pub struct ServiceRow {
     pub service: Service,
+    pub keys: ServiceKeys,
 }
 
 impl ServiceRow {
+    pub fn new(service: Service) -> Self {
+        let mut row = Self {
+            service,
+            keys: ServiceKeys::default(),
+        };
+        row.refresh_keys();
+        row
+    }
+
+    pub fn refresh_keys(&mut self) {
+        let endpoints = self.endpoints_display();
+        let description = self.description_display();
+        let lower = |s: &str| s.to_lowercase();
+        self.keys = ServiceKeys {
+            search_text: [
+                self.name_display(),
+                &endpoints,
+                description,
+                self.bom_ref_display(),
+            ]
+            .map(lower)
+            .join(&SEARCH_SEPARATOR.to_string()),
+        };
+    }
+
     pub fn name_display(&self) -> &str {
         self.service.name.as_deref().unwrap_or("-")
     }
@@ -155,15 +235,10 @@ impl ServiceRow {
         self.service.bom_ref.as_deref().unwrap_or("-")
     }
 
-    pub fn matches_query(&self, query: &str) -> bool {
-        if query.is_empty() {
-            return true;
-        }
-        let q = query.to_lowercase();
-        self.name_display().to_lowercase().contains(&q)
-            || self.endpoints_display().to_lowercase().contains(&q)
-            || self.description_display().to_lowercase().contains(&q)
-            || self.bom_ref_display().to_lowercase().contains(&q)
+    /// The query, already lowercased: the rebuild path lowercases it once
+    /// instead of once per row.
+    fn matches_lowercased(&self, query_lower: &str) -> bool {
+        self.keys.search_text.contains(query_lower)
     }
 }
 
@@ -268,9 +343,78 @@ fn purl_index_keys(purl: &str) -> Vec<String> {
 #[derive(Debug, Clone)]
 pub struct VulnerabilityRow {
     pub vuln: Vulnerability,
+    /// The values the sorts compare and the search matches, computed once
+    /// when the row is built: the severity and score parse, the insight
+    /// labels are scanned, and the display fields were lowercased per
+    /// comparison before this cache existed.
+    pub keys: VulnKeys,
+}
+
+#[derive(Debug, Clone)]
+pub struct VulnKeys {
+    pub id: String,
+    pub package: String,
+    pub severity_rank: u8,
+    pub max_score: f64,
+    pub prioritized: bool,
+    /// `any_reachability` plus `is_endpoint_reachable`, the value the
+    /// Reach sort compares.
+    pub reach: u8,
+    pub fix: String,
+    pub search_text: String,
 }
 
 impl VulnerabilityRow {
+    pub fn new(vuln: Vulnerability) -> Self {
+        let mut row = Self {
+            vuln,
+            keys: VulnKeys {
+                id: String::new(),
+                package: String::new(),
+                severity_rank: 0,
+                max_score: 0.0,
+                prioritized: false,
+                reach: 0,
+                fix: String::new(),
+                search_text: String::new(),
+            },
+        };
+        row.refresh_keys();
+        row
+    }
+
+    pub fn refresh_keys(&mut self) {
+        let package = self.package_name();
+        let description = self.vuln.description.as_deref().unwrap_or("");
+        let labels = self.insight_labels();
+        let lower = |s: &str| s.to_lowercase();
+        let mut lowered = String::new();
+        for part in [
+            self.id_display(),
+            package.as_str(),
+            self.severity(),
+            self.bom_ref_display(),
+            description,
+        ] {
+            lowered.push_str(&lower(part));
+            lowered.push(SEARCH_SEPARATOR);
+        }
+        for label in &labels {
+            lowered.push_str(&lower(label));
+            lowered.push(SEARCH_SEPARATOR);
+        }
+        self.keys = VulnKeys {
+            id: lower(self.id_display()),
+            package: lower(&package),
+            severity_rank: self.severity_rank(),
+            max_score: self.max_score(),
+            prioritized: self.is_prioritized(),
+            reach: self.any_reachability() as u8 + self.is_endpoint_reachable() as u8,
+            fix: self.fix_version(),
+            search_text: lowered,
+        };
+    }
+
     pub fn id_display(&self) -> &str {
         self.vuln.id.as_deref().unwrap_or("-")
     }
@@ -440,26 +584,21 @@ impl VulnerabilityRow {
         })
     }
 
-    pub fn matches_query(&self, query: &str) -> bool {
-        if query.is_empty() {
-            return true;
+    /// The query, already lowercased: the rebuild path lowercases it once
+    /// instead of once per row.
+    fn matches_lowercased(&self, query_lower: &str) -> bool {
+        self.keys.search_text.contains(query_lower)
+    }
+
+    /// The vuln quick-filter test, shared by the rebuild paths.
+    pub fn passes_vuln_filter(&self, filter: VulnFilter) -> bool {
+        match filter {
+            VulnFilter::All => true,
+            VulnFilter::Prioritized => self.is_prioritized(),
+            VulnFilter::Reachable => self.any_reachability(),
+            VulnFilter::Exploitable => self.is_exploitable(),
+            VulnFilter::CriticalHigh => self.severity_rank() >= 3,
         }
-        let q = query.to_lowercase();
-        self.id_display().to_lowercase().contains(&q)
-            || self.package_name().to_lowercase().contains(&q)
-            || self.severity().to_lowercase().contains(&q)
-            || self.bom_ref_display().to_lowercase().contains(&q)
-            || self
-                .insight_labels()
-                .iter()
-                .any(|l| l.to_lowercase().contains(&q))
-            || self
-                .vuln
-                .description
-                .as_deref()
-                .unwrap_or("")
-                .to_lowercase()
-                .contains(&q)
     }
 }
 
@@ -597,6 +736,16 @@ fn summary_for_purl<'a>(
     None
 }
 
+/// What the last filtered rebuild ran against, so extending a query
+/// filters only the rows that matched it instead of every row. `None`
+/// after the rows changed, when only a full rebuild is correct.
+#[derive(Debug, Clone)]
+struct LastSearch {
+    query_lower: String,
+    component_type: Option<String>,
+    vuln_filter: VulnFilter,
+}
+
 #[derive(Debug, Clone)]
 pub struct BomStore {
     pub bom_files: Vec<BomFile>,
@@ -622,6 +771,7 @@ pub struct BomStore {
     pub vuln_by_purl: HashMap<String, PurlVulnSummary>,
     pub security_summary: SecuritySummary,
     pub loaded: bool,
+    last_search: Option<LastSearch>,
 }
 
 impl BomStore {
@@ -650,6 +800,7 @@ impl BomStore {
             vuln_by_purl: HashMap::new(),
             security_summary: SecuritySummary::default(),
             loaded: false,
+            last_search: None,
         }
     }
 
@@ -767,8 +918,15 @@ impl BomStore {
         self.crypto_assets = crypto_merged;
         self.total_components = self.components.len();
         self.total_crypto = self.crypto_assets.len();
-        // Components changed by dedup; refresh the vuln aggregates (vulnerable
-        // component count depends on the merged component list).
+        // Property merging may have changed any display field a sort or a
+        // search matches on, and the rows changed for the filtered sets.
+        for row in &mut self.components {
+            row.refresh_keys();
+        }
+        self.last_search = None;
+        // Refresh the vuln aggregates (vulnerable component count depends
+        // on the merged component list); they also refill the per-row
+        // vulnerability numbers the sorts read.
         self.compute_vuln_aggregates();
         self.rebuild_filtered_indices();
     }
@@ -778,9 +936,7 @@ impl BomStore {
 
         if let Some(ref components) = bom.components {
             for component in components.iter() {
-                let row = ComponentRow {
-                    component: component.clone(),
-                };
+                let row = ComponentRow::new(component.clone());
                 if component.component_type == "cryptographic-asset" {
                     self.crypto_assets.push(self.components.len());
                 }
@@ -790,9 +946,7 @@ impl BomStore {
 
         if let Some(ref services) = bom.services {
             for service in services.iter() {
-                let row = ServiceRow {
-                    service: service.clone(),
-                };
+                let row = ServiceRow::new(service.clone());
                 self.services.push(row);
             }
         }
@@ -824,11 +978,13 @@ impl BomStore {
                 if existing.contains(&key) {
                     continue;
                 }
-                self.vulnerabilities
-                    .push(VulnerabilityRow { vuln: v.clone() });
+                self.vulnerabilities.push(VulnerabilityRow::new(v.clone()));
             }
         }
         self.total_vulnerabilities = self.vulnerabilities.len();
+        // The rows changed, so the previous filtered sets no longer answer
+        // an extended query.
+        self.last_search = None;
         self.compute_vuln_aggregates();
     }
 
@@ -939,6 +1095,28 @@ impl BomStore {
             .map(|s| (s.display_name.clone(), (*s).clone()))
             .collect();
 
+        // Resolve each component's summary once, so the vuln sorts read two
+        // numbers per row instead of rebuilding the purl key variants on
+        // both sides of every comparison.
+        let resolved: Vec<(usize, u8)> = self
+            .components
+            .iter()
+            .map(|row| {
+                let key = row
+                    .component
+                    .purl
+                    .as_deref()
+                    .or(row.component.bom_ref.as_deref())
+                    .unwrap_or("");
+                summary_for_purl(&self.vuln_by_purl, key)
+                    .map_or((0usize, 0u8), |s| (s.count, s.max_severity_rank))
+            })
+            .collect();
+        for (row, (count, rank)) in self.components.iter_mut().zip(resolved) {
+            row.vuln_count = count;
+            row.vuln_max_severity = rank;
+        }
+
         self.security_summary = summary;
     }
 
@@ -965,164 +1143,122 @@ impl BomStore {
     }
 
     fn rebuild_filtered_indices(&mut self) {
-        self.filtered_component_indices = self
-            .components
-            .iter()
-            .enumerate()
-            .filter(|(_, row)| {
-                let query_match = row.matches_query(&self.current_filter.query);
-                let type_match = self
-                    .current_filter
-                    .component_type
-                    .as_ref()
-                    .map(|t| row.component.component_type == *t)
-                    .unwrap_or(true);
-                query_match && type_match
-            })
-            .map(|(i, _)| i)
-            .collect();
+        let query_lower = self.current_filter.query.to_lowercase();
+        let type_unchanged = self
+            .last_search
+            .as_ref()
+            .is_some_and(|prev| prev.component_type == self.current_filter.component_type);
+        let vuln_filter_unchanged = self
+            .last_search
+            .as_ref()
+            .is_some_and(|prev| prev.vuln_filter == self.vuln_filter);
+        // Extending a query keeps every match it had: a row matching a
+        // longer query matches the prefix it extends, so only the rows the
+        // previous rebuild kept can still match.
+        let query_extends = self
+            .last_search
+            .as_ref()
+            .is_some_and(|prev| query_lower.starts_with(&prev.query_lower));
+        let extend = query_extends && type_unchanged && !query_lower.is_empty();
+        let extend_vulns = query_extends && vuln_filter_unchanged && !query_lower.is_empty();
 
-        self.filtered_service_indices = self
-            .services
-            .iter()
-            .enumerate()
-            .filter(|(_, row)| row.matches_query(&self.current_filter.query))
-            .map(|(i, _)| i)
-            .collect();
+        if extend {
+            let components = &self.components;
+            let services = &self.services;
+            self.filtered_component_indices
+                .retain(|&i| components[i].matches_lowercased(&query_lower));
+            self.filtered_service_indices
+                .retain(|&i| services[i].matches_lowercased(&query_lower));
+        } else if query_lower.is_empty() {
+            // Everything matches the other filters.
+            self.filtered_component_indices = (0..self.components.len())
+                .filter(|&i| self.component_passes_type_filter(i))
+                .collect();
+            self.filtered_service_indices = (0..self.services.len()).collect();
+            self.filtered_vulnerability_indices = (0..self.vulnerabilities.len())
+                .filter(|&i| self.vulnerabilities[i].passes_vuln_filter(self.vuln_filter))
+                .collect();
+        } else {
+            self.filtered_component_indices = self
+                .components
+                .iter()
+                .enumerate()
+                .filter(|(_, row)| {
+                    let type_match = self
+                        .current_filter
+                        .component_type
+                        .as_ref()
+                        .map(|t| row.component.component_type == *t)
+                        .unwrap_or(true);
+                    type_match && row.matches_lowercased(&query_lower)
+                })
+                .map(|(i, _)| i)
+                .collect();
 
-        self.filtered_vulnerability_indices = self
-            .vulnerabilities
-            .iter()
-            .enumerate()
-            .filter(|(_, row)| {
-                let query_match = row.matches_query(&self.current_filter.query);
-                let filter_match = match self.vuln_filter {
-                    VulnFilter::All => true,
-                    VulnFilter::Prioritized => row.is_prioritized(),
-                    VulnFilter::Reachable => row.any_reachability(),
-                    VulnFilter::Exploitable => row.is_exploitable(),
-                    VulnFilter::CriticalHigh => row.severity_rank() >= 3,
-                };
-                query_match && filter_match
-            })
-            .map(|(i, _)| i)
-            .collect();
+            self.filtered_service_indices = self
+                .services
+                .iter()
+                .enumerate()
+                .filter(|(_, row)| row.matches_lowercased(&query_lower))
+                .map(|(i, _)| i)
+                .collect();
+        }
+
+        if extend_vulns && !query_lower.is_empty() {
+            let vulnerabilities = &self.vulnerabilities;
+            self.filtered_vulnerability_indices
+                .retain(|&i| vulnerabilities[i].matches_lowercased(&query_lower));
+        } else if !query_lower.is_empty() {
+            self.filtered_vulnerability_indices = self
+                .vulnerabilities
+                .iter()
+                .enumerate()
+                .filter(|(_, row)| {
+                    row.matches_lowercased(&query_lower) && row.passes_vuln_filter(self.vuln_filter)
+                })
+                .map(|(i, _)| i)
+                .collect();
+        }
+
+        self.last_search = Some(LastSearch {
+            query_lower,
+            component_type: self.current_filter.component_type.clone(),
+            vuln_filter: self.vuln_filter,
+        });
 
         self.sort_filtered();
         self.sort_vulnerabilities();
     }
 
+    fn component_passes_type_filter(&self, index: usize) -> bool {
+        self.current_filter
+            .component_type
+            .as_ref()
+            .map(|t| self.components[index].component.component_type == *t)
+            .unwrap_or(true)
+    }
+
     pub fn sort_filtered(&mut self) {
-        match self.sort_field {
-            SortField::Name => {
-                self.filtered_component_indices.sort_by(|a, b| {
-                    let cmp = self.components[*a]
-                        .name_display()
-                        .to_lowercase()
-                        .cmp(&self.components[*b].name_display().to_lowercase());
-                    match self.sort_order {
-                        SortOrder::Ascending => cmp,
-                        SortOrder::Descending => cmp.reverse(),
-                    }
-                });
+        // Every key was lowercased when the row was built, so a sort of n
+        // rows compares instead of allocating 2n log n strings.
+        let order = self.sort_order;
+        let components = &self.components;
+        self.filtered_component_indices.sort_by(|a, b| {
+            let (a, b) = (&components[*a], &components[*b]);
+            let cmp = match self.sort_field {
+                SortField::Name => a.keys.name.cmp(&b.keys.name),
+                SortField::Type => a.keys.component_type.cmp(&b.keys.component_type),
+                SortField::Version => a.keys.version.cmp(&b.keys.version),
+                SortField::Purl => a.keys.purl.cmp(&b.keys.purl),
+                SortField::License => a.keys.license.cmp(&b.keys.license),
+                SortField::VulnCount => b.vuln_count.cmp(&a.vuln_count),
+                SortField::MaxSeverity => b.vuln_max_severity.cmp(&a.vuln_max_severity),
+            };
+            match order {
+                SortOrder::Ascending => cmp,
+                SortOrder::Descending => cmp.reverse(),
             }
-            SortField::Type => {
-                self.filtered_component_indices.sort_by(|a, b| {
-                    let cmp = self.components[*a]
-                        .type_display()
-                        .to_lowercase()
-                        .cmp(&self.components[*b].type_display().to_lowercase());
-                    match self.sort_order {
-                        SortOrder::Ascending => cmp,
-                        SortOrder::Descending => cmp.reverse(),
-                    }
-                });
-            }
-            SortField::Version => {
-                self.filtered_component_indices.sort_by(|a, b| {
-                    let cmp = self.components[*a]
-                        .version_display()
-                        .to_lowercase()
-                        .cmp(&self.components[*b].version_display().to_lowercase());
-                    match self.sort_order {
-                        SortOrder::Ascending => cmp,
-                        SortOrder::Descending => cmp.reverse(),
-                    }
-                });
-            }
-            SortField::Purl => {
-                self.filtered_component_indices.sort_by(|a, b| {
-                    let cmp = self.components[*a]
-                        .purl_display()
-                        .to_lowercase()
-                        .cmp(&self.components[*b].purl_display().to_lowercase());
-                    match self.sort_order {
-                        SortOrder::Ascending => cmp,
-                        SortOrder::Descending => cmp.reverse(),
-                    }
-                });
-            }
-            SortField::License => {
-                self.filtered_component_indices.sort_by(|a, b| {
-                    let cmp = self.components[*a]
-                        .license_display()
-                        .to_lowercase()
-                        .cmp(&self.components[*b].license_display().to_lowercase());
-                    match self.sort_order {
-                        SortOrder::Ascending => cmp,
-                        SortOrder::Descending => cmp.reverse(),
-                    }
-                });
-            }
-            SortField::VulnCount => {
-                let map = &self.vuln_by_purl;
-                self.filtered_component_indices.sort_by(|a, b| {
-                    let ca = self.components[*a]
-                        .component
-                        .purl
-                        .as_deref()
-                        .or_else(|| self.components[*a].component.bom_ref.as_deref())
-                        .and_then(|p| summary_for_purl(map, p))
-                        .map_or(0usize, |s| s.count);
-                    let cb = self.components[*b]
-                        .component
-                        .purl
-                        .as_deref()
-                        .or_else(|| self.components[*b].component.bom_ref.as_deref())
-                        .and_then(|p| summary_for_purl(map, p))
-                        .map_or(0usize, |s| s.count);
-                    let cmp = cb.cmp(&ca);
-                    match self.sort_order {
-                        SortOrder::Ascending => cmp,
-                        SortOrder::Descending => cmp.reverse(),
-                    }
-                });
-            }
-            SortField::MaxSeverity => {
-                let map = &self.vuln_by_purl;
-                self.filtered_component_indices.sort_by(|a, b| {
-                    let ra = self.components[*a]
-                        .component
-                        .purl
-                        .as_deref()
-                        .or_else(|| self.components[*a].component.bom_ref.as_deref())
-                        .and_then(|p| summary_for_purl(map, p))
-                        .map_or(0u8, |s| s.max_severity_rank);
-                    let rb = self.components[*b]
-                        .component
-                        .purl
-                        .as_deref()
-                        .or_else(|| self.components[*b].component.bom_ref.as_deref())
-                        .and_then(|p| summary_for_purl(map, p))
-                        .map_or(0u8, |s| s.max_severity_rank);
-                    let cmp = rb.cmp(&ra);
-                    match self.sort_order {
-                        SortOrder::Ascending => cmp,
-                        SortOrder::Descending => cmp.reverse(),
-                    }
-                });
-            }
-        }
+        });
     }
 
     pub fn cycle_sort(&mut self) {
@@ -1157,37 +1293,31 @@ impl BomStore {
         self.filtered_vulnerability_indices.sort_by(|a, b| {
             let ra = &self.vulnerabilities[*a];
             let rb = &self.vulnerabilities[*b];
-            // Default tie-breakers always applied in this order.
+            // Default tie-breakers always applied in this order; every value
+            // was parsed and lowercased when the row was built.
             let base = ra
-                .is_prioritized()
-                .cmp(&rb.is_prioritized())
-                .then_with(|| rb.severity_rank().cmp(&ra.severity_rank()))
+                .keys
+                .prioritized
+                .cmp(&rb.keys.prioritized)
+                .then_with(|| rb.keys.severity_rank.cmp(&ra.keys.severity_rank))
                 .then_with(|| {
-                    rb.max_score()
-                        .partial_cmp(&ra.max_score())
+                    rb.keys
+                        .max_score
+                        .partial_cmp(&ra.keys.max_score)
                         .unwrap_or(std::cmp::Ordering::Equal)
                 });
             let primary = match field {
-                VulnSortField::Priority => ra.is_prioritized().cmp(&rb.is_prioritized()),
-                VulnSortField::Id => ra
-                    .id_display()
-                    .to_lowercase()
-                    .cmp(&rb.id_display().to_lowercase()),
-                VulnSortField::Severity => rb.severity_rank().cmp(&ra.severity_rank()),
+                VulnSortField::Priority => ra.keys.prioritized.cmp(&rb.keys.prioritized),
+                VulnSortField::Id => ra.keys.id.cmp(&rb.keys.id),
+                VulnSortField::Severity => rb.keys.severity_rank.cmp(&ra.keys.severity_rank),
                 VulnSortField::Score => rb
-                    .max_score()
-                    .partial_cmp(&ra.max_score())
+                    .keys
+                    .max_score
+                    .partial_cmp(&ra.keys.max_score)
                     .unwrap_or(std::cmp::Ordering::Equal),
-                VulnSortField::Reach => {
-                    let av = ra.any_reachability() as u8 + (ra.is_endpoint_reachable() as u8);
-                    let bv = rb.any_reachability() as u8 + (rb.is_endpoint_reachable() as u8);
-                    bv.cmp(&av)
-                }
-                VulnSortField::Package => ra
-                    .package_name()
-                    .to_lowercase()
-                    .cmp(&rb.package_name().to_lowercase()),
-                VulnSortField::Fix => ra.fix_version().cmp(&rb.fix_version()),
+                VulnSortField::Reach => rb.keys.reach.cmp(&ra.keys.reach),
+                VulnSortField::Package => ra.keys.package.cmp(&rb.keys.package),
+                VulnSortField::Fix => ra.keys.fix.cmp(&rb.keys.fix),
             };
 
             match field {
@@ -2144,4 +2274,503 @@ mod tests {
         assert_eq!(strip_rich("clean text"), "clean text");
         assert_eq!(strip_rich("Endpoint-Reachable"), "Endpoint-Reachable");
     }
+
+    // ------------------------------------------------------------------
+    // Sort and search parity with the implementation this store replaced:
+    // the functions below are the old per-comparison lowercasing and the
+    // old full rebuild, kept so the precomputed keys have to reproduce
+    // their orders and their filtered sets exactly.
+    // ------------------------------------------------------------------
+
+    fn legacy_component_matches(row: &ComponentRow, query: &str) -> bool {
+        if query.is_empty() {
+            return true;
+        }
+        let q = query.to_lowercase();
+        row.name_display().to_lowercase().contains(&q)
+            || row.type_display().to_lowercase().contains(&q)
+            || row.version_display().to_lowercase().contains(&q)
+            || row.purl_display().to_lowercase().contains(&q)
+            || row.license_display().to_lowercase().contains(&q)
+            || row.bom_ref_display().to_lowercase().contains(&q)
+            || row.description_display().to_lowercase().contains(&q)
+            || row
+                .component
+                .group
+                .as_deref()
+                .unwrap_or("")
+                .to_lowercase()
+                .contains(&q)
+            || row
+                .crypto_algorithm()
+                .unwrap_or_default()
+                .to_lowercase()
+                .contains(&q)
+    }
+
+    fn legacy_service_matches(row: &ServiceRow, query: &str) -> bool {
+        if query.is_empty() {
+            return true;
+        }
+        let q = query.to_lowercase();
+        row.name_display().to_lowercase().contains(&q)
+            || row.endpoints_display().to_lowercase().contains(&q)
+            || row.description_display().to_lowercase().contains(&q)
+            || row.bom_ref_display().to_lowercase().contains(&q)
+    }
+
+    fn legacy_vuln_matches(row: &VulnerabilityRow, query: &str) -> bool {
+        if query.is_empty() {
+            return true;
+        }
+        let q = query.to_lowercase();
+        row.id_display().to_lowercase().contains(&q)
+            || row.package_name().to_lowercase().contains(&q)
+            || row.severity().to_lowercase().contains(&q)
+            || row.bom_ref_display().to_lowercase().contains(&q)
+            || row
+                .insight_labels()
+                .iter()
+                .any(|l| l.to_lowercase().contains(&q))
+            || row
+                .vuln
+                .description
+                .as_deref()
+                .unwrap_or("")
+                .to_lowercase()
+                .contains(&q)
+    }
+
+    /// The original component comparator.
+    fn legacy_component_cmp(
+        store: &BomStore,
+        a: usize,
+        b: usize,
+        field: SortField,
+    ) -> std::cmp::Ordering {
+        let ca = &store.components[a];
+        let cb = &store.components[b];
+        let map = &store.vuln_by_purl;
+
+        match field {
+            SortField::Name => ca
+                .name_display()
+                .to_lowercase()
+                .cmp(&cb.name_display().to_lowercase()),
+            SortField::Type => ca
+                .type_display()
+                .to_lowercase()
+                .cmp(&cb.type_display().to_lowercase()),
+            SortField::Version => ca
+                .version_display()
+                .to_lowercase()
+                .cmp(&cb.version_display().to_lowercase()),
+            SortField::Purl => ca
+                .purl_display()
+                .to_lowercase()
+                .cmp(&cb.purl_display().to_lowercase()),
+            SortField::License => ca
+                .license_display()
+                .to_lowercase()
+                .cmp(&cb.license_display().to_lowercase()),
+            SortField::VulnCount => {
+                let count = |row: &ComponentRow| {
+                    row.component
+                        .purl
+                        .as_deref()
+                        .or(row.component.bom_ref.as_deref())
+                        .and_then(|p| summary_for_purl(map, p))
+                        .map_or(0usize, |s| s.count)
+                };
+                count(cb).cmp(&count(ca))
+            }
+            SortField::MaxSeverity => {
+                let rank = |row: &ComponentRow| {
+                    row.component
+                        .purl
+                        .as_deref()
+                        .or(row.component.bom_ref.as_deref())
+                        .and_then(|p| summary_for_purl(map, p))
+                        .map_or(0u8, |s| s.max_severity_rank)
+                };
+                rank(cb).cmp(&rank(ca))
+            }
+        }
+    }
+
+    /// The original vulnerability comparator.
+    fn legacy_vuln_cmp(
+        store: &BomStore,
+        a: usize,
+        b: usize,
+        field: VulnSortField,
+    ) -> std::cmp::Ordering {
+        let ra = &store.vulnerabilities[a];
+        let rb = &store.vulnerabilities[b];
+        let base = ra
+            .is_prioritized()
+            .cmp(&rb.is_prioritized())
+            .then_with(|| rb.severity_rank().cmp(&ra.severity_rank()))
+            .then_with(|| {
+                rb.max_score()
+                    .partial_cmp(&ra.max_score())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+        let primary = match field {
+            VulnSortField::Priority => ra.is_prioritized().cmp(&rb.is_prioritized()),
+            VulnSortField::Id => ra
+                .id_display()
+                .to_lowercase()
+                .cmp(&rb.id_display().to_lowercase()),
+            VulnSortField::Severity => rb.severity_rank().cmp(&ra.severity_rank()),
+            VulnSortField::Score => rb
+                .max_score()
+                .partial_cmp(&ra.max_score())
+                .unwrap_or(std::cmp::Ordering::Equal),
+            VulnSortField::Reach => {
+                let av = ra.any_reachability() as u8 + (ra.is_endpoint_reachable() as u8);
+                let bv = rb.any_reachability() as u8 + (rb.is_endpoint_reachable() as u8);
+                bv.cmp(&av)
+            }
+            VulnSortField::Package => ra
+                .package_name()
+                .to_lowercase()
+                .cmp(&rb.package_name().to_lowercase()),
+            VulnSortField::Fix => ra.fix_version().cmp(&rb.fix_version()),
+        };
+        match field {
+            VulnSortField::Priority
+            | VulnSortField::Severity
+            | VulnSortField::Score
+            | VulnSortField::Reach => {
+                if store.vuln_sort_order == SortOrder::Ascending {
+                    primary.reverse().then(base)
+                } else {
+                    primary.then(base)
+                }
+            }
+            _ => {
+                if store.vuln_sort_order == SortOrder::Ascending {
+                    primary.then(base)
+                } else {
+                    primary.reverse().then(base)
+                }
+            }
+        }
+    }
+
+    /// The original full rebuild: every row, every time.
+    fn legacy_rebuild(store: &BomStore) -> (Vec<usize>, Vec<usize>, Vec<usize>) {
+        let components = (0..store.components.len())
+            .filter(|&i| {
+                legacy_component_matches(&store.components[i], &store.current_filter.query)
+                    && store
+                        .current_filter
+                        .component_type
+                        .as_ref()
+                        .map(|t| store.components[i].component.component_type == *t)
+                        .unwrap_or(true)
+            })
+            .collect::<Vec<_>>();
+        let services = (0..store.services.len())
+            .filter(|&i| legacy_service_matches(&store.services[i], &store.current_filter.query))
+            .collect::<Vec<_>>();
+        let vulns = (0..store.vulnerabilities.len())
+            .filter(|&i| {
+                legacy_vuln_matches(&store.vulnerabilities[i], &store.current_filter.query)
+                    && match store.vuln_filter {
+                        VulnFilter::All => true,
+                        VulnFilter::Prioritized => store.vulnerabilities[i].is_prioritized(),
+                        VulnFilter::Reachable => store.vulnerabilities[i].any_reachability(),
+                        VulnFilter::Exploitable => store.vulnerabilities[i].is_exploitable(),
+                        VulnFilter::CriticalHigh => store.vulnerabilities[i].severity_rank() >= 3,
+                    }
+            })
+            .collect::<Vec<_>>();
+        (components, services, vulns)
+    }
+
+    fn legacy_sort_components(store: &mut BomStore, mut indices: Vec<usize>) -> Vec<usize> {
+        let order = store.sort_order;
+        let field = store.sort_field;
+        indices.sort_by(|a, b| {
+            let cmp = legacy_component_cmp(store, *a, *b, field);
+            match order {
+                SortOrder::Ascending => cmp,
+                SortOrder::Descending => cmp.reverse(),
+            }
+        });
+        indices
+    }
+
+    fn legacy_sort_vulns(store: &mut BomStore, mut indices: Vec<usize>) -> Vec<usize> {
+        let field = store.vuln_sort_field;
+        indices.sort_by(|a, b| legacy_vuln_cmp(store, *a, *b, field));
+        indices
+    }
+
+    fn write_temp(json: &str) -> NamedTempFile {
+        let mut tmp = NamedTempFile::new().unwrap();
+        tmp.write_all(json.as_bytes()).unwrap();
+        tmp
+    }
+
+    /// A generated BOM with duplicate names, mixed case, and components
+    /// missing purls, licenses, and versions.
+    fn generated_bom_json(components: usize, vulns: usize) -> String {
+        let severities = ["none", "low", "medium", "high", "critical"];
+        let mut json = String::from(
+            r#"{"bomFormat":"CycloneDX","specVersion":"1.7","version":1,"components":["#,
+        );
+        for i in 0..components {
+            if i > 0 {
+                json.push(',');
+            }
+            // Duplicates: the same name-version pair recurs across the set.
+            let name = if i % 5 == 0 {
+                format!("Lib-{}", i % 977)
+            } else {
+                format!("lib{}", i)
+            };
+            let version = if i % 3 == 0 {
+                format!("1.0.{}", i % 7)
+            } else {
+                "2.3.4".to_string()
+            };
+            json.push_str(&format!(
+                r#"{{"type":"library","name":"{name}","version":"{version}""#
+            ));
+            if i % 7 != 0 {
+                json.push_str(&format!(r#","purl":"pkg:npm/{name}@{version}""#));
+            }
+            if i % 11 != 0 {
+                json.push_str(r#","licenses":[{"license":{"id":"MIT"}}]"#);
+            }
+            if i % 13 == 0 {
+                json.push_str(r#","group":"@Scope/GROUP""#);
+            }
+            if i % 17 == 0 {
+                json.push_str(r#","description":"a component used for Ünicode searching""#);
+            }
+            json.push('}');
+        }
+        json.push_str("],\"vulnerabilities\":[");
+        for i in 0..vulns {
+            if i > 0 {
+                json.push(',');
+            }
+            let target = i * 11 % components;
+            let name = if target.is_multiple_of(5) {
+                format!("Lib-{}", target % 977)
+            } else {
+                format!("lib{target}")
+            };
+            let severity = severities[i % severities.len()];
+            let score = (i % 11) as f64 / 2.0;
+            json.push_str(&format!(
+                r#"{{"id":"CVE-2025-{}","bom-ref":"vuln-{i}","ratings":[{{"severity":"{severity}","score":{score}}}],"affects":[{{"ref":"pkg:npm/{name}"}}]"#,
+                1000 + i
+            ));
+            let mut properties = Vec::new();
+            if i % 4 == 0 {
+                properties.push(r#"{"name":"depscan:prioritized","value":"true"}"#.to_string());
+            }
+            if i % 3 == 0 {
+                // dep-scan emits a literal backslash-n between insights.
+                properties.push(
+                    r#"{"name":"depscan:insights","value":"[green]Reachable[/green]\\nUsed in 3 locations"}"#
+                        .to_string(),
+                );
+            }
+            if !properties.is_empty() {
+                json.push_str(r#","properties":["#);
+                json.push_str(&properties.join(","));
+                json.push(']');
+            }
+            if i % 6 == 0 {
+                json.push_str(r#","description":"A vulnerability for Ünicode search""#);
+            }
+            json.push('}');
+        }
+        json.push_str("]}");
+        json
+    }
+
+    /// The store over every BOM in the repository's test directory, plus a
+    /// generated BOM with duplicates, mixed case, and missing fields.
+    fn parity_store() -> BomStore {
+        let mut store = BomStore::new();
+        let test_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("test");
+        let mut files = Vec::new();
+        collect_bom_files(&test_dir, &mut files);
+        files.sort();
+        for file in &files {
+            if let Err(error) = store.load_path(file) {
+                panic!("{} failed to load: {error:?}", file.display());
+            }
+        }
+        let generated = write_temp(&generated_bom_json(3_000, 300));
+        store.load_path(generated.path()).unwrap();
+        store
+    }
+
+    fn collect_bom_files(dir: &Path, out: &mut Vec<PathBuf>) {
+        let Ok(entries) = fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                collect_bom_files(&path, out);
+            } else if path
+                .extension()
+                .is_some_and(|ext| ext == "json" || ext == "cdx")
+            {
+                out.push(path);
+            }
+        }
+    }
+
+    /// Sorting by every field in both orders must produce exactly the order
+    /// the per-comparison lowercasing produced.
+    #[test]
+    fn sorts_match_the_legacy_comparators_on_every_bom() {
+        let mut store = parity_store();
+        assert!(store.total_components > 3_000, "corpus loaded");
+        assert!(store.total_vulnerabilities > 100, "vulns loaded");
+
+        for field in [
+            SortField::Type,
+            SortField::Name,
+            SortField::Version,
+            SortField::Purl,
+            SortField::License,
+            SortField::VulnCount,
+            SortField::MaxSeverity,
+        ] {
+            for order in [SortOrder::Ascending, SortOrder::Descending] {
+                let snapshot = store.filtered_component_indices.clone();
+                store.sort_field = field;
+                store.sort_order = order;
+                store.sort_filtered();
+                let expected = legacy_sort_components(&mut store, snapshot);
+                assert_eq!(
+                    store.filtered_component_indices, expected,
+                    "{field:?} {order:?}: component order diverged"
+                );
+            }
+        }
+
+        for field in [
+            VulnSortField::Priority,
+            VulnSortField::Id,
+            VulnSortField::Severity,
+            VulnSortField::Score,
+            VulnSortField::Reach,
+            VulnSortField::Package,
+            VulnSortField::Fix,
+        ] {
+            for order in [SortOrder::Ascending, SortOrder::Descending] {
+                let snapshot = store.filtered_vulnerability_indices.clone();
+                store.vuln_sort_field = field;
+                store.vuln_sort_order = order;
+                store.sort_vulnerabilities();
+                let expected = legacy_sort_vulns(&mut store, snapshot);
+                assert_eq!(
+                    store.filtered_vulnerability_indices, expected,
+                    "{field:?} {order:?}: vulnerability order diverged"
+                );
+            }
+        }
+    }
+
+    /// A typed sequence with extensions, backspaces, case changes, Unicode,
+    /// and filter switches must leave exactly the sets the full rebuild
+    /// produces, after every step.
+    #[test]
+    fn query_sequences_match_the_legacy_rebuild() {
+        let mut store = parity_store();
+
+        let steps: Vec<(&str, Step)> = vec![
+            ("empty", Step::Query("")),
+            ("one char", Step::Query("li")),
+            ("extend", Step::Query("lib")),
+            ("extend", Step::Query("lib1")),
+            ("backspace", Step::Query("lib")),
+            ("case change", Step::Query("LIB")),
+            ("unicode", Step::Query("ünicode")),
+            ("unicode case", Step::Query("ÜNICODE")),
+            ("no match", Step::Query("zzzz")),
+            ("back to prefix", Step::Query("")),
+            ("type filter", Step::Type(Some("library".to_string()))),
+            (
+                "type filter + query",
+                Step::QueryAndType("lib", Some("library".to_string())),
+            ),
+            ("clear type", Step::Type(None)),
+            ("vuln filter", Step::VulnFilter(VulnFilter::Reachable)),
+            ("vuln filter + query", Step::Query("reach")),
+            ("vuln filter cycle", Step::VulnFilter(VulnFilter::All)),
+        ];
+
+        for (label, step) in steps {
+            match step {
+                Step::Query(q) => store.search_components(q),
+                Step::Type(t) => store.set_type_filter(t),
+                Step::QueryAndType(q, t) => {
+                    store.current_filter.query = q.to_string();
+                    store.set_type_filter(t);
+                }
+                Step::VulnFilter(f) => store.set_vuln_filter(f),
+            }
+            let (components, services, vulns) = legacy_rebuild(&store);
+            // The store's sets are sorted; sort the legacy sets the same way
+            // so the comparison is on membership and order.
+            let expected_components = legacy_sort_components(&mut store, components);
+            assert_eq!(
+                store.filtered_component_indices, expected_components,
+                "{label}: component set diverged"
+            );
+            assert_eq!(
+                store.filtered_service_indices, services,
+                "{label}: service set diverged"
+            );
+            let expected_vulns = legacy_sort_vulns(&mut store, vulns);
+            assert_eq!(
+                store.filtered_vulnerability_indices, expected_vulns,
+                "{label}: vulnerability set diverged"
+            );
+        }
+    }
+
+    #[test]
+    fn empty_query_short_circuits_to_the_other_filters() {
+        let mut store = parity_store();
+        store.set_type_filter(Some("library".to_string()));
+        assert_eq!(
+            store.filtered_component_indices.len(),
+            store
+                .components
+                .iter()
+                .filter(|row| row.component.component_type == "library")
+                .count()
+        );
+        store.set_vuln_filter(VulnFilter::CriticalHigh);
+        assert_eq!(
+            store.filtered_vulnerability_indices.len(),
+            store
+                .vulnerabilities
+                .iter()
+                .filter(|row| row.severity_rank() >= 3)
+                .count()
+        );
+    }
+
+    enum Step {
+        Query(&'static str),
+        Type(Option<String>),
+        QueryAndType(&'static str, Option<String>),
+        VulnFilter(VulnFilter),
+    }
+
 }
