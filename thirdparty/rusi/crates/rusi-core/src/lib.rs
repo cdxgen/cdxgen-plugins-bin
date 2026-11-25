@@ -343,44 +343,17 @@ fn loop_forest(regions: &[LoopRegion]) -> Vec<LoopNode> {
     roots
 }
 
-/// Runs `visit` over `operations` in order, iterating every loop to a
-/// fixpoint, and then once more over the fixpoint to emit what it finds.
-///
-/// A loop is walked from the state at its head; `join` then folds the state
-/// the walk ends in back into the head and reports whether that added
-/// anything, and if it did the loop is walked again from the grown head.
-/// Once a walk adds nothing, the head is also the state after the loop: a
-/// loop may run any number of times, so what holds after it is what holds at
-/// its head.
-///
-/// `visit` is told whether its walk emits. The walks that bring a loop to its
-/// fixpoint do not; once it settles, the body is walked one last time from
-/// the settled head, and that walk emits if the code around the loop does.
-/// Every operation is therefore visited exactly once with `emit` set, and in
-/// the state the fixpoint holds there, so what a pass reports does not depend
-/// on how many trips the fixpoint took or on what an early trip saw.
-///
-/// A loop also keeps its settled head between entries. When an enclosing
-/// loop walks its body again, an inner loop resumes from the head it settled
-/// on the last time, joined with the new entry state, and if that entry adds
-/// nothing it is not walked again at all. The enclosing loop's head only
-/// grows, so the inner loop's entry does too, and its fixpoint for the new
-/// entry is at least the old one; resuming reaches the same fixpoint as
-/// starting over. It does not repeat the climb, so nested loops cost the sum
-/// of their fixpoints rather than their product.
-///
-/// There is no trip limit, and none is needed. Each walk of a loop either
-/// grows its head, finds the head settled, or emits. The head only grows,
-/// over a function's finite names and origins; a settling walk happens once
-/// for the first entry and once for each later entry that grew the head; and
-/// the emitting walk happens once. A loop whose head can hold `F`
-/// name–origin pairs is therefore walked at most `F + 2` times, however
-/// deeply it is nested.
 /// The cost of one whole-state copy, as the number of entries it carries.
 /// The `--stats-json` counters use it so a clone of a large environment
-/// counts by its size rather than as one unit.
+/// counts by its size rather than counting as one unit.
+///
+/// The loop settling also asks a state to forget the keys written during a
+/// trip, so the trip's join folds only the writes back into the head. A
+/// state that cannot track writes per key joins in full every trip.
 pub(crate) trait StateSize {
     fn state_size(&self) -> usize;
+
+    fn clear_dirty(&mut self) {}
 }
 
 impl<K, V> StateSize for HashMap<K, V> {
@@ -413,6 +386,10 @@ struct FunctionEnv<V> {
     /// Total entries `field_keys` holds, so the stats counter can price a
     /// whole-state clone by the entries it copies.
     field_key_count: usize,
+    /// Keys written since the dirty list was last cleared, in write order.
+    /// A loop trip's join folds the trip's writes into the head through this
+    /// list instead of visiting every entry of the body state.
+    dirty_keys: Vec<String>,
 }
 
 impl<V> FunctionEnv<V> {
@@ -421,6 +398,7 @@ impl<V> FunctionEnv<V> {
             values: HashMap::new(),
             field_keys: HashMap::new(),
             field_key_count: 0,
+            dirty_keys: Vec::new(),
         }
     }
 
@@ -439,7 +417,15 @@ impl<V> FunctionEnv<V> {
                 self.field_key_count += 1;
             }
         }
-        self.values.insert(key, value);
+        self.values.insert(key.clone(), value);
+        self.dirty_keys.push(key);
+    }
+
+    /// Forgets the keys written so far. The loop settling clears this after
+    /// cloning a trip's starting state, so the trip's join folds only what
+    /// the trip itself wrote back into the head.
+    fn clear_dirty(&mut self) {
+        self.dirty_keys.clear();
     }
 
     /// The entry `key` maps to, inserting the default when absent, so a
@@ -496,30 +482,69 @@ impl<V: Default> StateSize for FunctionEnv<V> {
     fn state_size(&self) -> usize {
         self.entry_count()
     }
+
+    fn clear_dirty(&mut self) {
+        FunctionEnv::clear_dirty(self);
+    }
 }
 
 impl FunctionEnv<BTreeSet<AbstractOrigin>> {
     /// Unions `origins` into the set under `key`, creating it when absent.
     fn extend_origins(&mut self, key: &str, origins: impl IntoIterator<Item = AbstractOrigin>) {
+        let origins: BTreeSet<_> = origins.into_iter().collect();
+        if origins.is_empty() {
+            return;
+        }
         match self.values.get_mut(key) {
-            Some(existing) => existing.extend(origins),
-            None => {
-                let mut set = BTreeSet::new();
-                set.extend(origins);
-                if !set.is_empty() {
-                    self.insert(key.to_string(), set);
-                }
+            Some(existing) => {
+                existing.extend(origins);
+                self.dirty_keys.push(key.to_string());
             }
+            None => self.insert(key.to_string(), origins),
         }
     }
 }
 
+/// Runs `visit` over `operations` in order, iterating every loop to a
+/// fixpoint, and then once more over the fixpoint to emit what it finds.
+///
+/// A loop is walked from the state at its head; `join_dirty` then folds the
+/// keys the walk wrote back into the head and reports whether that added
+/// anything, and if it did the loop is walked again from the grown head.
+/// Once a walk adds nothing, the head is also the state after the loop: a
+/// loop may run any number of times, so what holds after it is what holds at
+/// its head.
+///
+/// `visit` is told whether its walk emits. The walks that bring a loop to its
+/// fixpoint do not; once it settles, the body is walked one last time from
+/// the settled head, and that walk emits if the code around the loop does.
+/// Every operation is therefore visited exactly once with `emit` set, and in
+/// the state the fixpoint holds there, so what a pass reports does not depend
+/// on how many trips the fixpoint took or on what an early trip saw.
+///
+/// A loop also keeps its settled head between entries. When an enclosing
+/// loop walks its body again, an inner loop resumes from the head it settled
+/// on the last time, joined with the new entry state, and if that entry adds
+/// nothing it is not walked again at all. The enclosing loop's head only
+/// grows, so the inner loop's entry does too, and its fixpoint for the new
+/// entry is at least the old one; resuming reaches the same fixpoint as
+/// starting over. It does not repeat the climb, so nested loops cost the sum
+/// of their fixpoints rather than their product.
+///
+/// There is no trip limit, and none is needed. Each walk of a loop either
+/// grows its head, finds the head settled, or emits. The head only grows,
+/// over a function's finite names and origins; a settling walk happens once
+/// for the first entry and once for each later entry that grew the head; and
+/// the emitting walk happens once. A loop whose head can hold `F`
+/// name–origin pairs is therefore walked at most `F + 2` times, however
+/// deeply it is nested.
 fn run_operations<S: Clone + StateSize>(
     operations: &[Operation],
     loops: &[LoopNode],
     state: &mut S,
     visit: &mut dyn FnMut(&Operation, &mut S, bool),
     join: fn(&mut S, &S) -> bool,
+    join_dirty: fn(&mut S, &S) -> bool,
     pass: stats::AnalysisPass,
 ) {
     fn count(loops: &[LoopNode]) -> usize {
@@ -529,6 +554,7 @@ fn run_operations<S: Clone + StateSize>(
         operations,
         visit,
         join,
+        join_dirty,
         pass,
         settled: (0..count(loops)).map(|_| None).collect(),
     }
@@ -538,7 +564,11 @@ fn run_operations<S: Clone + StateSize>(
 struct OperationWalk<'o, 'v, S> {
     operations: &'o [Operation],
     visit: &'v mut dyn FnMut(&Operation, &mut S, bool),
+    /// Joins two arbitrary states: the loop entry into the stored head.
     join: fn(&mut S, &S) -> bool,
+    /// Joins a trip's body into the head through the keys the trip wrote,
+    /// since everything else in the body is the head's own value unchanged.
+    join_dirty: fn(&mut S, &S) -> bool,
     /// Which pass this walk belongs to, so its loop walks and state clones
     /// land in that pass's `--stats-json` counters.
     pass: stats::AnalysisPass,
@@ -575,17 +605,24 @@ impl<S: Clone + StateSize> OperationWalk<'_, '_, S> {
             stats::record_loop_walks(self.pass, 1);
             stats::record_state_entries_cloned(self.pass, state.state_size() as u64);
             let mut body = state.clone();
+            body.clear_dirty();
             self.run(node.start, node.end, &node.children, &mut body, false);
-            settled = !(self.join)(state, &body);
-        }
-        if emit {
-            stats::record_loop_walks(self.pass, 1);
-            stats::record_state_entries_cloned(self.pass, state.state_size() as u64);
-            let mut body = state.clone();
-            self.run(node.start, node.end, &node.children, &mut body, true);
+            settled = !(self.join_dirty)(state, &body);
         }
         stats::record_state_entries_cloned(self.pass, state.state_size() as u64);
+        // The settled head is both what the next entry resumes from and what
+        // holds after the loop, so the store keeps one copy of it while the
+        // emitting walk writes over `state`; the head comes back from the
+        // store afterwards. Walking a throwaway copy of the head instead
+        // copied it once more per entry.
         self.settled[node.index] = Some(state.clone());
+        if emit {
+            stats::record_loop_walks(self.pass, 1);
+            self.run(node.start, node.end, &node.children, state, true);
+            *state = self.settled[node.index]
+                .take()
+                .expect("the settled head was just stored");
+        }
     }
 }
 
@@ -11535,6 +11572,69 @@ fn join_concrete_env(
     changed
 }
 
+/// The settling join for the summary pass: visits only the keys the trip
+/// wrote. Everything else in the body is the head's own value unchanged
+/// since the clone the trip started from, so joining it would add nothing.
+fn join_abstract_env_dirty(
+    head: &mut FunctionEnv<BTreeSet<AbstractOrigin>>,
+    body: &FunctionEnv<BTreeSet<AbstractOrigin>>,
+) -> bool {
+    stats::work().join_entries_visited_summary.fetch_add(
+        body.dirty_keys.len() as u64,
+        std::sync::atomic::Ordering::Relaxed,
+    );
+    let mut changed = false;
+    for key in &body.dirty_keys {
+        let Some(origins) = body.values.get(key) else {
+            continue;
+        };
+        if origins.is_empty() {
+            continue;
+        }
+        match head.values.get_mut(key) {
+            Some(entry) => {
+                let before = entry.len();
+                entry.extend(origins.iter().cloned());
+                changed |= entry.len() != before;
+            }
+            None => {
+                head.insert(key.clone(), origins.clone());
+                changed = true;
+            }
+        }
+    }
+    changed
+}
+
+/// The settling join for the concrete pass, through the trip's dirty keys.
+fn join_concrete_env_dirty(
+    head: &mut FunctionEnv<ConcreteTaint>,
+    body: &FunctionEnv<ConcreteTaint>,
+) -> bool {
+    stats::work().join_entries_visited_concrete.fetch_add(
+        body.dirty_keys.len() as u64,
+        std::sync::atomic::Ordering::Relaxed,
+    );
+    let mut changed = false;
+    for key in &body.dirty_keys {
+        let Some(taint) = body.values.get(key) else {
+            continue;
+        };
+        for path in &taint.paths {
+            let entry = head.get_or_insert_default(key);
+            if !entry
+                .paths
+                .iter()
+                .any(|existing| existing.origin_key == path.origin_key)
+            {
+                entry.paths.push(path.clone());
+                changed = true;
+            }
+        }
+    }
+    changed
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum AbstractOrigin {
     Param(usize),
@@ -11790,6 +11890,7 @@ fn summarize_function(
             }
         },
         join_abstract_env,
+        join_abstract_env_dirty,
         stats::AnalysisPass::Summary,
     );
     summary
@@ -12376,6 +12477,7 @@ impl<'a> DataFlowBuilder<'a> {
             &mut env,
             &mut |operation, env, emit| self.materialize_operation(function, operation, env, emit),
             join_concrete_env,
+            join_concrete_env_dirty,
             stats::AnalysisPass::Concrete,
         );
         self.emitting = true;
@@ -21429,7 +21531,8 @@ mod fixpoint_tests {
         AbstractOrigin, CfgEvaluator, FileContext, FunctionEnv, FunctionRecord, LoopNode,
         LoopRegion, Operation, ReturnTypeIndex, SimpleExpr, SourceCollector, TypeIndexes,
         build_local_function_index, built_in_dataflow_patterns, infer_summaries_counted,
-        infer_type_bindings, join_abstract_env, loop_forest, run_operations,
+        infer_type_bindings, join_abstract_env, join_abstract_env_dirty, loop_forest,
+        run_operations,
     };
     use crate::macro_expand;
 
@@ -21622,6 +21725,7 @@ pub fn run(rows: Vec<Vec<String>>) {
                 env.insert(target.clone(), origins);
             },
             join_abstract_env,
+            join_abstract_env_dirty,
             crate::stats::AnalysisPass::Summary,
         );
         assert!(env.get("x0").expect("the head holds x0").contains(&source));
@@ -21717,6 +21821,7 @@ pub fn run(rows: Vec<Vec<String>>) {
                 }
                 step_tainted(operation, state);
             },
+            join_tainted,
             join_tainted,
             crate::stats::AnalysisPass::Concrete,
         );
@@ -21859,6 +21964,7 @@ pub fn run(rows: Vec<Vec<String>>) {
                     }
                     step_tainted(operation, state);
                 },
+                join_tainted,
                 join_tainted,
                 crate::stats::AnalysisPass::Concrete,
             );
