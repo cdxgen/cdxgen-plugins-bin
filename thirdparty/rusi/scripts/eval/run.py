@@ -195,6 +195,7 @@ def invoke_rusi(
     *,
     timeout: int | None,
     extra_args: Iterable[str] = (),
+    stats_path: Path | None = None,
 ) -> dict:
     command = [
         str(rusi_bin),
@@ -211,6 +212,8 @@ def invoke_rusi(
         str(out_path),
     ]
     command.extend(extra_args)
+    if stats_path is not None:
+        command.extend(["--stats-json", str(stats_path)])
     result, elapsed, peak_rss = run_with_timeout(command, cwd=REPO_ROOT, timeout=timeout)
     status = "ok"
     error_text: str | None = None
@@ -227,7 +230,26 @@ def invoke_rusi(
         "peak_rss_kb": peak_rss,
         "error": error_text,
         "report_path": str(out_path),
+        "stats": load_stats(stats_path) if stats_path is not None else None,
     }
+
+
+def load_stats(path: Path) -> dict | None:
+    """Read the `--stats-json` document a run wrote, if it exists."""
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text())
+    except json.JSONDecodeError:
+        return None
+
+
+def stats_counts(stats: dict | None) -> dict | None:
+    """The deterministic part of a stats document: the counters, without the
+    informational wall times, which differ between runs by nature."""
+    if not stats:
+        return None
+    return {"counts": stats.get("counts"), "compiler": stats.get("compiler")}
 
 
 def load_report(path: Path) -> dict | None:
@@ -489,9 +511,11 @@ def run_one(
         run_dir.mkdir(parents=True, exist_ok=True)
         out1 = run_dir / "run1.json"
         out2 = run_dir / "run2.json"
+        stats1 = run_dir / "run1.stats.json"
+        stats2 = run_dir / "run2.stats.json"
 
         result = invoke_rusi(
-            rusi_bin, target, backend, out1, timeout=timeout
+            rusi_bin, target, backend, out1, timeout=timeout, stats_path=stats1
         )
         backend_summary: dict = {"run1": result}
 
@@ -512,7 +536,7 @@ def run_one(
         determinism: dict
         if check_determinism and result["status"] == "ok":
             second = invoke_rusi(
-                rusi_bin, target, backend, out2, timeout=timeout
+                rusi_bin, target, backend, out2, timeout=timeout, stats_path=stats2
             )
             report2 = load_report(out2)
             if report2 is None:
@@ -520,13 +544,17 @@ def run_one(
             else:
                 digest2 = compute_digest(report2)
                 bytes_match = out1.read_bytes() == out2.read_bytes()
-                # The hard gate is byte-identical. We also expose the digest
-                # match so a future intentional non-determinism (e.g. embedded
-                # timestamp) would still be detectable as content-stable.
+                # The work counters must also agree between runs; a count that
+                # moves with thread scheduling would make the numbers useless
+                # for comparisons even when the report stays stable.
+                stats_match = stats_counts(result.get("stats")) == stats_counts(
+                    second.get("stats")
+                )
                 determinism = {
                     "status": "match" if bytes_match else "diff",
                     "bytes_match": bytes_match,
                     "digest_match": digest == digest2,
+                    "stats_match": stats_match,
                     "run2_seconds": second.get("seconds"),
                 }
         else:
@@ -603,6 +631,81 @@ def render_table(summaries: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def compare_metrics(old_path: Path, new_path: Path) -> int:
+    """Print per-project new/old ratios for every work counter and wall time.
+
+    `old_path` and `new_path` are `--metrics` documents of two runs over the
+    same tier. Rows print worst first: the project whose worst counter ratio
+    is highest comes first, and within a project the counters print in the
+    same order. Ratios above 1 are regressions (more work or more time); the
+    counter ratios are the deterministic signal, the wall-time ratio is
+    informational.
+    """
+    old_doc = json.loads(old_path.read_text())
+    new_doc = json.loads(new_path.read_text())
+
+    def by_slug(doc: dict) -> dict:
+        out = {}
+        for project in doc.get("summaries") or []:
+            for backend, info in (project.get("backends") or {}).items():
+                run1 = info.get("run1") or {}
+                out[(project["slug"], backend)] = {
+                    "tier": project.get("tier"),
+                    "seconds": run1.get("seconds"),
+                    "stats": run1.get("stats") or {},
+                }
+        return out
+
+    old_runs = by_slug(old_doc)
+    new_runs = by_slug(new_doc)
+
+    def ratio(new, old) -> float | None:
+        if old is None or new is None or old == 0:
+            return None
+        return new / old
+
+    def fmt_ratio(value: float | None) -> str:
+        return f"{value:6.3f}" if value is not None else "   n/a"
+
+    rows = []
+    for key, new_run in new_runs.items():
+        old_run = old_runs.get(key)
+        if not old_run:
+            continue
+        new_counts = (new_run.get("stats") or {}).get("counts") or {}
+        old_counts = (old_run.get("stats") or {}).get("counts") or {}
+        counters = []
+        for name, new_value in new_counts.items():
+            counters.append(
+                (name, ratio(new_value, old_counts.get(name)))
+            )
+        wall = ratio(new_run.get("seconds"), old_run.get("seconds"))
+        counter_ratios = [r for _, r in counters if r is not None]
+        worst = max(counter_ratios + [r for r in [wall] if r is not None] or [0.0])
+        rows.append((worst, key, wall, counters))
+
+    rows.sort(key=lambda row: (-row[0], row[1]))
+    if not rows:
+        print("no projects to compare")
+        return 0
+    name_width = max(len("/".join(key)) for _, key, _, _ in rows)
+    counter_names = [name for name, _ in rows[0][3]]
+    header = f"{'project/backend'.ljust(name_width)}  {'wall':>6}  " + " ".join(
+        name.rjust(12) for name in counter_names
+    )
+    print(header)
+    for _, key, wall, counters in rows:
+        line = "/".join(key).ljust(name_width) + "  " + fmt_ratio(wall) + "  "
+        line += " ".join(fmt_ratio(r).rjust(12) for _, r in counters)
+        print(line)
+    print()
+    print(
+        "wall is informational; counter ratios above 1.000 are the "
+        "deterministic regressions to chase"
+    )
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -657,6 +760,16 @@ def main() -> int:
         "--metrics",
         type=Path,
         help="Write a JSON metrics summary to this path.",
+    )
+    parser.add_argument(
+        "--compare-metrics",
+        type=Path,
+        help=(
+            "After the run, print per-project new/old ratios for every work "
+            "counter and wall time, worst first. The argument is the OLD "
+            "--metrics document; the current run must also pass --metrics, "
+            "whose file supplies the new numbers."
+        ),
     )
     parser.add_argument(
         "--fail-on-diff",
@@ -765,6 +878,16 @@ def main() -> int:
             )
             + "\n"
         )
+
+    if args.compare_metrics:
+        if not args.metrics:
+            print(
+                "[run] --compare-metrics needs --metrics to write the new "
+                "numbers it compares against",
+                file=sys.stderr,
+            )
+            return 2
+        return compare_metrics(args.compare_metrics, args.metrics)
 
     if args.fail_on_diff and (failed_determinism or failed_golden or failed_runs):
         return 1
