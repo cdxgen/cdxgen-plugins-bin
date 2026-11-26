@@ -13873,14 +13873,13 @@ fn forwarded_method_source(
 /// callee text names in this workspace, and which source, sanitizer,
 /// passthrough, and sink patterns it matches.
 ///
-/// The questions used to be answered per evaluation, once per fixpoint trip
-/// of every call: `resolve_call_target` normalized the callee path and
-/// walked up to five hash tables, and the pattern lookups re-normalized
-/// every pattern on every scan. The tables are built once, before the
-/// summary fixpoint starts, from every callee text the workspace writes,
-/// each resolved and matched once. The fixpoint evaluates in parallel, so
-/// nothing here fills lazily; a callee the build never saw, which only a
-/// synthesized text could produce, resolves directly.
+/// Both passes ask these questions on every evaluation of every call, and
+/// answering one means normalizing the callee path, walking up to five hash
+/// tables in `resolve_call_target`, and scanning every pattern. The tables
+/// are built once, before the summary fixpoint starts, from every callee
+/// text the workspace writes, so each text is resolved and matched once.
+/// The fixpoint evaluates in parallel, so nothing here fills lazily; a text
+/// the build never saw is resolved or matched directly on each lookup.
 struct CallTables<'a> {
     /// Package path -> callee text -> position of the local function the
     /// call resolves to, `None` when the call is external.
@@ -13990,8 +13989,6 @@ impl<'a> CallTables<'a> {
         let mut sink_candidates = HashMap::new();
         let mut sanitizers = HashSet::new();
         for text in &texts {
-            // The pattern match the fixpoint used to run per evaluation of
-            // every call happens here, once per distinct callee text.
             sources.insert(
                 text.clone(),
                 find_source_pattern(text, &patterns.sources).map(|matched| matched.category),
@@ -14061,28 +14058,66 @@ impl<'a> CallTables<'a> {
             .as_str()
     }
 
+    /// Whether the build matched `normalized` against the patterns. Every
+    /// callee text the operations write was matched; any other text is
+    /// matched on demand by the lookups below, so a lookup never answers
+    /// "no match" just because the build did not see the text.
+    fn matched(&self, normalized: &str) -> bool {
+        self.sources.contains_key(normalized)
+    }
+
     /// The category of the first source pattern `callee` matches.
     fn source_match(&self, callee: &str) -> Option<SourcePatternMatch> {
-        normalized_callee(callee).and_then(|normalized| {
-            self.sources
-                .get(normalized.as_ref())
-                .and_then(|category| category.as_ref())
-                .map(|category| SourcePatternMatch {
-                    category: category.clone(),
-                })
-        })
+        let normalized = normalized_callee(callee)?;
+        match self.sources.get(normalized.as_ref()) {
+            Some(category) => category.as_ref().map(|category| SourcePatternMatch {
+                category: category.clone(),
+            }),
+            None => find_source_pattern(normalized.as_ref(), &self.patterns.sources),
+        }
     }
 
     /// Whether `callee` matches a passthrough pattern.
     fn is_passthrough(&self, callee: &str) -> bool {
-        normalized_callee(callee)
-            .is_some_and(|normalized| self.passthroughs.contains(normalized.as_ref()))
+        normalized_callee(callee).is_some_and(|normalized| {
+            if self.matched(normalized.as_ref()) {
+                self.passthroughs.contains(normalized.as_ref())
+            } else {
+                has_passthrough_pattern(normalized.as_ref(), &self.patterns.passthroughs)
+            }
+        })
     }
 
     /// Whether `callee` matches a sanitizer pattern.
     fn is_sanitizer(&self, callee: &str) -> bool {
-        normalized_callee(callee)
-            .is_some_and(|normalized| self.sanitizers.contains(normalized.as_ref()))
+        normalized_callee(callee).is_some_and(|normalized| {
+            if self.matched(normalized.as_ref()) {
+                self.sanitizers.contains(normalized.as_ref())
+            } else {
+                is_sanitizer_call(normalized.as_ref())
+            }
+        })
+    }
+
+    /// The sink patterns `normalized` matches by name, in pattern order.
+    fn sink_candidates_for(&self, normalized: &str) -> std::borrow::Cow<'_, [usize]> {
+        if self.matched(normalized) {
+            return std::borrow::Cow::Borrowed(
+                self.sink_candidates
+                    .get(normalized)
+                    .map(Vec::as_slice)
+                    .unwrap_or_default(),
+            );
+        }
+        std::borrow::Cow::Owned(
+            self.patterns
+                .sinks
+                .iter()
+                .enumerate()
+                .filter(|(_, pattern)| pattern_matches_callee(normalized, &pattern.pattern))
+                .map(|(index, _)| index)
+                .collect(),
+        )
     }
 
     /// The first sink pattern `callee` matches with its receiver type and
@@ -14094,8 +14129,7 @@ impl<'a> CallTables<'a> {
         receiver_type: Option<&str>,
     ) -> Option<SinkPatternMatch> {
         let normalized = normalized_callee(callee)?;
-        let candidates = self.sink_candidates.get(normalized.as_ref())?;
-        for index in candidates {
+        for index in self.sink_candidates_for(normalized.as_ref()).iter() {
             let pattern = &self.patterns.sinks[*index];
             if receiver_type_matches(pattern, receiver_type)
                 && sink_pattern_context_confident(normalized.as_ref(), args, pattern)
@@ -14123,18 +14157,16 @@ impl<'a> CallTables<'a> {
             // decision, not a gap.
             return false;
         }
-        let normalized = normalized_callee(callee);
-        let Some(normalized) = normalized else {
+        let Some(normalized) = normalized_callee(callee) else {
             return false;
         };
-        let Some(candidates) = self.sink_candidates.get(normalized.as_ref()) else {
-            return false;
-        };
-        candidates.iter().any(|index| {
-            let pattern = &self.patterns.sinks[*index];
-            pattern.receiver_type.is_some()
-                && sink_pattern_context_confident(normalized.as_ref(), args, pattern)
-        })
+        self.sink_candidates_for(normalized.as_ref())
+            .iter()
+            .any(|index| {
+                let pattern = &self.patterns.sinks[*index];
+                pattern.receiver_type.is_some()
+                    && sink_pattern_context_confident(normalized.as_ref(), args, pattern)
+            })
     }
 
     /// The SQL sink pattern `callee` matches on name and receiver but not on
@@ -14145,8 +14177,7 @@ impl<'a> CallTables<'a> {
         receiver_type: Option<&str>,
     ) -> Option<SinkPatternMatch> {
         let normalized = normalized_callee(callee)?;
-        let candidates = self.sink_candidates.get(normalized.as_ref())?;
-        for index in candidates {
+        for index in self.sink_candidates_for(normalized.as_ref()).iter() {
             let pattern = &self.patterns.sinks[*index];
             if pattern.category == "sql-query" && receiver_type_matches(pattern, receiver_type) {
                 return Some(SinkPatternMatch {
