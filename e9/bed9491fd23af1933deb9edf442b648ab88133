@@ -1,0 +1,19 @@
+thirdparty/cdxui/src/bom/store.rs
+  s_babdf7f6b57d6f::t_61d1fa4a6bfbff 45-47,66-67,345-347,351,369,1136-1147,1149,1154-1157,1160,1162-1168,1172,1176-1180
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e9bed9491fd23af1933deb9edf442b648ab88133",
+  "prompts": {},
+  "sessions": {
+    "s_babdf7f6b57d6f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2be749a3-ee66-4442-97ec-ef82c8e114b4",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
