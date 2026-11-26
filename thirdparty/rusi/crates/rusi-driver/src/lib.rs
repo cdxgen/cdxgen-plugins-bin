@@ -13,8 +13,8 @@ use rusi_core::{AnalyzeOptionsInput, CompilerBackendPayload};
 use rusi_schema::{
     CallGraph, CompilerEvidence, CryptoComponent, CryptoEvidence, CryptoFinding, CryptoLibrary,
     CryptoMaterial, DataFlowEvidence, DataFlowStats, Declaration, Diagnostic, FileEvidence,
-    GraphStats, ImportUsage, LibraryUsage, Position, SecuritySignal, relative_display_path,
-    stable_id,
+    GraphStats, ImportUsage, LibraryUsage, Position, SecuritySignal, WrapperWorkCounts,
+    relative_display_path, stable_id,
 };
 use serde::{Deserialize, Serialize};
 use syn::spanned::Spanned;
@@ -102,6 +102,10 @@ pub struct DriverProtocolPayload {
     pub crypto: Option<CryptoEvidence>,
     pub call_graph: Option<CallGraph>,
     pub data_flow: Option<DataFlowEvidence>,
+    /// Work counters the wrapper's data-flow passes measured, summed over the
+    /// crate artifacts. `None` when the wrapper predates the counters.
+    #[serde(default)]
+    pub work_counts: Option<WrapperWorkCounts>,
 }
 
 impl DriverProtocolEnvelope {
@@ -133,6 +137,7 @@ impl DriverProtocolEnvelope {
             crypto: self.payload.crypto,
             call_graph: self.payload.call_graph,
             data_flow: self.payload.data_flow,
+            work_counts: self.payload.work_counts,
         }
     }
 
@@ -250,6 +255,7 @@ fn run_driver_on_this_thread(options: &DriverOptions) -> Result<DriverProtocolEn
                 merge_crypto_evidence(&mut payload.crypto, evidence.crypto);
                 payload.call_graph = evidence.call_graph;
                 payload.data_flow = evidence.data_flow;
+                payload.work_counts = evidence.work_counts;
                 payload.diagnostics.extend(evidence.diagnostics);
                 payload.diagnostics.push(Diagnostic {
                     kind: "compiler-source-evidence".to_string(),
@@ -1246,6 +1252,9 @@ struct CompilerEvidenceMerger {
     data_flow_slice_ids: HashSet<String>,
     data_flow_summary_ids: HashSet<String>,
     data_flow_diagnostic_keys: HashSet<String>,
+    /// Sum of the counters every merged artifact carried, so the merged
+    /// evidence reports the whole backend's work rather than one crate's.
+    work_counts: WrapperWorkCounts,
 }
 
 /// Per-file dedup indices, kept parallel to `CompilerEvidenceMerger::evidence.files`.
@@ -1278,6 +1287,7 @@ impl CompilerEvidenceMerger {
             crypto,
             call_graph,
             data_flow,
+            work_counts,
         } = artifact;
 
         // Top-level diagnostics were never deduplicated by the original merge;
@@ -1313,6 +1323,11 @@ impl CompilerEvidenceMerger {
         merge_crypto_indexed(&mut self.evidence.crypto, crypto, &mut self.crypto);
         self.merge_call_graph(call_graph);
         self.merge_data_flow(data_flow);
+        if let Some(counts) = work_counts {
+            self.work_counts.summary_evaluations += counts.summary_evaluations;
+            self.work_counts.block_evaluations_abstract += counts.block_evaluations_abstract;
+            self.work_counts.block_evaluations_concrete += counts.block_evaluations_concrete;
+        }
     }
 
     fn merge_file(&mut self, file: FileEvidence) {
@@ -1469,6 +1484,7 @@ impl CompilerEvidenceMerger {
                 summary_count: data_flow.summaries.len(),
             };
         }
+        self.evidence.work_counts = Some(self.work_counts);
         self.evidence
     }
 }

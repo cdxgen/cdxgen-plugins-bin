@@ -13,11 +13,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::{Context, Result};
 use indexmap::IndexMap;
 use rusi_schema::fixpoint::{
-    Dependents, MinRankWorklist, TrackedReads, callee_first_order, join_map, join_set,
+    Dependents, MinRankWorklist, TrackedIndexReads, callee_first_order, join_map, join_set,
     weak_topological_order,
 };
 use rusi_schema::{
@@ -25,7 +26,7 @@ use rusi_schema::{
     CryptoFinding, CryptoLibrary, CryptoMaterial, DataFlowEdge, DataFlowEvidence,
     DataFlowMethodSummary, DataFlowNode, DataFlowPattern, DataFlowPatternSet, DataFlowSlice,
     DataFlowStats, Declaration, Diagnostic, ExpandedFrom, FileEvidence, GraphStats, ImportUsage,
-    LibraryUsage, Position, SecuritySignal, relative_display_path, stable_id,
+    LibraryUsage, Position, SecuritySignal, WrapperWorkCounts, relative_display_path, stable_id,
 };
 use rustc_driver_impl::{Callbacks, Compilation};
 // `rustc_driver_impl::run_compiler` became `compiler_entrypoint` (same
@@ -379,6 +380,7 @@ impl EmbeddedCollector {
             },
             call_graph: Some(call_graph),
             data_flow: Some(data_flow),
+            work_counts: Some(wrapper_work_counts()),
         }
     }
 
@@ -2641,7 +2643,9 @@ impl BlockGraph {
 /// are recorded as it reads them, and the recursion cycle it sits in.
 struct SummaryPass<'p, 'a> {
     ctx: &'p FlowContext<'a>,
-    summaries: &'p TrackedReads<'p, FunctionSummary>,
+    summaries: &'p TrackedIndexReads<'p, FunctionSummary>,
+    /// Row of each function id in the summaries the pass reads.
+    position_of: &'p HashMap<&'p str, usize>,
     component_of: &'p HashMap<&'p str, usize>,
     component: usize,
 }
@@ -3187,6 +3191,22 @@ fn method_suffix(target_name: &str) -> String {
     last_segment(&canonical_call_symbol(target_name)).to_string()
 }
 
+/// Work counters this wrapper process accumulated, sent to the driver through
+/// the crate artifact so the `--stats-json` document can report the compiler
+/// backend's work next to the stable backend's. The wrapper analyzes crates
+/// sequentially in one process, so plain atomics are enough.
+static SUMMARY_EVALUATIONS: AtomicU64 = AtomicU64::new(0);
+static ABSTRACT_BLOCK_EVALUATIONS: AtomicU64 = AtomicU64::new(0);
+static CONCRETE_BLOCK_EVALUATIONS: AtomicU64 = AtomicU64::new(0);
+
+fn wrapper_work_counts() -> WrapperWorkCounts {
+    WrapperWorkCounts {
+        summary_evaluations: SUMMARY_EVALUATIONS.load(Ordering::Relaxed),
+        block_evaluations_abstract: ABSTRACT_BLOCK_EVALUATIONS.load(Ordering::Relaxed),
+        block_evaluations_concrete: CONCRETE_BLOCK_EVALUATIONS.load(Ordering::Relaxed),
+    }
+}
+
 fn build_data_flow(
     functions: &[MirFunction],
     diagnostics: &mut Vec<Diagnostic>,
@@ -3238,6 +3258,7 @@ fn infer_summaries(
     debug: bool,
 ) -> BTreeMap<String, FunctionSummary> {
     let (summaries, evaluations) = summary_fixpoint(functions, ctx, debug);
+    SUMMARY_EVALUATIONS.fetch_add(evaluations as u64, Ordering::Relaxed);
     debug_log(
         debug,
         format_args!(
@@ -3254,19 +3275,19 @@ fn summary_fixpoint(
     ctx: &FlowContext<'_>,
     debug: bool,
 ) -> (BTreeMap<String, FunctionSummary>, usize) {
-    let position: HashMap<String, usize> = functions
+    let position: HashMap<&str, usize> = functions
         .iter()
         .enumerate()
-        .map(|(index, function)| (function.id.clone(), index))
+        .map(|(index, function)| (function.id.as_str(), index))
         .collect();
     let mut summaries = functions
         .iter()
-        .map(|f| (f.id.clone(), FunctionSummary::with_context(f)))
-        .collect::<BTreeMap<_, _>>();
+        .map(FunctionSummary::with_context)
+        .collect::<Vec<_>>();
     let call_order = callee_first_order(functions.len(), |index| {
         summary_dependencies(&functions[index], ctx)
             .into_iter()
-            .filter_map(|id| position.get(&id).copied())
+            .filter_map(|id| position.get(id.as_str()).copied())
             .collect::<Vec<_>>()
     });
     let component_of: HashMap<&str, usize> = functions
@@ -3278,10 +3299,11 @@ fn summary_fixpoint(
     let mut dependents = Dependents::new(functions.len());
     while let Some(index) = worklist.pop() {
         let function = &functions[index];
-        let reads = TrackedReads::new(&summaries, &position);
+        let reads = TrackedIndexReads::new(&summaries);
         let pass = SummaryPass {
             ctx,
             summaries: &reads,
+            position_of: &position,
             component_of: &component_of,
             component: call_order.component[index],
         };
@@ -3299,16 +3321,20 @@ fn summary_fixpoint(
             );
         }
         dependents.record(index, reads.into_reads());
-        let entry = summaries
-            .get_mut(&function.id)
-            .expect("every function has a summary");
-        if entry.join(next) {
+        if summaries[index].join(next) {
             for reader in dependents.readers(index) {
                 worklist.mark_dirty(reader);
             }
         }
     }
     let evaluations = worklist.evaluations();
+    // Callers outside the fixpoint address summaries by function id, so the
+    // rows return to the keyed map they were drawn from.
+    let summaries = functions
+        .iter()
+        .zip(summaries)
+        .map(|(function, summary)| (function.id.clone(), summary))
+        .collect();
     (summaries, evaluations)
 }
 
@@ -3358,6 +3384,12 @@ fn summarize_function(function: &MirFunction, pass: &SummaryPass<'_, '_>) -> Fun
     // so the worklist empties without an iteration limit.
     let mut worklist = MinRankWorklist::new(function.blocks.len(), graph.order.clone());
     while let Some(block) = worklist.pop() {
+        // The clone is load-bearing: `transfer_abstract` works by mutating a
+        // state in place through the whole block, and the accumulated entry
+        // has to stay intact for the merges later predecessors make into
+        // it, some of whose facts the block's own transfer may kill.
+        // Borrowing the entry instead would move the same copy inside the
+        // transfer, which builds its result out of the state it walks.
         let Some(state) = in_states[block].clone() else {
             continue;
         };
@@ -3370,6 +3402,7 @@ fn summarize_function(function: &MirFunction, pass: &SummaryPass<'_, '_>) -> Fun
             }
         }
     }
+    ABSTRACT_BLOCK_EVALUATIONS.fetch_add(worklist.evaluations() as u64, Ordering::Relaxed);
     for (block_index, (block, state)) in function.blocks.iter().zip(in_states).enumerate() {
         let Some(mut state) = state else {
             continue;
@@ -3633,7 +3666,8 @@ fn eval_call_abstract(
     }
     for target in &facts.targets {
         if pass.ctx.local_ids.contains(target)
-            && let Some(summary) = pass.summaries.get(target)
+            && let Some(row) = pass.position_of.get(target.as_str()).copied()
+            && let Some(summary) = pass.summaries.get(row)
             && let Some(callee) = pass.ctx.function_map.get(target)
         {
             let widen = pass.in_cycle(target);
@@ -3957,6 +3991,7 @@ impl<'a> DataFlowBuilder<'a> {
                 }
             }
         }
+        CONCRETE_BLOCK_EVALUATIONS.fetch_add(worklist.evaluations() as u64, Ordering::Relaxed);
         self.emitting = true;
         for &block in &graph.order {
             if let Some(state) = in_states[block].take() {
@@ -4838,7 +4873,10 @@ fn lift_async_body_summary(
         .map(Vec::as_slice)
         .unwrap_or_default();
     for function_id in nested {
-        let Some(child_summary) = pass.summaries.get(function_id) else {
+        let Some(row) = pass.position_of.get(function_id.as_str()).copied() else {
+            continue;
+        };
+        let Some(child_summary) = pass.summaries.get(row) else {
             continue;
         };
         summary_out

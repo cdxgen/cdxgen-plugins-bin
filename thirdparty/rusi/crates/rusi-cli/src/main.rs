@@ -116,6 +116,11 @@ struct AnalysisArgs {
         help = "Pretty-print JSON output (report and exports). Off by default: output is minified to reduce file size"
     )]
     pretty: bool,
+    #[arg(
+        long,
+        help = "Write the analysis work counters and phase times to this JSON file. The counts (fixpoint evaluations, loop walks, resolution and pattern lookups, environment scans, state clones) are deterministic across runs on unchanged input; the phase times are wall times and informational. The report itself is never affected"
+    )]
+    stats_json: Option<PathBuf>,
     #[command(flatten)]
     modeling: ModelingArgs,
 }
@@ -167,7 +172,13 @@ fn run_analysis_command(args: AnalysisArgs, scope: AnalysisScope) -> Result<()> 
         write_data_flow_export(data_flow, &args.dataflow_export_format, path, args.pretty)?;
     }
 
-    write_report_json(&report, args.out.as_deref(), args.pretty)
+    write_report_json(&report, args.out.as_deref(), args.pretty)?;
+
+    if let Some(path) = args.stats_json.as_ref() {
+        rusi_core::stats::write_stats_json(path)
+            .with_context(|| format!("failed to write {}", path.display()))?;
+    }
+    Ok(())
 }
 
 /// Analyze one crate or workspace directory.
@@ -364,6 +375,7 @@ mod tests {
                 tests: false,
                 debug: false,
                 pretty: false,
+                stats_json: None,
                 modeling: ModelingArgs::default(),
             },
             AnalysisScope::Default,
@@ -417,6 +429,7 @@ mod tests {
                 tests: false,
                 debug: false,
                 pretty: false,
+                stats_json: None,
                 modeling: ModelingArgs::default(),
             },
             AnalysisScope::Default,

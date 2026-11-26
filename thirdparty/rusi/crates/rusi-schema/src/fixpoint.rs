@@ -578,6 +578,67 @@ impl<V> KeyedTable<V> for TrackedReads<'_, V> {
     }
 }
 
+/// Read access to a table addressed by row index, served both by the table
+/// itself and by a [`TrackedIndexReads`] view of it, so one evaluation
+/// routine can run inside a fixpoint (which records what it read) and after
+/// it (which does not).
+pub trait IndexedTable<V> {
+    fn lookup_index(&self, index: usize) -> Option<&V>;
+}
+
+impl<V> IndexedTable<V> for [V] {
+    fn lookup_index(&self, index: usize) -> Option<&V> {
+        self.get(index)
+    }
+}
+
+impl<V> IndexedTable<V> for Vec<V> {
+    fn lookup_index(&self, index: usize) -> Option<&V> {
+        self.get(index)
+    }
+}
+
+/// A read-only view of a slice-indexed table that records which rows one
+/// evaluation looked up.
+///
+/// A view belongs to a single evaluation on a single thread; the table it
+/// borrows can be shared between threads. Reading by index skips the name
+/// to row lookups a keyed table pays per read, which is what the summary
+/// fixpoint does once its rows carry positions ([`CallTables`] resolves a
+/// call to the position directly).
+pub struct TrackedIndexReads<'a, V> {
+    table: &'a [V],
+    reads: RefCell<Vec<usize>>,
+}
+
+impl<'a, V> TrackedIndexReads<'a, V> {
+    pub fn new(table: &'a [V]) -> Self {
+        Self {
+            table,
+            reads: RefCell::new(Vec::new()),
+        }
+    }
+
+    /// Looks `index` up, recording the read when it names a row.
+    pub fn get(&self, index: usize) -> Option<&'a V> {
+        if index < self.table.len() {
+            self.reads.borrow_mut().push(index);
+        }
+        self.table.get(index)
+    }
+
+    /// The rows read so far, possibly with repeats.
+    pub fn into_reads(self) -> Vec<usize> {
+        self.reads.into_inner()
+    }
+}
+
+impl<V> IndexedTable<V> for TrackedIndexReads<'_, V> {
+    fn lookup_index(&self, index: usize) -> Option<&V> {
+        self.get(index)
+    }
+}
+
 /// Unions `incoming` into `target`; true when `target` grew.
 pub fn join_set<T: Ord>(target: &mut BTreeSet<T>, incoming: BTreeSet<T>) -> bool {
     let before = target.len();
@@ -1239,6 +1300,20 @@ mod tests {
         assert_eq!(view.get("b"), Some(&2));
         assert_eq!(view.get("missing"), None);
         assert_eq!(view.get("a"), Some(&1));
+        assert_eq!(view.into_reads(), vec![1, 0]);
+    }
+
+    #[test]
+    fn tracked_index_reads_record_rows_and_skip_out_of_range() {
+        fn read(table: &impl IndexedTable<u8>) -> Option<u8> {
+            table.lookup_index(1).copied()
+        }
+        let table = vec![7u8, 9];
+        assert_eq!(read(&table), Some(9));
+        let view = TrackedIndexReads::new(&table);
+        assert_eq!(view.get(1), Some(&9));
+        assert_eq!(view.get(5), None);
+        assert_eq!(view.get(0), Some(&7));
         assert_eq!(view.into_reads(), vec![1, 0]);
     }
 }

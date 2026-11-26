@@ -633,3 +633,211 @@ to sources and sinks a reviewer can name, and shows the path, while being clear 
 places where its knowledge ends. That honesty is what lets a security analyst and a
 compiler engineer trust the parts that are strong and compensate for the parts that are
 approximate.
+
+## 9. Design note: context-sensitive summaries for receiver-typed sinks
+
+The stable backend computes one summary per function, however its callers call it. That
+context insensitivity is usually the right trade: a summary that unifies over call sites
+is what makes the interprocedural analysis scale. It costs precision in exactly one place
+today, and this note describes how that one place can be recovered the way the next rust
+trait solver recovers cache precision, by recording when a computation depended on
+information it did not have and paying to redo only that computation, in only that
+context.
+
+### 9.1 Where the type is missing
+
+A receiver-typed sink pattern (`receiver_type: "Command"` on `arg`) fires only when the
+call's receiver type was resolved to the pattern's type. Two places make that decision
+against a summary's definition rather than a caller's site:
+
+1. In `summarize_function`, the `Operation::Expr` / `Operation::Return` arm computes
+   `receiver_type` with `infer_expr_type` over the function's own type bindings
+   (`infer_type_bindings` of the callee's body: constructed types, field types, return
+   types). A wrapper whose parameter carries the sink's receiver
+   (`fn forward<T: Bound>(target: &mut T, v: &str) { target.arg(v) }`) binds `target` to
+   nothing the stable backend can name, so `receiver_type` is `None`, and
+   `receiver_type_matches` refuses a pattern with a `receiver_type` restriction: the
+   sink never fires, and the wrapper's summary records no `param_to_sink` entry. The
+   caller that passes a `Command` loses the flow. The same computation happens in the
+   concrete pass's `materialize_operation`, which consults the callee's summary rather
+   than re-deriving the match, so the slice disappears with the summary entry.
+2. The auto-discovered passthrough mechanism is gated on evidence that a method forwards
+   a parameter to its result, which is independent of this problem, and a method that
+   matches a sanitizer is never a passthrough. The gap above is specifically
+   receiver-typed *sink* matching where the receiver's type is a parameter of the
+   function being summarized.
+
+### 9.2 What the flag records
+
+`FunctionSummary` gains one field, `receiver_type_pending: bool`. While summarizing, when
+a sink candidate matches the callee text by name and its `receiver_type` restriction is
+the only reason it does not fire (`receiver_type_matches` false because the resolved
+receiver type was `None`), the flag is set and nothing else happens: no sink entry is
+recorded, so a summary whose callers all pass unresolvable receivers behaves exactly as
+today. The flag records the fact this summary would differ in some context, not which
+type was missing; the set of types that could matter is the caller's knowledge, which
+the summary cannot enumerate.
+
+The flag joins like the rest of the summary: once any evaluation sets it, it stays set.
+A summary that carries it is still a sound over-approximation of the function's own
+behavior; it is simply marked as one whose precision a knowing caller can raise.
+
+### 9.3 The call-site application and its memo key
+
+When a caller's evaluation resolves a call to a callee whose summary carries the flag,
+and the caller's type bindings resolve the call's receiver argument to a concrete type
+(`infer_expr_type` at the call site, where the constructed type of the receiver binding
+is visible), the caller re-summarizes the callee in that context: it runs the ordinary
+`summarize_function` on the callee's record with the callee's own inferred type bindings
+plus one binding added, the callee's receiver parameter (its parameter 0) named as the
+concrete type. The receiver-typed sink then fires inside that contextual evaluation, and
+the caller reads the resulting summary the way it reads the context-free one, applying
+`param_to_sink` to its arguments.
+
+The memo key is the callee's function position plus exactly the type that was missing,
+`(callee position, receiver type)`, not the caller, not the call site, and not the rest
+of the caller's bindings, because those cannot affect what the contextual evaluation sees:
+the evaluation runs on the callee's body with one binding added. The memo lives for one
+caller evaluation; a shared memo would be written by the parallel wave and would need
+synchronization for no measured gain, since a caller evaluation needs at most a handful
+of contextual summaries. When the caller cannot resolve the receiver type, the
+context-free summary is used as is, which is today's behavior.
+
+The same application runs in the concrete pass (`materialize_operation`), through a
+positional view of the keyed summary map, so the slice exists and not only the caller's
+summary claim. Both passes resolve through `CallTables`, so both see the same contexts
+and the two cannot disagree about whether a flow was reported.
+
+### 9.4 Interaction with the fixpoint and termination
+
+The contextual evaluation is an ordinary `summarize_function` run inside the caller's
+evaluation, on the callee's body, with the fixpoint's current summary table as its callee
+summaries. Because it runs with the caller's `TrackedIndexReads` in its hand, every
+summary it reads is recorded as a read of the caller's evaluation: when one of those
+grows, the wave worklist re-dirties the caller, the caller re-evaluates, and the
+contextual summary is recomputed against the grown table. The callee's own summary is
+also read (for the flag and for the call's other effects), so a grown callee re-dirties
+the caller the same way. Nothing about `Dependents` changes.
+
+Termination holds for three reasons. First, the contextual evaluation runs with the
+contextual path itself disabled: a summary computed in a context does not set the
+pending flag's recovery in motion again: contexts do not nest, so the re-summary graph
+is one level deep. Second, the contextual evaluation's states draw from the same finite
+domains as any evaluation (names, origins, places taken from the callee's body), and its
+result joins into the caller's summary, which joins monotonically and only over finite
+sets; no new iteration mechanism is added to the fixpoint, only a deterministic function
+of the current table. Third, the memo bounds the work within one evaluation: each
+(callee, type) pair is summarized at most once per evaluation, and the pairs are finite
+because the types come from the caller's finite binding set.
+
+### 9.5 What is deliberately not covered
+
+Trait dispatch, generic bounds beyond the receiver parameter, and associated types stay
+out: the flag records one missing piece of information, the receiver parameter's type,
+and the recovery supplies exactly that. A summary whose precision depends on something
+wider (a whole trait implementation choice, for instance) needs the same machinery with
+a different flag and key, and this note's shape extends to it; the receiver-typed sink
+case is the one measured gap in the stable backend's flow coverage, so it is the one
+implemented.
+
+## 10. Design note: a summary cache shared across crates
+
+The dependency mode today analyzes every dependency crate's functions each run. The
+stable backend's dependency tier already collects bodies only under
+`security-deps`, and a dependency closure is typically an order of magnitude larger
+than the workspace, so summarizing a dependency whose source has not changed is the
+same work every run. A per-dependency summary cache follows the trait solver's cache
+key lesson: the key must contain everything that can change a summary and nothing else.
+
+### 10.1 The key
+
+An entry is keyed on:
+
+- the dependency's package name and exact version, as resolved by `cargo metadata`;
+- a checksum of the crate's source: the `Cargo.lock` checksum for a registry
+  dependency, and for a path or git dependency the hash over the collected source
+  files' contents, since neither source of truth has a registry checksum that covers
+  what was read;
+- the feature set Cargo resolved for that crate, in sorted order (features can gate
+  code, and gated code changes summaries);
+- the active cfg set fingerprint (target triple and the options `cfg` evaluation
+  used), for the same reason;
+- the rusi version and the summary schema version, so an upgrade invalidates every
+  entry rather than misreading old ones;
+- a hash of only the source and sink patterns that matched at least one callee in
+  that crate during the run that produced the entry. This is the piece that keeps an
+  unrelated pattern edit from invalidating every cache entry: a new `Command::arg`
+  rule invalidates only the crates whose bodies mention a matched callee, not the
+  crates whose summaries could not have consulted it. The cost is that the cache
+  records, per crate, the set of matching patterns; that set is small (pattern
+  categories and texts, not call sites). Passthrough patterns are part of this hash
+  too, because an auto-discovered passthrough changes what flows through a body.
+
+Everything else that a summary depends on is a function of the source plus the callee
+summaries, and callee summaries are reached transitively: a dependency's summaries are
+stored together as one entry, so a call into another dependency either resolves inside
+the same entry or marks the entry as depending on a second crate's (name, version,
+checksum), which is checked before the entry is reused. Two dependencies whose sources
+call into each other share one entry keyed on both.
+
+### 10.2 Where entries live
+
+Under `rusi_cache_base`, the per-user directory the embedded wrapper build already
+uses, which enforces an absolute path, has no fallback to the system temp directory,
+and ignores relative `XDG_CACHE_HOME` and `HOME` values. The layout is
+`<cache>/summaries/<key-hash>.json`, one file per dependency, written atomically. The
+key hash is the SHA-256 of the canonical key fields, length-prefixed in a fixed order,
+the way the fetch cache derives its entry names, so a reader that disagrees about the
+key simply misses rather than misreads.
+
+### 10.3 How summaries name functions across runs
+
+Inside the fixpoint, summaries are rows addressed by position; the keyed map they
+become is keyed on the declaration id, which is stable only within a run. Entries
+therefore store summaries keyed by `canonical_name()`, the schema's generic-free,
+lifetime-free, hash-free function path, which is already the join key between a
+source-level and a binary-level call graph. On a cache hit the entry's names are
+resolved back into the run's tables: a name that no longer resolves (the dependency's
+own source changed, so the checksum would have differed) cannot occur inside one
+entry; a cross-dependency reference resolves against the referenced crate's entry, or
+the whole entry is discarded if that crate's key changed.
+
+### 10.4 Size bounds and eviction
+
+The cache has a byte ceiling with the same shape as the fetch cache's: a default
+ceiling, an enforcement pass that walks the directory and evicts by access time
+(moved forward on a hit without writing bytes), and a slack budget between passes so
+a typical scan does not pay for the walk. An entry is bounded by what its crate
+produces; a hostile crate cannot inflate an entry beyond what summarizing it would
+have produced in memory anyway, and the entry write is capped at that size. A sweep
+also drops entries whose schema version or key generation is not the current one, so
+an upgrade reclaims rather than accumulates.
+
+### 10.5 Threats, from THREAT_MODEL.md
+
+A cache another process could write is an untrusted input. The threats that apply:
+
+1. A planted entry could fabricate findings, or worse, suppress them: a hostile
+   `param_to_sink` that never fires turns a real flow silent. Every entry therefore
+   carries the key fields it was built from, and the reader recomputes the key hash
+   from what it holds against the directory name before trusting the contents; an
+   entry moved from another key is rejected. The summary schema version and rusi
+   version inside the entry must match the running tool.
+2. A hostile entry could carry malformed JSON, absurd sizes, or hostile paths. The
+   entry's JSON is parsed with the same schema types the wrapper's artifacts use, so
+   a malformed entry is a rejected entry, not a panic; the parse is size-capped by
+   the byte ceiling's per-entry bound. An entry stores no paths: functions are named
+   by `canonical_name()`, sources and sinks by category, and nothing in an entry is
+   ever turned into a filesystem path or executed.
+3. A hostile entry could reference a second crate's entry that was replaced after
+   the fact. Cross-dependency references store the referenced crate's key fields, and
+   the reference is re-checked against the current directory contents on every read;
+   a mismatch discards the referencing entry.
+4. The directory itself is per-user (no world-writable fallback), so another local
+   user cannot plant entries unless they can already write the user's cache; the
+   fetch cache documents the same boundary. Entries are validated on read regardless,
+   on the assumption the directory may be hostile anyway.
+
+What a corrupted or hostile entry costs under these rules is a cache miss and a
+re-summary, never a wrong answer: rejection is the only recovery the reader has, and
+it is always available because every entry can be recomputed from source.

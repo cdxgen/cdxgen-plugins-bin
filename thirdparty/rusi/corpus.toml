@@ -124,6 +124,12 @@ slug = "macro-zoo-app"
 tier = "fixtures"
 path = "fixtures/macro-zoo-app"
 capabilities = ["macro_rules", "scoping", "hygiene", "dependency-macros"]
+[[fixtures]]
+slug = "receiver-sink-app"
+tier = "fixtures"
+path = "fixtures/receiver-sink-app"
+capabilities = ["receiver-type", "context-sensitive-summaries", "generics"]
+expected_flows = "expected.jsonl"
 
 # ---------------------------------------------------------------------------
 # Small tier - cloned once, cached, run on every change.

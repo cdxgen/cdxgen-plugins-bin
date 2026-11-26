@@ -840,6 +840,25 @@ pub struct CompilerEvidence {
     pub crypto: Option<CryptoEvidence>,
     pub call_graph: Option<CallGraph>,
     pub data_flow: Option<DataFlowEvidence>,
+    /// Work counters the wrapper measured while collecting this crate, which
+    /// the driver merges into the `--stats-json` document. Optional so an
+    /// artifact written before the counters existed still parses.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub work_counts: Option<WrapperWorkCounts>,
+}
+
+/// The deterministic work counters of the compiler backend's data-flow passes,
+/// gathered per crate artifact and summed by the driver.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct WrapperWorkCounts {
+    #[serde(default)]
+    pub summary_evaluations: u64,
+    /// Block evaluations of the abstract MIR data-flow pass.
+    #[serde(default)]
+    pub block_evaluations_abstract: u64,
+    /// Block evaluations of the concrete MIR data-flow pass.
+    #[serde(default)]
+    pub block_evaluations_concrete: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
