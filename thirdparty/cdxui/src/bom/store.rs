@@ -42,9 +42,9 @@ pub struct FilterState {
 }
 
 /// The display fields a sort or a search matches on, lowercased once when
-/// the row is built. Sorting used to lowercase both sides of every
-/// comparison, about 2n log n small allocations per sort, and a search
-/// re-lowercased every row on every keystroke.
+/// the row is built, so a sort compares stored strings instead of
+/// allocating two lowercased copies per comparison, and a search lowercases
+/// only the query.
 #[derive(Debug, Clone, Default)]
 pub struct ComponentKeys {
     pub name: String,
@@ -63,9 +63,8 @@ pub struct ComponentRow {
     pub component: Component,
     pub keys: ComponentKeys,
     /// The row's vulnerability count and highest severity, resolved once
-    /// when the vuln aggregates change. The vuln sorts used to look the
-    /// summary up on both sides of every comparison, building the purl key
-    /// variants each time.
+    /// when the vuln aggregates change, so the vuln sorts compare two
+    /// numbers instead of resolving purl key variants per comparison.
     pub vuln_count: usize,
     pub vuln_max_severity: u8,
 }
@@ -343,14 +342,13 @@ fn purl_index_keys(purl: &str) -> Vec<String> {
 #[derive(Debug, Clone)]
 pub struct VulnerabilityRow {
     pub vuln: Vulnerability,
-    /// The values the sorts compare and the search matches, computed once
-    /// when the row is built: the severity and score parse, the insight
-    /// labels are scanned, and the display fields were lowercased per
-    /// comparison before this cache existed.
+    /// The values the sorts compare and the search matches, computed when
+    /// the row is built: the parsed severity and score, the insight-label
+    /// flags, and the lowercased display fields.
     pub keys: VulnKeys,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct VulnKeys {
     pub id: String,
     pub package: String,
@@ -368,16 +366,7 @@ impl VulnerabilityRow {
     pub fn new(vuln: Vulnerability) -> Self {
         let mut row = Self {
             vuln,
-            keys: VulnKeys {
-                id: String::new(),
-                package: String::new(),
-                severity_rank: 0,
-                max_score: 0.0,
-                prioritized: false,
-                reach: 0,
-                fix: String::new(),
-                search_text: String::new(),
-            },
+            keys: VulnKeys::default(),
         };
         row.refresh_keys();
         row
@@ -1144,79 +1133,52 @@ impl BomStore {
 
     fn rebuild_filtered_indices(&mut self) {
         let query_lower = self.current_filter.query.to_lowercase();
-        let type_unchanged = self
-            .last_search
-            .as_ref()
-            .is_some_and(|prev| prev.component_type == self.current_filter.component_type);
-        let vuln_filter_unchanged = self
-            .last_search
-            .as_ref()
-            .is_some_and(|prev| prev.vuln_filter == self.vuln_filter);
-        // Extending a query keeps every match it had: a row matching a
-        // longer query matches the prefix it extends, so only the rows the
-        // previous rebuild kept can still match.
-        let query_extends = self
-            .last_search
-            .as_ref()
-            .is_some_and(|prev| query_lower.starts_with(&prev.query_lower));
-        let extend = query_extends && type_unchanged && !query_lower.is_empty();
-        let extend_vulns = query_extends && vuln_filter_unchanged && !query_lower.is_empty();
+        // A row matching a longer query also matches the prefix it extends,
+        // so when the query only grew, the rows the previous rebuild kept are
+        // the only candidates. Each list also needs its own other filter to
+        // be unchanged, and an empty query matches every row anyway.
+        let (extends, type_unchanged, vuln_filter_unchanged) = match &self.last_search {
+            Some(prev) => (
+                !query_lower.is_empty() && query_lower.starts_with(&prev.query_lower),
+                prev.component_type == self.current_filter.component_type,
+                prev.vuln_filter == self.vuln_filter,
+            ),
+            None => (false, false, false),
+        };
 
-        if extend {
+        if extends && type_unchanged {
             let components = &self.components;
-            let services = &self.services;
             self.filtered_component_indices
                 .retain(|&i| components[i].matches_lowercased(&query_lower));
-            self.filtered_service_indices
-                .retain(|&i| services[i].matches_lowercased(&query_lower));
-        } else if query_lower.is_empty() {
-            // Everything matches the other filters.
-            self.filtered_component_indices = (0..self.components.len())
-                .filter(|&i| self.component_passes_type_filter(i))
-                .collect();
-            self.filtered_service_indices = (0..self.services.len()).collect();
-            self.filtered_vulnerability_indices = (0..self.vulnerabilities.len())
-                .filter(|&i| self.vulnerabilities[i].passes_vuln_filter(self.vuln_filter))
-                .collect();
         } else {
-            self.filtered_component_indices = self
-                .components
-                .iter()
-                .enumerate()
-                .filter(|(_, row)| {
-                    let type_match = self
-                        .current_filter
-                        .component_type
-                        .as_ref()
-                        .map(|t| row.component.component_type == *t)
-                        .unwrap_or(true);
-                    type_match && row.matches_lowercased(&query_lower)
+            self.filtered_component_indices = (0..self.components.len())
+                .filter(|&i| {
+                    self.component_passes_type_filter(i)
+                        && self.components[i].matches_lowercased(&query_lower)
                 })
-                .map(|(i, _)| i)
-                .collect();
-
-            self.filtered_service_indices = self
-                .services
-                .iter()
-                .enumerate()
-                .filter(|(_, row)| row.matches_lowercased(&query_lower))
-                .map(|(i, _)| i)
                 .collect();
         }
 
-        if extend_vulns && !query_lower.is_empty() {
+        if extends {
+            let services = &self.services;
+            self.filtered_service_indices
+                .retain(|&i| services[i].matches_lowercased(&query_lower));
+        } else {
+            self.filtered_service_indices = (0..self.services.len())
+                .filter(|&i| self.services[i].matches_lowercased(&query_lower))
+                .collect();
+        }
+
+        if extends && vuln_filter_unchanged {
             let vulnerabilities = &self.vulnerabilities;
             self.filtered_vulnerability_indices
                 .retain(|&i| vulnerabilities[i].matches_lowercased(&query_lower));
-        } else if !query_lower.is_empty() {
-            self.filtered_vulnerability_indices = self
-                .vulnerabilities
-                .iter()
-                .enumerate()
-                .filter(|(_, row)| {
-                    row.matches_lowercased(&query_lower) && row.passes_vuln_filter(self.vuln_filter)
+        } else {
+            self.filtered_vulnerability_indices = (0..self.vulnerabilities.len())
+                .filter(|&i| {
+                    let row = &self.vulnerabilities[i];
+                    row.passes_vuln_filter(self.vuln_filter) && row.matches_lowercased(&query_lower)
                 })
-                .map(|(i, _)| i)
                 .collect();
         }
 
