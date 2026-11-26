@@ -365,12 +365,15 @@ impl IndexedTable<FunctionSummary> for KeyedRows<'_> {
 /// counts by its size rather than counting as one unit.
 ///
 /// The loop settling also asks a state to forget the keys written during a
-/// trip, so the trip's join folds only the writes back into the head. A
-/// state that cannot track writes per key joins in full every trip.
+/// trip, so the trip's join folds only the writes back into the head, and to
+/// count every key as written when the state is replaced wholesale. A state
+/// that cannot track writes per key joins in full every trip.
 pub(crate) trait StateSize {
     fn state_size(&self) -> usize;
 
     fn clear_dirty(&mut self) {}
+
+    fn mark_all_dirty(&mut self) {}
 }
 
 impl<K, V> StateSize for HashMap<K, V> {
@@ -403,9 +406,12 @@ struct FunctionEnv<V> {
     /// Total entries `field_keys` holds, so the stats counter can price a
     /// whole-state clone by the entries it copies.
     field_key_count: usize,
-    /// Keys written since the dirty list was last cleared, in write order.
-    /// A loop trip's join folds the trip's writes into the head through this
-    /// list instead of visiting every entry of the body state.
+    /// Keys whose value may have changed since the dirty list was last
+    /// cleared: every insert, and every join that grew an existing entry. A
+    /// loop trip's join folds the trip's changes into the head through this
+    /// list instead of visiting every entry of the body state, so anything
+    /// that changes a value without recording its key here loses taint at
+    /// the enclosing loop's head.
     dirty_keys: Vec<String>,
 }
 
@@ -445,8 +451,20 @@ impl<V> FunctionEnv<V> {
         self.dirty_keys.clear();
     }
 
+    /// Records that the value under `key` changed in place.
+    fn mark_dirty(&mut self, key: &str) {
+        self.dirty_keys.push(key.to_string());
+    }
+
+    /// Records every key as changed, for a state that replaced the one the
+    /// current trip started from.
+    fn mark_all_dirty(&mut self) {
+        self.dirty_keys = self.values.keys().cloned().collect();
+    }
+
     /// The entry `key` maps to, inserting the default when absent, so a
-    /// dotted key's index entry is created with it.
+    /// dotted key's index entry is created with it. A caller that changes an
+    /// entry that already existed must also call [`Self::mark_dirty`].
     fn get_or_insert_default(&mut self, key: &str) -> &mut V
     where
         V: Default,
@@ -502,6 +520,10 @@ impl<V: Default> StateSize for FunctionEnv<V> {
 
     fn clear_dirty(&mut self) {
         FunctionEnv::clear_dirty(self);
+    }
+
+    fn mark_all_dirty(&mut self) {
+        FunctionEnv::mark_all_dirty(self);
     }
 }
 
@@ -617,6 +639,11 @@ impl<S: Clone + StateSize> OperationWalk<'_, '_, S> {
         if let Some(mut head) = self.settled[node.index].take() {
             settled = !(self.join)(&mut head, state);
             *state = head;
+            // `state` may be an enclosing loop's trip body, whose join folds
+            // only the keys recorded as changed. The stored head can differ
+            // from that trip's starting state on any key, so every key counts
+            // as changed from here on.
+            state.mark_all_dirty();
         }
         while !settled {
             stats::record_loop_walks(self.pass, 1);
@@ -630,8 +657,7 @@ impl<S: Clone + StateSize> OperationWalk<'_, '_, S> {
         // The settled head is both what the next entry resumes from and what
         // holds after the loop, so the store keeps one copy of it while the
         // emitting walk writes over `state`; the head comes back from the
-        // store afterwards. Walking a throwaway copy of the head instead
-        // copied it once more per entry.
+        // store afterwards, and no second copy is made for the walk.
         self.settled[node.index] = Some(state.clone());
         if emit {
             stats::record_loop_walks(self.pass, 1);
@@ -11518,6 +11544,57 @@ fn summary_dependencies(function: &FunctionRecord, tables: &CallTables) -> BTree
     dependencies
 }
 
+/// Unions `origins` into `head`'s entry for `key` and reports whether it
+/// grew. A grown entry is recorded as changed, so when `head` is itself an
+/// enclosing loop's trip body, that loop's join sees the growth.
+fn join_origins_at(
+    head: &mut FunctionEnv<BTreeSet<AbstractOrigin>>,
+    key: &str,
+    origins: &BTreeSet<AbstractOrigin>,
+) -> bool {
+    if origins.is_empty() {
+        return false;
+    }
+    let Some(entry) = head.values.get_mut(key) else {
+        head.insert(key.to_string(), origins.clone());
+        return true;
+    };
+    let before = entry.len();
+    entry.extend(origins.iter().cloned());
+    let grew = entry.len() != before;
+    if grew {
+        head.mark_dirty(key);
+    }
+    grew
+}
+
+/// Adds to `head`'s entry for `key` the witnesses of origins it did not
+/// carry yet. The entry keeps the witness it already holds for an origin, so
+/// another trip around a loop never trades it for a longer one. A grown entry
+/// is recorded as changed, as in [`join_origins_at`].
+fn join_witnesses_at(
+    head: &mut FunctionEnv<ConcreteTaint>,
+    key: &str,
+    taint: &ConcreteTaint,
+) -> bool {
+    let mut grew = false;
+    for path in &taint.paths {
+        let entry = head.get_or_insert_default(key);
+        if !entry
+            .paths
+            .iter()
+            .any(|existing| existing.origin_key == path.origin_key)
+        {
+            entry.paths.push(path.clone());
+            grew = true;
+        }
+    }
+    if grew {
+        head.mark_dirty(key);
+    }
+    grew
+}
+
 /// Loop-head join for the summary pass: unions each name's origins.
 fn join_abstract_env(
     head: &mut FunctionEnv<BTreeSet<AbstractOrigin>>,
@@ -11529,25 +11606,13 @@ fn join_abstract_env(
     );
     let mut changed = false;
     for (name, origins) in body.iter() {
-        if origins.is_empty() {
-            continue;
-        }
-        let Some(entry) = head.values.get_mut(name) else {
-            head.insert(name.clone(), origins.clone());
-            changed = true;
-            continue;
-        };
-        let before = entry.len();
-        entry.extend(origins.iter().cloned());
-        changed |= entry.len() != before;
+        changed |= join_origins_at(head, name, origins);
     }
     changed
 }
 
 /// Loop-head join for the concrete pass: adds the witnesses of origins a
-/// name did not carry yet. A name keeps the witness it already holds for an
-/// origin, so another trip around the loop never trades it for a longer one,
-/// and the join only grows while new origins arrive.
+/// name did not carry yet, so the join only grows while new origins arrive.
 fn join_concrete_env(
     head: &mut FunctionEnv<ConcreteTaint>,
     body: &FunctionEnv<ConcreteTaint>,
@@ -11558,23 +11623,13 @@ fn join_concrete_env(
     );
     let mut changed = false;
     for (name, taint) in body.iter() {
-        for path in &taint.paths {
-            let entry = head.get_or_insert_default(name);
-            if !entry
-                .paths
-                .iter()
-                .any(|existing| existing.origin_key == path.origin_key)
-            {
-                entry.paths.push(path.clone());
-                changed = true;
-            }
-        }
+        changed |= join_witnesses_at(head, name, taint);
     }
     changed
 }
 
 /// The settling join for the summary pass: visits only the keys the trip
-/// wrote. Everything else in the body is the head's own value unchanged
+/// changed. Everything else in the body is the head's own value unchanged
 /// since the clone the trip started from, so joining it would add nothing.
 fn join_abstract_env_dirty(
     head: &mut FunctionEnv<BTreeSet<AbstractOrigin>>,
@@ -11586,28 +11641,14 @@ fn join_abstract_env_dirty(
     );
     let mut changed = false;
     for key in &body.dirty_keys {
-        let Some(origins) = body.values.get(key) else {
-            continue;
-        };
-        if origins.is_empty() {
-            continue;
-        }
-        match head.values.get_mut(key) {
-            Some(entry) => {
-                let before = entry.len();
-                entry.extend(origins.iter().cloned());
-                changed |= entry.len() != before;
-            }
-            None => {
-                head.insert(key.clone(), origins.clone());
-                changed = true;
-            }
+        if let Some(origins) = body.values.get(key) {
+            changed |= join_origins_at(head, key, origins);
         }
     }
     changed
 }
 
-/// The settling join for the concrete pass, through the trip's dirty keys.
+/// The settling join for the concrete pass, through the trip's changed keys.
 fn join_concrete_env_dirty(
     head: &mut FunctionEnv<ConcreteTaint>,
     body: &FunctionEnv<ConcreteTaint>,
@@ -11618,19 +11659,8 @@ fn join_concrete_env_dirty(
     );
     let mut changed = false;
     for key in &body.dirty_keys {
-        let Some(taint) = body.values.get(key) else {
-            continue;
-        };
-        for path in &taint.paths {
-            let entry = head.get_or_insert_default(key);
-            if !entry
-                .paths
-                .iter()
-                .any(|existing| existing.origin_key == path.origin_key)
-            {
-                entry.paths.push(path.clone());
-                changed = true;
-            }
+        if let Some(taint) = body.values.get(key) {
+            changed |= join_witnesses_at(head, key, taint);
         }
     }
     changed
@@ -22196,6 +22226,142 @@ pub fn run(rows: Vec<Vec<String>>) {
         // assignment it sees already carries the source.
         assert_eq!(emitted, operations.len());
         assert_eq!(emitted_untainted, 0);
+    }
+
+    /// A random function body for [`dirty_joins_match_full_joins`]: straight
+    /// line assignments over a few names, with loops nested at random.
+    fn random_loop_program(seed: u64) -> (Vec<Operation>, Vec<LoopRegion>) {
+        let mut state = seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1;
+        let mut next = move |bound: u64| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state % bound
+        };
+        fn build(
+            next: &mut dyn FnMut(u64) -> u64,
+            depth: usize,
+            operations: &mut Vec<Operation>,
+            regions: &mut Vec<LoopRegion>,
+        ) {
+            let items = 1 + next(4);
+            for _ in 0..items {
+                if depth < 4 && next(3) == 0 {
+                    let start = operations.len();
+                    build(next, depth + 1, operations, regions);
+                    regions.push(LoopRegion {
+                        start,
+                        end: operations.len(),
+                    });
+                    continue;
+                }
+                let target = format!("v{}", next(4));
+                let value = match next(4) {
+                    0 => SimpleExpr::Literal {
+                        text: String::new(),
+                    },
+                    1 => SimpleExpr::Unknown,
+                    _ => SimpleExpr::Var(format!("v{}", next(4))),
+                };
+                if next(4) == 0 {
+                    operations.push(Operation::AssignField {
+                        target,
+                        field: format!("f{}", next(2)),
+                        value,
+                    });
+                } else {
+                    operations.push(Operation::Assign { target, value });
+                }
+            }
+        }
+        let mut operations = Vec::new();
+        let mut regions = Vec::new();
+        build(&mut next, 0, &mut operations, &mut regions);
+        regions.sort_by_key(|region| (region.start, std::cmp::Reverse(region.end)));
+        (operations, regions)
+    }
+
+    type SummaryEnv = FunctionEnv<BTreeSet<AbstractOrigin>>;
+
+    /// What each operation saw on its emitting visit, and the final state.
+    type WalkOutcome = (
+        Vec<BTreeSet<AbstractOrigin>>,
+        std::collections::BTreeMap<String, BTreeSet<AbstractOrigin>>,
+    );
+
+    /// Walks `operations` with the summary pass's joins, `join_dirty` as the
+    /// settling join. A literal is a source of its own (origin = operation
+    /// index), `Unknown` clears, a variable read sees the variable's field
+    /// paths, and a field write unions into `target.field` in place. Returns
+    /// what each operation saw on its emitting visit and the final state.
+    fn walk_random_program(
+        operations: &[Operation],
+        regions: &[LoopRegion],
+        join_dirty: fn(&mut SummaryEnv, &SummaryEnv) -> bool,
+    ) -> WalkOutcome {
+        let loops = loop_forest(regions);
+        let mut emitted = vec![BTreeSet::new(); operations.len()];
+        let mut env: FunctionEnv<BTreeSet<AbstractOrigin>> = FunctionEnv::new();
+        run_operations(
+            operations,
+            &loops,
+            &mut env,
+            &mut |operation, env, emit| {
+                let index = operations
+                    .iter()
+                    .position(|candidate| std::ptr::eq(candidate, operation))
+                    .expect("an operation of this body");
+                let value = match operation {
+                    Operation::Assign { value, .. } | Operation::AssignField { value, .. } => value,
+                    _ => return,
+                };
+                let origins: BTreeSet<AbstractOrigin> = match value {
+                    SimpleExpr::Literal { .. } => {
+                        BTreeSet::from([AbstractOrigin::Source(index as u32)])
+                    }
+                    SimpleExpr::Var(name) => {
+                        env.read_with_fields(name).flatten().cloned().collect()
+                    }
+                    _ => BTreeSet::new(),
+                };
+                if emit {
+                    emitted[index] = origins.clone();
+                }
+                match operation {
+                    Operation::AssignField { target, field, .. } => {
+                        env.extend_origins(&format!("{target}.{field}"), origins)
+                    }
+                    Operation::Assign { target, .. } => env.insert(target.clone(), origins),
+                    _ => {}
+                }
+            },
+            join_abstract_env,
+            join_dirty,
+            crate::stats::AnalysisPass::Summary,
+        );
+        let finals = env
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
+        (emitted, finals)
+    }
+
+    /// The settling join that folds only a trip's changed keys must reach
+    /// exactly what the join over every key reaches, however the loops nest:
+    /// a key that an inner loop's join grows in place is a change of the
+    /// enclosing trip too, and so is every key of a stored head that replaces
+    /// the trip's state.
+    #[test]
+    fn dirty_joins_match_full_joins() {
+        for seed in 0..3000 {
+            let (operations, regions) = random_loop_program(seed);
+            let full = walk_random_program(&operations, &regions, join_abstract_env);
+            let dirty = walk_random_program(&operations, &regions, join_abstract_env_dirty);
+            assert_eq!(
+                full, dirty,
+                "seed {seed}: {operations:?} with loops {regions:?}"
+            );
+        }
     }
 
     /// The state the loop tests walk: the names that carry taint.

@@ -69,15 +69,13 @@ pub(crate) fn record_loop_walks(pass: AnalysisPass, amount: u64) {
 }
 
 /// Records environment entries whole-variable reads visited for `pass`: one
-/// read of `x` scans the environment for keys starting `x.`, so a scan over
-/// an environment of `n` entries adds `n`.
+/// read of `x` visits `x` itself and each field path recorded under it.
 pub(crate) fn record_env_scan(pass: AnalysisPass, entries_visited: u64) {
     pass.add_env_scan_entries(entries_visited);
 }
 
 /// Records the entry count of every whole-state clone made for `pass`: the
-/// per-trip body copy, the emitting body copy, and the settled head stored
-/// for the next entry.
+/// per-trip body copy and the settled head stored for the next entry.
 pub(crate) fn record_state_entries_cloned(pass: AnalysisPass, entries_cloned: u64) {
     pass.add_state_entries_cloned(entries_cloned);
 }
@@ -113,8 +111,8 @@ pub struct WorkCounters {
     /// Same, for the concrete taint pass.
     pub state_entries_cloned_concrete: AtomicU64,
     /// Environment entries the loop-head joins visited in the summary pass:
-    /// the join folds a trip's final state into the head, and today that
-    /// means walking every entry of the body state.
+    /// every entry of the state for a join of a loop entry into a stored
+    /// head, and the changed keys for the join that settles a trip.
     pub join_entries_visited_summary: AtomicU64,
     /// Same, for the concrete taint pass.
     pub join_entries_visited_concrete: AtomicU64,
