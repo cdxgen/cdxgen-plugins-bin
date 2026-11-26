@@ -1,0 +1,19 @@
+thirdparty/rusi/crates/rusi-core/src/lib.rs
+  s_babdf7f6b57d6f::t_72fc1bdbb9154d 13876-13882,14061-14068,14071-14077,14082-14088,14093-14120,14132,14160,14163-14169,14180
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "71ecf965823e8a0891ed90d3b7b97eacf3c89ee4",
+  "prompts": {},
+  "sessions": {
+    "s_babdf7f6b57d6f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2be749a3-ee66-4442-97ec-ef82c8e114b4",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
