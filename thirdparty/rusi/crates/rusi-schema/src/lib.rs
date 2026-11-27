@@ -119,7 +119,9 @@ fn find_top_level(name: &str, needle: &str) -> Option<Range<usize>> {
                     depth -= 1;
                 }
             }
-            _ if depth == 0 && name[idx..].starts_with(needle) => {
+            // Compared as bytes: `idx` walks bytes and may sit inside a
+            // multi-byte character, where slicing the `str` would panic.
+            _ if depth == 0 && bytes[idx..].starts_with(needle.as_bytes()) => {
                 return Some(idx..idx + needle.len());
             }
             _ => {}
@@ -1074,6 +1076,10 @@ mod canonical_name_tests {
             canonical_name("alloc::vec::Vec<u8>::push"),
             "alloc::vec::Vec::push"
         );
+        // A name with a multi-byte identifier reduces without slicing
+        // inside a character.
+        assert_eq!(canonical_name("app::ẕ::<impl Tr for app::ẕ::T>::m"), "app::ẕ::T::m");
+        assert_eq!(canonical_name("app::ẕẕ::run"), "app::ẕẕ::run");
         // A turbofish is not a qualified self either.
         assert_eq!(
             canonical_name("alloc::vec::Vec::<u8>::push"),
