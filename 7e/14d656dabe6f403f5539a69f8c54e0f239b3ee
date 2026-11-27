@@ -1,0 +1,26 @@
+thirdparty/rusi/fixtures/macro-zoo-app/src/lib.rs
+  s_313a3332a63f47::t_0568cdc5da159f 235-238
+  s_313a3332a63f47::t_27378b8d27ba67 221-222
+  s_313a3332a63f47::t_4f14181aefb8c1 31
+  s_313a3332a63f47::t_c98d2bb7aa247d 202-220,223-234,239
+thirdparty/rusi/fixtures/macro-zoo-app/Cargo.toml
+  s_313a3332a63f47::t_ef650f00660ccf 11
+thirdparty/rusi/fixtures/macro-zoo-app/Cargo.lock
+  s_313a3332a63f47::t_0aa79516a3bb44 29,33-38
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7e14d656dabe6f403f5539a69f8c54e0f239b3ee",
+  "prompts": {},
+  "sessions": {
+    "s_313a3332a63f47": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_c5dc46c0-216e-4d08-a8b5-9496b92c2580",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}

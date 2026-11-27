@@ -1,0 +1,26 @@
+thirdparty/rusi/crates/rusi-rustc-wrapper/src/main.rs
+  s_313a3332a63f47::t_94c0db710484ae 1310
+thirdparty/rusi/crates/rusi-driver/src/lib.rs
+  s_313a3332a63f47::t_d239fa180b1d9d 745-751
+thirdparty/rusi/crates/rusi-core/src/lib.rs
+  s_313a3332a63f47::t_94c0db710484ae 18553-18556
+thirdparty/rusi/crates/rusi-cli/tests/cli_smoke.rs
+  s_313a3332a63f47::t_ff4ce90910d65d 1423
+  s_313a3332a63f47::t_94c0db710484ae 1220-1223,1239-1241,1305-1308,1324-1325,1338,1354-1356,1360-1362,1389-1391,1468-1470
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "9cde7fd33485ffef422a9ff273a37018216c3776",
+  "prompts": {},
+  "sessions": {
+    "s_313a3332a63f47": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_c5dc46c0-216e-4d08-a8b5-9496b92c2580",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}

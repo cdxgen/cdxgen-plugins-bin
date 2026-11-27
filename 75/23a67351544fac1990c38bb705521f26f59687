@@ -1,0 +1,23 @@
+thirdparty/rusi/scripts/eval/golden/macro-zoo-app.stable.digest.json
+  s_313a3332a63f47::t_d5d528dfaa8d34 2-3,5
+thirdparty/rusi/docs/ANALYSIS_ARCHITECTURE.md
+  s_313a3332a63f47::t_672223169604fb 462,465-472
+thirdparty/rusi/scripts/eval/golden/macro-zoo-app.compiler.digest.json
+  s_313a3332a63f47::t_d5d528dfaa8d34 1-6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7523a67351544fac1990c38bb705521f26f59687",
+  "prompts": {},
+  "sessions": {
+    "s_313a3332a63f47": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_c5dc46c0-216e-4d08-a8b5-9496b92c2580",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
