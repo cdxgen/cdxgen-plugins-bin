@@ -1306,13 +1306,11 @@ fn analyze_on_this_thread(
         options.debug,
         format_args!("pass=stable-file-analysis files={}", analysis_tasks.len()),
     );
+    let macro_table = std::sync::Arc::new(stats::time_phase("macro_prepass", || {
+        build_macro_table(&metadata, &analysis_root, options.debug, &analysis_tasks)
+    }));
     let mut analyzed_files = stats::time_phase("parse", || {
-        let macro_table = std::sync::Arc::new(build_macro_table(
-            &metadata,
-            &analysis_root,
-            options.debug,
-            &analysis_tasks,
-        ));
+        let macro_table = macro_table.clone();
         let mut parse_diagnostics = parallel_map_collect(&analysis_tasks, |task| {
             match analyze_file(
                 &task.package_ctx,
@@ -1357,7 +1355,10 @@ fn analyze_on_this_thread(
         parsed
     });
     debug_log(options.debug, format_args!("pass=import-resolution"));
-    for glob in resolve_imports(&mut analyzed_files) {
+    let unresolved_globs = stats::time_phase("import_resolution", || {
+        resolve_imports(&mut analyzed_files)
+    });
+    for glob in unresolved_globs {
         diagnostics.push(Diagnostic {
             kind: "import-resolution".to_string(),
             message: format!(
@@ -2028,23 +2029,26 @@ fn plan_packages(
     };
     // Module discovery parses every module file to read its `mod` declarations,
     // so it is worth spreading across packages the same way file analysis is.
-    let planned = parallel_map_collect(&packages, |(package, workspace_member)| {
-        let package_ctx = package_context(package, *workspace_member)?;
-        let mut cfg_options = host_cfg.clone();
-        cfg_options.insert_package_features(metadata, package);
-        let evaluator = CfgEvaluator::new(cfg_options, include_tests);
-        // A dependency contributes only its library; test targets of a
-        // dependency are never built here either.
-        let roots = module_tree::crate_roots(
-            package,
-            include_tests && *workspace_member,
-            !*workspace_member,
-        );
-        let module_tree = module_tree::discover(&package_ctx, &roots, &evaluator, include_tests)?;
-        Ok(PackageAnalysisPlan {
-            package_ctx,
-            evaluator,
-            module_tree,
+    let planned = stats::time_phase("module_tree", || {
+        parallel_map_collect(&packages, |(package, workspace_member)| {
+            let package_ctx = package_context(package, *workspace_member)?;
+            let mut cfg_options = host_cfg.clone();
+            cfg_options.insert_package_features(metadata, package);
+            let evaluator = CfgEvaluator::new(cfg_options, include_tests);
+            // A dependency contributes only its library; test targets of a
+            // dependency are never built here either.
+            let roots = module_tree::crate_roots(
+                package,
+                include_tests && *workspace_member,
+                !*workspace_member,
+            );
+            let module_tree =
+                module_tree::discover(&package_ctx, &roots, &evaluator, include_tests)?;
+            Ok(PackageAnalysisPlan {
+                package_ctx,
+                evaluator,
+                module_tree,
+            })
         })
     });
     let mut plans = planned.into_iter().collect::<Result<Vec<_>>>()?;

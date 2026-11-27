@@ -172,7 +172,9 @@ fn run_analysis_command(args: AnalysisArgs, scope: AnalysisScope) -> Result<()> 
         write_data_flow_export(data_flow, &args.dataflow_export_format, path, args.pretty)?;
     }
 
-    write_report_json(&report, args.out.as_deref(), args.pretty)?;
+    rusi_core::stats::time_phase("report_write", || {
+        write_report_json(&report, args.out.as_deref(), args.pretty)
+    })?;
 
     if let Some(path) = args.stats_json.as_ref() {
         rusi_core::stats::write_stats_json(path)

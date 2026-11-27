@@ -311,6 +311,7 @@ dependencies = [
  "anyhow",
  "cargo_metadata",
  "indexmap",
+ "libc",
  "pretty_assertions",
  "proc-macro2",
  "quote",
