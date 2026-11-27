@@ -37,9 +37,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from run import (  # noqa: E402
-    CACHE_DIR,
     REPO_ROOT,
-    load_corpus,
     resolve_target_path,
     run_with_timeout,
 )
@@ -131,28 +129,24 @@ def run_mode(
         status = "ok"
 
     phases: dict[str, float] = {}
-    stats_peak_rss: int | None = None
     if stats_path.exists():
         try:
             stats = json.loads(stats_path.read_text())
+            # A phase that runs more than once has one entry per run.
             for entry in stats.get("phases") or []:
-                phases[entry["name"]] = entry.get("seconds", 0.0)
-                reading = entry.get("peak_rss_bytes")
-                if reading is not None:
-                    stats_peak_rss = max(stats_peak_rss or 0, reading)
-        except Exception:
+                name = entry["name"]
+                phases[name] = phases.get(name, 0.0) + entry.get("seconds", 0.0)
+        except (OSError, ValueError, KeyError, TypeError):
             pass
-    # `/usr/bin/time` reads the whole process including any child; the
-    # stats document reads the rusi process itself. The table reports the
-    # time wrapper's figure, which is the one the epic's other tasks also
-    # set targets from.
+    # The table reports the peak RSS `/usr/bin/time` measured, which covers
+    # child processes too; the per-phase readings in the stats document only
+    # cover the rusi process itself.
     return {
         "slug": slug,
         "mode": mode,
         "status": status,
         "seconds": round(elapsed, 2),
         "peak_rss_kb": peak_rss_kb,
-        "stats_peak_rss_kb": (stats_peak_rss // 1024) if stats_peak_rss else None,
         "phases": phases,
     }
 
@@ -213,7 +207,7 @@ def main() -> int:
     parser.add_argument(
         "--out",
         type=Path,
-        default=REPO_ROOT / "scripts" / "eval" / "deps-baseline.md",
+        default=REPO_ROOT / "scripts" / "eval" / "runs" / "deps-baseline.md",
         help="where the Markdown table is written",
     )
     args = parser.parse_args()

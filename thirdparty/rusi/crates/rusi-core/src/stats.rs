@@ -154,8 +154,7 @@ pub fn work() -> &'static WorkCounters {
 /// reading sits above the previous phase's is where the process grew.
 /// Linux reports the figure in kilobytes and macOS in bytes. On Windows
 /// nothing is read and the phase entries carry `null`, which the stats
-/// document documents rather than pretending to zero; reading
-/// `GetProcessMemoryInfo`'s `PeakWorkingSetSize` there is the follow-up.
+/// document documents rather than pretending to zero.
 #[cfg(unix)]
 fn peak_rss_bytes() -> Option<u64> {
     let usage = unsafe {
@@ -320,23 +319,19 @@ mod tests {
     use super::{phase_samples, snapshot_value, time_phase};
 
     #[test]
-    fn every_phase_entry_names_the_pass_and_carries_a_reading() {
+    fn every_phase_entry_names_the_pass() {
         time_phase("stats_test_pass", || 1usize);
         let samples = phase_samples();
         let last = samples
             .iter()
             .rfind(|sample| sample.name == "stats_test_pass")
             .expect("the phase was recorded");
-        assert_eq!(last.name, "stats_test_pass");
-        // A reading is present on this platform (macOS and Linux both read
-        // one); a platform without a read records null rather than zero.
-        assert!(
-            last.peak_rss_bytes.is_some() || last.peak_rss_bytes.is_none(),
-            "the field is present either way"
-        );
         assert!(last.micros < 1_000_000, "the timed work is trivial");
+        // Unix platforms read a high-water mark; elsewhere the entry is null.
+        assert_eq!(last.peak_rss_bytes.is_some(), cfg!(unix));
     }
 
+    #[cfg(unix)]
     #[test]
     fn peak_rss_never_decreases_across_phases() {
         // The kernel's high-water mark only grows, so the readings the
