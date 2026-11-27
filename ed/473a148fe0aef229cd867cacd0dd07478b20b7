@@ -1,0 +1,20 @@
+thirdparty/rusi/crates/rusi-core/src/lib.rs
+  s_f579657ee773f3::t_4990d73287cd5f 15492-15557
+  s_f579657ee773f3::t_9415bc87dde6bf 15467-15474
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ed473a148fe0aef229cd867cacd0dd07478b20b7",
+  "prompts": {},
+  "sessions": {
+    "s_f579657ee773f3": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_d612013f-11e4-4ec5-b2c4-7b55f3f92ed3",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
