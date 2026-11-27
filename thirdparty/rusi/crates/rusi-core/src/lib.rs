@@ -7817,8 +7817,9 @@ fn resolve_call_targets(
             // Combine local + trait candidates so the filter sees every
             // possible impl of this method, regardless of where it lives.
             let mut combined: Vec<String> = local_candidates.clone();
+            let mut seen: HashSet<&str> = local_candidates.iter().map(String::as_str).collect();
             for id in &trait_candidates {
-                if !combined.contains(id) {
+                if seen.insert(id.as_str()) {
                     combined.push(id.clone());
                 }
             }
@@ -7884,9 +7885,11 @@ fn resolve_call_targets(
                     .and_then(|receiver| receiver.split('.').next())
                     .and_then(|base| dyn_type_texts.get(base))
                     .and_then(|type_text| written_trait_object_type(type_text));
+                let trait_method_ids: HashSet<&str> =
+                    trait_method_ids.iter().map(String::as_str).collect();
                 let dispatched: Vec<String> = trait_candidates
                     .iter()
-                    .filter(|id| trait_method_ids.contains(*id))
+                    .filter(|id| trait_method_ids.contains(id.as_str()))
                     .filter(|id| {
                         let Some((_, written_args)) = written_dyn.as_ref() else {
                             return true;

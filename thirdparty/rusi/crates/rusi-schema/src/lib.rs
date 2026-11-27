@@ -1078,7 +1078,10 @@ mod canonical_name_tests {
         );
         // A name with a multi-byte identifier reduces without slicing
         // inside a character.
-        assert_eq!(canonical_name("app::ẕ::<impl Tr for app::ẕ::T>::m"), "app::ẕ::T::m");
+        assert_eq!(
+            canonical_name("app::ẕ::<impl Tr for app::ẕ::T>::m"),
+            "app::ẕ::T::m"
+        );
         assert_eq!(canonical_name("app::ẕẕ::run"), "app::ẕẕ::run");
         // A turbofish is not a qualified self either.
         assert_eq!(
