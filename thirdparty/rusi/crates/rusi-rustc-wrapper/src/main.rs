@@ -2581,8 +2581,8 @@ fn generic_call_impl_fallback<'tcx>(
             continue;
         }
         let args_match = (1..call_args.args_len()).all(|index| {
-            match (impl_trait_ref.args.get(index), call_args.arg_at(index)) {
-                (Some(impl_arg), Some(call_arg)) => generic_arg_may_match(*impl_arg, call_arg),
+            match (impl_trait_ref.args.arg_at(index), call_args.arg_at(index)) {
+                (Some(impl_arg), Some(call_arg)) => generic_arg_may_match(impl_arg, call_arg),
                 _ => true,
             }
         });

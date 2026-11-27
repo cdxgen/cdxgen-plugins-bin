@@ -2406,7 +2406,11 @@ fn compiler_backend_keeps_context_impl_probes_apart() -> Result<()> {
         ]
     );
     // A lifetime argument never rules an impl out of a dyn dispatch.
-    assert_context_impl_reaches(&report, "::named_dyn", "Named");
+    let named = context_impl_edge_targets(&report, "::named_dyn", "probes::Named");
+    assert!(
+        !named.is_empty(),
+        "named_dyn should dispatch to Named's impl despite the lifetime argument"
+    );
     // A method's own generic parameter leaves every impl possible.
     assert_context_impl_reaches(&report, "::method_generic", COMPILER_API_CTX_IMPL_TO_JSON);
     assert_context_impl_reaches(&report, "::method_generic", COMPILER_RPC_CTX_IMPL_TO_JSON);
