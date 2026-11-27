@@ -1355,9 +1355,8 @@ fn analyze_on_this_thread(
         parsed
     });
     debug_log(options.debug, format_args!("pass=import-resolution"));
-    let unresolved_globs = stats::time_phase("import_resolution", || {
-        resolve_imports(&mut analyzed_files)
-    });
+    let unresolved_globs =
+        stats::time_phase("import_resolution", || resolve_imports(&mut analyzed_files));
     for glob in unresolved_globs {
         diagnostics.push(Diagnostic {
             kind: "import-resolution".to_string(),
