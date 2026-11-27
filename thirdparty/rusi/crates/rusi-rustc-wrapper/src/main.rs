@@ -792,6 +792,7 @@ impl EmbeddedCollector {
             let resolved = ResolvedCall {
                 callee_display: declaration.name.clone(),
                 candidate_count: None,
+                callback_start: None,
                 call_type: "static".to_string(),
                 dispatch_confidence: "high".to_string(),
                 target_ids: vec![function_id.clone()],
@@ -854,6 +855,7 @@ impl EmbeddedCollector {
             index.entry(body.arg_count).or_default().push(ResolvedCall {
                 callee_display: declaration.qualified_name.clone(),
                 candidate_count: None,
+                callback_start: None,
                 call_type: "closure".to_string(),
                 dispatch_confidence: dispatch_confidence_for("closure", 1),
                 target_ids: vec![function_id],
@@ -1643,9 +1645,13 @@ impl<'tcx> BodyVisitor<'tcx, '_> {
 struct ResolvedCall {
     callee_display: String,
     /// The size of the candidate set before `--max-call-candidates` cut it,
-    /// `Some` only when it was cut; the edges then carry `candidateCount`
-    /// and `candidatesTruncated`.
+    /// `Some` only when it was cut; the edges then carry `candidateCount` and
+    /// `candidatesTruncated`.
     candidate_count: Option<usize>,
+    /// The index in `target_ids` where the trait-callback targets begin,
+    /// `None` when the call has none. Targets before it are the call's own
+    /// and keep its `call_type`; targets from it on are `trait-callback`.
+    callback_start: Option<usize>,
     call_type: String,
     dispatch_confidence: String,
     target_ids: Vec<String>,
@@ -1674,6 +1680,7 @@ impl ResolvedCall {
         Self {
             callee_display: name,
             candidate_count: None,
+            callback_start: None,
             call_type: "unresolved".to_string(),
             dispatch_confidence: "low".to_string(),
             target_ids: Vec::new(),
@@ -1940,6 +1947,7 @@ impl MirBlock {
                         dest_type: Some(body.local_decls[destination.local].ty.to_string()),
                         callee_display: resolved.callee_display,
                         candidate_count: resolved.candidate_count,
+                        callback_start: resolved.callback_start,
                         call_type: resolved.call_type,
                         dispatch_confidence: resolved.dispatch_confidence,
                         target_ids: resolved.target_ids,
@@ -2016,6 +2024,7 @@ fn callable_candidate_resolution(
     Some(ResolvedCall {
         callee_display: unresolved_display.to_string(),
         candidate_count: None,
+        callback_start: None,
         call_type: "closure".to_string(),
         dispatch_confidence: dispatch_confidence_for("closure", target_ids.len()),
         target_ids,
@@ -2123,6 +2132,8 @@ impl AssignAction {
 struct MirCall {
     /// See [`ResolvedCall::candidate_count`].
     candidate_count: Option<usize>,
+    /// See [`ResolvedCall::callback_start`].
+    callback_start: Option<usize>,
     dest: PlacePath,
     dest_type: Option<String>,
     callee_display: String,
@@ -3208,7 +3219,7 @@ fn build_call_graph(
                             id: edge_id,
                             source_id: function.id.clone(),
                             target_id: target_id.clone(),
-                            call_type: callgraph_call_type(call),
+                            call_type: callgraph_call_type(call, idx),
                             line: function.position.line,
                             column: function.position.column,
                             callee_text: Some(call.callee_display.clone()),
@@ -3382,15 +3393,13 @@ fn build_call_graph(
                     id: edge_id,
                     source_id: call.source_id.clone(),
                     target_id: target_id.clone(),
-                    call_type: if call.resolved.async_boundary || call.resolved.task_boundary {
-                        "async-logical".to_string()
-                    } else if call.resolved.target_ids.is_empty() {
-                        format!("{}-unknown", call.resolved.call_type)
-                    } else if call.resolved.target_ids.len() == 1 {
-                        format!("{}-exact", call.resolved.call_type)
-                    } else {
-                        format!("{}-bounded", call.resolved.call_type)
-                    },
+                    call_type: edge_call_type(
+                        &call.resolved.call_type,
+                        call.resolved.async_boundary || call.resolved.task_boundary,
+                        call.resolved.target_ids.len(),
+                        call.resolved.callback_start,
+                        idx,
+                    ),
                     line: call.position.line,
                     column: call.position.column,
                     callee_text: Some(call.resolved.callee_display.clone()),
@@ -7877,6 +7886,7 @@ fn resolve_method_call<'tcx>(
     let mut target_ids = target_ids;
     let mut target_names = target_names;
     let mut target_impl_traits = target_impl_traits;
+    let own_targets = target_ids.len();
     let (candidate_count, callback_used) = append_capped_targets(
         tcx,
         callback_targets,
@@ -7885,11 +7895,7 @@ fn resolve_method_call<'tcx>(
         &mut target_names,
         &mut target_impl_traits,
     );
-    let call_type = if callback_used {
-        "trait-callback"
-    } else {
-        call_type
-    };
+    let callback_start = callback_used.then_some(own_targets);
     let native_boundary = modeled_native_boundary(&symbol)
         || target_names
             .iter()
@@ -7909,6 +7915,7 @@ fn resolve_method_call<'tcx>(
     Some(ResolvedCall {
         callee_display: symbol,
         candidate_count,
+        callback_start,
         call_type: if native_boundary
             || matches!(
                 tcx.def_kind(def_id),
@@ -7961,6 +7968,7 @@ fn resolve_expr_call<'tcx>(
                 &mut target_names,
                 &mut target_impl_traits,
             );
+            let own_targets = target_ids.len();
             let (callback_count, callback_used) = append_capped_targets(
                 tcx,
                 trait_callback_targets(tcx, def_id, Some(call_args)),
@@ -7970,6 +7978,7 @@ fn resolve_expr_call<'tcx>(
                 &mut target_impl_traits,
             );
             let candidate_count = callback_count.or(fallback_count);
+            let callback_start = callback_used.then_some(own_targets);
             let symbol = def_path(tcx, def_id);
             let native_symbol = foreign_link_symbol(tcx, def_id);
             let native_boundary = modeled_native_boundary(&symbol)
@@ -7987,12 +7996,11 @@ fn resolve_expr_call<'tcx>(
             Some(ResolvedCall {
                 callee_display: symbol,
                 candidate_count,
+                callback_start,
                 call_type: if native_boundary {
                     "native".to_string()
                 } else if matches!(typeck.expr_ty(func).kind(), ty::FnPtr(..)) {
                     "fn-pointer".to_string()
-                } else if callback_used {
-                    "trait-callback".to_string()
                 } else {
                     "static".to_string()
                 },
@@ -8024,6 +8032,7 @@ fn resolve_expr_call<'tcx>(
                 Some(ResolvedCall {
                     callee_display: def_path(tcx, def_id),
                     candidate_count: None,
+                    callback_start: None,
                     call_type: "closure".to_string(),
                     dispatch_confidence: dispatch_confidence_for("closure", target_ids.len()),
                     target_ids,
@@ -8056,6 +8065,7 @@ fn resolve_expr_call<'tcx>(
                 Some(ResolvedCall {
                     callee_display: def_path(tcx, def_id),
                     candidate_count: None,
+                    callback_start: None,
                     call_type: if native_boundary { "native" } else { "static" }.to_string(),
                     dispatch_confidence: dispatch_confidence_for("static", target_ids.len()),
                     target_ids,
@@ -8074,6 +8084,7 @@ fn resolve_expr_call<'tcx>(
             ty::FnPtr(..) => Some(ResolvedCall {
                 callee_display: "fn-pointer".to_string(),
                 candidate_count: None,
+                callback_start: None,
                 call_type: "fn-pointer".to_string(),
                 dispatch_confidence: "low".to_string(),
                 target_ids: Vec::new(),
@@ -8351,15 +8362,40 @@ fn edge_precision_for(call: &MirCall) -> String {
     }
 }
 
-fn callgraph_call_type(call: &MirCall) -> String {
-    if call.async_boundary || call.task_boundary {
-        "async-logical".to_string()
-    } else if call.target_ids.is_empty() {
-        format!("{}-unknown", call.call_type)
-    } else if call.target_ids.len() == 1 {
-        format!("{}-exact", call.call_type)
-    } else {
-        format!("{}-bounded", call.call_type)
+fn callgraph_call_type(call: &MirCall, index: usize) -> String {
+    edge_call_type(
+        &call.call_type,
+        call.async_boundary || call.task_boundary,
+        call.target_ids.len(),
+        call.callback_start,
+        index,
+    )
+}
+
+/// The call type of the edge to the target at `index`. A target at or past
+/// `callback_start` is a `trait-callback`; the others keep the call's own
+/// type. The `-exact` / `-bounded` suffix counts only the targets of the
+/// same kind, so a call's single direct target stays exact when callbacks
+/// were added beside it.
+fn edge_call_type(
+    call_type: &str,
+    boundary: bool,
+    target_count: usize,
+    callback_start: Option<usize>,
+    index: usize,
+) -> String {
+    if boundary {
+        return "async-logical".to_string();
+    }
+    let (kind, count) = match callback_start {
+        Some(start) if index >= start => ("trait-callback", target_count - start),
+        Some(start) => (call_type, start),
+        None => (call_type, target_count),
+    };
+    match count {
+        0 => format!("{kind}-unknown"),
+        1 => format!("{kind}-exact"),
+        _ => format!("{kind}-bounded"),
     }
 }
 
@@ -8903,6 +8939,7 @@ mod tests {
             dest_type: None,
             callee_display: callee.to_string(),
             candidate_count: None,
+            callback_start: None,
             call_type: if target_ids.is_empty() {
                 "static".to_string()
             } else {
@@ -8993,6 +9030,30 @@ mod tests {
                 function(&name, &["p"], vec![block(0, vec![op], &[], true)])
             })
             .collect()
+    }
+
+    #[test]
+    fn a_callback_target_does_not_relabel_the_call_s_own_target() {
+        assert_eq!(
+            super::edge_call_type("static", false, 3, Some(1), 0),
+            "static-exact"
+        );
+        assert_eq!(
+            super::edge_call_type("static", false, 3, Some(1), 1),
+            "trait-callback-bounded"
+        );
+        assert_eq!(
+            super::edge_call_type("static", false, 2, Some(1), 1),
+            "trait-callback-exact"
+        );
+        assert_eq!(
+            super::edge_call_type("static", false, 2, None, 1),
+            "static-bounded"
+        );
+        assert_eq!(
+            super::edge_call_type("static", true, 2, Some(1), 1),
+            "async-logical"
+        );
     }
 
     #[test]

@@ -411,7 +411,8 @@ on its own signature, whether it is called as a method or as a path:
 `Client::<ApiCtx>::enc::<Uuid>` calls `t.to_json()` under
 `T: ToJson<X>`, and the call site knows the bound's arguments, so the edge
 goes to the local impl of that trait for that self type and those arguments
-(`context_impl_app::<impl ToJson<ApiCtx> for fakeuuid::Uuid>::to_json`). The
+(`context_impl_app::<impl ToJson<ApiCtx> for fakeuuid::Uuid>::to_json`), while
+the edge to the called function itself keeps its own call type. The
 fan-out is capped the way `--max-call-candidates` caps an over-approximated
 call site: the call's own targets are kept, the callback targets fill the
 rest of the limit, and a cut edge carries `candidateCount` and
