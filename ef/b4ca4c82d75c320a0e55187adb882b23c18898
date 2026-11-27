@@ -1,0 +1,41 @@
+thirdparty/rusi/scripts/eval/golden/fixpoint-flow-app.stable.digest.json
+  s_f579657ee773f3::t_38ba1626b6d768 4-5
+thirdparty/rusi/scripts/eval/golden/context-impl-app.stable.digest.json
+  s_f579657ee773f3::t_38ba1626b6d768 1-6
+thirdparty/rusi/scripts/eval/golden/dyn-collection-app.compiler.digest.json
+  s_f579657ee773f3::t_38ba1626b6d768 4-5
+thirdparty/rusi/scripts/eval/golden/fixpoint-flow-app.compiler.digest.json
+  s_f579657ee773f3::t_38ba1626b6d768 2-5
+thirdparty/rusi/scripts/eval/golden/dyn-dispatch-app.compiler.digest.json
+  s_f579657ee773f3::t_38ba1626b6d768 4-5
+thirdparty/rusi/scripts/eval/golden/anyhow.compiler.digest.json
+  s_f579657ee773f3::t_49b2da6b88cb57 2-3
+thirdparty/rusi/scripts/eval/golden/dyn-dispatch-app.stable.digest.json
+  s_f579657ee773f3::t_38ba1626b6d768 4-5
+thirdparty/rusi/scripts/eval/golden/dyn-collection-app.stable.digest.json
+  s_f579657ee773f3::t_38ba1626b6d768 4-5
+thirdparty/rusi/scripts/eval/golden/context-impl-app.compiler.digest.json
+  s_f579657ee773f3::t_38ba1626b6d768 1-6
+thirdparty/rusi/scripts/eval/golden/async-semantic-app.stable.digest.json
+  s_f579657ee773f3::t_38ba1626b6d768 3
+thirdparty/rusi/scripts/eval/golden/dyn-bounds-app.stable.digest.json
+  s_f579657ee773f3::t_38ba1626b6d768 4-5
+thirdparty/rusi/scripts/eval/golden/dyn-bounds-app.compiler.digest.json
+  s_f579657ee773f3::t_38ba1626b6d768 4-5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "efb4ca4c82d75c320a0e55187adb882b23c18898",
+  "prompts": {},
+  "sessions": {
+    "s_f579657ee773f3": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_d612013f-11e4-4ec5-b2c4-7b55f3f92ed3",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
