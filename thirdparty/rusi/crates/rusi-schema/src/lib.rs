@@ -161,10 +161,22 @@ fn split_balanced_angle(name: &str) -> Option<(String, String)> {
 fn reduce_qualified_self(name: &str) -> String {
     match split_balanced_angle(name) {
         None => match find_top_level(name, "::<") {
-            // `pkg::<impl Trait for Type>::m`: reduce from the qualifier on,
-            // without the crate prefix. The bracket is the needle's last
-            // character.
-            Some(range) => reduce_qualified_self(&name[range.end - 1..]),
+            // `pkg::<impl Trait for Type>::m` or `pkg::<Type as Trait>::m`:
+            // reduce from the qualifier on, without the crate prefix. The
+            // bracket is the needle's last character.
+            Some(range) if is_qualified_self_group(&name[range.end - 1..]) => {
+                reduce_qualified_self(&name[range.end - 1..])
+            }
+            // `Vec::<u8>::push`: a turbofish, whose arguments are dropped.
+            Some(range) => {
+                let group = &name[range.end - 1..];
+                match split_balanced_angle(group) {
+                    Some((_, rest)) => {
+                        reduce_qualified_self(&format!("{}{}", &name[..range.start], rest))
+                    }
+                    None => name.to_string(),
+                }
+            }
             None => name.to_string(),
         },
         Some((inner, rest)) => {
@@ -182,6 +194,18 @@ fn reduce_qualified_self(name: &str) -> String {
             }
             format!("{}{}", reduce_qualified_self(implementing.trim()), rest)
         }
+    }
+}
+
+/// Whether a leading `<...>` group is a qualified self (`<impl Trait for
+/// Type>` or `<Type as Trait>`) rather than a turbofish's generic arguments.
+fn is_qualified_self_group(group: &str) -> bool {
+    match split_balanced_angle(group) {
+        Some((inner, _)) => {
+            let inner = inner.trim();
+            inner.starts_with("impl ") || find_top_level(inner, " as ").is_some()
+        }
+        None => false,
     }
 }
 
@@ -1027,10 +1051,9 @@ mod canonical_name_tests {
 
     #[test]
     fn reduces_the_crate_prefixed_impl_form() {
-        // rustc spells an impl method whose self type is foreign to its crate
-        // with the defining crate's name in front of the qualifier. The
-        // prefix is dropped, so this spelling and the `<impl ...>` one reduce
-        // to the same canonical name and the two backends join on it.
+        // A crate prefix in front of the qualifier is dropped, so this
+        // spelling and the bare `<impl ...>` one reduce to the same
+        // canonical name.
         assert_eq!(
             canonical_name("myapp::<impl tojson::ToJson<myapp::ApiCtx> for uuid::Uuid>::to_json"),
             "uuid::Uuid::to_json"
@@ -1050,6 +1073,19 @@ mod canonical_name_tests {
         assert_eq!(
             canonical_name("alloc::vec::Vec<u8>::push"),
             "alloc::vec::Vec::push"
+        );
+        // A turbofish is not a qualified self either.
+        assert_eq!(
+            canonical_name("alloc::vec::Vec::<u8>::push"),
+            "alloc::vec::Vec::push"
+        );
+        assert_eq!(
+            canonical_name("context_impl_tojson::Client::<ApiCtx>::new"),
+            "context_impl_tojson::Client::new"
+        );
+        assert_eq!(
+            canonical_name("app::a::<impl core::fmt::Display for app::a::Err>::fmt"),
+            "app::a::Err::fmt"
         );
     }
 }
