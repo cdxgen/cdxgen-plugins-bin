@@ -88,6 +88,12 @@ path = "fixtures/dyn-dispatch-app"
 capabilities = ["traits", "dyn-dispatch", "over-approx"]
 
 [[fixtures]]
+slug = "context-impl-app"
+tier = "fixtures"
+path = "fixtures/context-impl-app"
+capabilities = ["traits", "context-parameter", "dyn-dispatch", "fully-qualified-calls"]
+
+[[fixtures]]
 slug = "dyn-bounds-app"
 tier = "fixtures"
 path = "fixtures/dyn-bounds-app"
