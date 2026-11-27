@@ -8551,6 +8551,37 @@ fn type_qualified_name_matches(qname: &str, type_token: &str, method: &str) -> b
 /// (`fakeuuid::Uuid` of
 /// `app::<impl ToJson<ApiCtx> for fakeuuid::Uuid>::to_json`), when the name
 /// has that shape.
+#[cfg(test)]
+mod impl_form_matching_tests {
+    use super::type_qualified_name_matches;
+
+    #[test]
+    fn an_impl_form_name_declares_the_type_it_implements_for() {
+        let name = "context_impl_app::<impl ToJson<ApiCtx> for fakeuuid::Uuid>::to_json";
+        assert!(type_qualified_name_matches(name, "Uuid", "to_json"));
+        assert!(type_qualified_name_matches(
+            name,
+            "fakeuuid::Uuid",
+            "to_json"
+        ));
+        assert!(!type_qualified_name_matches(name, "Product", "to_json"));
+        assert!(!type_qualified_name_matches(
+            "context_impl_app::<impl ToJson<ApiCtx> for fakeuuid::Uuid>::to_json",
+            "Uuid",
+            "pair"
+        ));
+    }
+
+    #[test]
+    fn a_plain_qualified_name_matches_by_segment_as_before() {
+        assert!(type_qualified_name_matches(
+            "context_impl_app::MyUuid::to_json",
+            "MyUuid",
+            "to_json"
+        ));
+    }
+}
+
 fn qualified_impl_self_type(qname: &str) -> Option<&str> {
     // The impl part is the first top-level `<...>` group that starts with
     // `impl `, followed by the crate path's `::`. The bracket is the
@@ -23791,40 +23822,5 @@ pub fn run() {
             summaries[top_index].param_to_sink.get("process-exec"),
             Some(&BTreeSet::from([0]))
         );
-    }
-}
-
-#[cfg(test)]
-mod temp_step2_tests {
-    use super::type_qualified_name_matches;
-
-    #[test]
-    fn impl_form_name_declares_type() {
-        eprintln!(
-            "SELF: {:?}",
-            super::qualified_impl_self_type(
-                "context_impl_app::<impl ToJson<ApiCtx> for fakeuuid::Uuid>::to_json"
-            )
-        );
-        eprintln!(
-            "SEGS: {:?}",
-            super::split_qualified_segments("fakeuuid::Uuid").collect::<Vec<_>>()
-        );
-        eprintln!(
-            "LAST: {:?}",
-            super::last_segment(
-                "context_impl_app::<impl ToJson<ApiCtx> for fakeuuid::Uuid>::to_json"
-            )
-        );
-        assert!(type_qualified_name_matches(
-            "context_impl_app::<impl ToJson<ApiCtx> for fakeuuid::Uuid>::to_json",
-            "Uuid",
-            "to_json"
-        ));
-        assert!(!type_qualified_name_matches(
-            "context_impl_app::<impl ToJson<ApiCtx> for fakeuuid::Uuid>::to_json",
-            "Product",
-            "to_json"
-        ));
     }
 }
