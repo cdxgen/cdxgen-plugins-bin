@@ -1,0 +1,19 @@
+thirdparty/rusi/crates/rusi-rustc-wrapper/src/main.rs
+  s_f579657ee773f3::t_8a7bc2e089de45 707-713
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a69d4e537f408960cebae4102005279ab6e18780",
+  "prompts": {},
+  "sessions": {
+    "s_f579657ee773f3": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_d612013f-11e4-4ec5-b2c4-7b55f3f92ed3",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
