@@ -1,0 +1,30 @@
+thirdparty/rusi/crates/rusi-driver/src/lib.rs
+  s_f579657ee773f3::t_e3a4148266dc3d 1154-1157
+thirdparty/rusi/crates/rusi-rustc-wrapper/src/main.rs
+  s_f579657ee773f3::t_e3a4148266dc3d 711-713,801-804,859-862,1202-1203,2563-2566,5474,7792-7795,7803-7807,7862,7874-7877,8227-8232
+thirdparty/rusi/crates/rusi-core/src/lib.rs
+  s_f579657ee773f3::t_d5b7d722e1a510 13753,14043,14209,14994,14996
+  s_f579657ee773f3::t_e3a4148266dc3d 3207-3213,4318-4320,4649-4652,7901-7904,8008,8024-8025,13147-13149,13240-13242,14961-14963,15006-15009,15512-15515,15519-15522,21482-21484,21488-21490
+  s_f579657ee773f3::t_a6b450845ec4b7 12748,12751,12761,13789,13792,13806
+  s_f579657ee773f3::t_003f61080d14c3 6871,7544,13749,14039,14205,14978
+thirdparty/rusi/crates/rusi-cli/tests/cli_smoke.rs
+  s_f579657ee773f3::t_e3a4148266dc3d 2085
+thirdparty/rusi/crates/rusi-schema/src/lib.rs
+  s_f579657ee773f3::t_e3a4148266dc3d 1035,1040,1050-1053
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "11dd31b8ca34edac65c308d87a4b86ce9eb4a5c1",
+  "prompts": {},
+  "sessions": {
+    "s_f579657ee773f3": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_d612013f-11e4-4ec5-b2c4-7b55f3f92ed3",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
