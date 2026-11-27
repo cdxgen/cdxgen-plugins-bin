@@ -32,6 +32,7 @@ anyhow = "1"
 cargo_metadata = "0.23"
 clap = { version = "4", features = ["derive"] }
 indexmap = { version = "2", features = ["serde"] }
+libc = "0.2"
 pretty_assertions = "1"
 proc-macro2 = { version = "1", features = ["span-locations"] }
 quote = "1"

@@ -15,5 +15,8 @@ serde_json.workspace = true
 syn.workspace = true
 rusi-schema = { path = "../rusi-schema" }
 
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
 [dev-dependencies]
 pretty_assertions.workspace = true

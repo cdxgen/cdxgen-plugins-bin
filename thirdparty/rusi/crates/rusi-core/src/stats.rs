@@ -16,6 +16,13 @@
 //! The numbers never enter the report itself. The report is golden-diffed
 //! and must stay byte-identical, and these counts are analysis plumbing, not
 //! evidence about the analyzed code.
+//!
+//! The phase timings and the peak RSS each phase ended with are the same
+//! kind of informational value: they live in their own `phases` entries of
+//! the `--stats-json` document, apart from the deterministic `counts`, and
+//! the determinism check ignores them. The peak RSS is the kernel's
+//! high-water mark at the moment the phase ended, so the entries read as a
+//! staircase of where the run's memory actually went.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -140,13 +147,63 @@ pub fn work() -> &'static WorkCounters {
     &WORK
 }
 
-/// Phase wall times, in submission order.
-static PHASES: Mutex<Vec<(&'static str, u64)>> = Mutex::new(Vec::new());
+/// Peak resident set size the process has reached so far, in bytes, or
+/// `None` where the platform offers no read. The kernel's
+/// `getrusage(RUSAGE_SELF).ru_maxrss` is a high-water mark, so a later
+/// phase's reading is never below an earlier phase's, and a phase whose
+/// reading sits above the previous phase's is where the process grew.
+/// Linux reports the figure in kilobytes and macOS in bytes. On Windows
+/// nothing is read and the phase entries carry `null`, which the stats
+/// document documents rather than pretending to zero.
+#[cfg(unix)]
+fn peak_rss_bytes() -> Option<u64> {
+    let usage = unsafe {
+        let mut usage: libc::rusage = std::mem::zeroed();
+        if libc::getrusage(libc::RUSAGE_SELF, &mut usage) != 0 {
+            return None;
+        }
+        usage
+    };
+    // Linux counts kilobytes; macOS (and the other BSDs) count bytes.
+    let bytes = if cfg!(target_os = "linux") {
+        usage.ru_maxrss.saturating_mul(1024)
+    } else {
+        usage.ru_maxrss
+    };
+    Some(bytes.max(0) as u64)
+}
 
-/// Records a phase's wall time in microseconds.
+#[cfg(not(unix))]
+fn peak_rss_bytes() -> Option<u64> {
+    None
+}
+
+/// One phase's wall time and the process's peak RSS when it ended. Both are
+/// informational: the wall time is scheduling's, and the RSS is the
+/// allocator's and the kernel's. The deterministic counters live in
+/// [`WorkCounters`] and never mix with these.
+#[derive(Debug, Clone, Copy)]
+pub struct PhaseSample {
+    pub name: &'static str,
+    /// Wall time in microseconds.
+    pub micros: u64,
+    /// Peak RSS so far in bytes, `None` where the platform has no read.
+    pub peak_rss_bytes: Option<u64>,
+}
+
+/// Phase samples, in submission order. A phase that runs more than once
+/// appears once per run, each with its own peak-RSS reading.
+static PHASES: Mutex<Vec<PhaseSample>> = Mutex::new(Vec::new());
+
+/// Records a phase's wall time in microseconds and the process's peak RSS
+/// when the phase ended.
 pub fn record_phase(name: &'static str, micros: u64) {
     if let Ok(mut phases) = PHASES.lock() {
-        phases.push((name, micros));
+        phases.push(PhaseSample {
+            name,
+            micros,
+            peak_rss_bytes: peak_rss_bytes(),
+        });
     }
 }
 
@@ -156,6 +213,14 @@ pub fn time_phase<T>(name: &'static str, work: impl FnOnce() -> T) -> T {
     let value = work();
     record_phase(name, started.elapsed().as_micros() as u64);
     value
+}
+
+/// The phases recorded so far, in submission order.
+pub fn phase_samples() -> Vec<PhaseSample> {
+    PHASES
+        .lock()
+        .map(|phases| phases.clone())
+        .unwrap_or_default()
 }
 
 /// Work counters the compiler backend's wrapper measured. The wrapper runs as
@@ -187,8 +252,8 @@ pub fn snapshot_value() -> serde_json::Value {
     let load = |counter: &AtomicU64| counter.load(Ordering::Relaxed);
     let mut phases: BTreeMap<&str, f64> = BTreeMap::new();
     if let Ok(guard) = PHASES.lock() {
-        for (name, micros) in guard.iter() {
-            *phases.entry(name).or_insert(0.0) += *micros as f64 / 1_000_000.0;
+        for sample in guard.iter() {
+            *phases.entry(sample.name).or_insert(0.0) += sample.micros as f64 / 1_000_000.0;
         }
     }
     let compiler = COMPILER_COUNTS
@@ -202,6 +267,16 @@ pub fn snapshot_value() -> serde_json::Value {
                 "block_evaluations_concrete": counts.block_evaluations_concrete,
             })
         });
+    let phase_entries: Vec<serde_json::Value> = phase_samples()
+        .iter()
+        .map(|sample| {
+            serde_json::json!({
+                "name": sample.name,
+                "seconds": sample.micros as f64 / 1_000_000.0,
+                "peak_rss_bytes": sample.peak_rss_bytes,
+            })
+        })
+        .collect();
     serde_json::json!({
         "counts": {
             "functions": load(&counters.functions),
@@ -220,6 +295,7 @@ pub fn snapshot_value() -> serde_json::Value {
             "join_entries_visited_concrete": load(&counters.join_entries_visited_concrete),
         },
         "phase_seconds": phases,
+        "phases": phase_entries,
         "compiler": compiler,
     })
 }
@@ -236,4 +312,82 @@ pub fn write_stats_json(path: &Path) -> io::Result<()> {
         path,
         serde_json::to_string_pretty(&value).unwrap_or_default() + "\n",
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{phase_samples, snapshot_value, time_phase};
+
+    #[test]
+    fn every_phase_entry_names_the_pass() {
+        time_phase("stats_test_pass", || 1usize);
+        let samples = phase_samples();
+        let last = samples
+            .iter()
+            .rfind(|sample| sample.name == "stats_test_pass")
+            .expect("the phase was recorded");
+        assert!(last.micros < 1_000_000, "the timed work is trivial");
+        // Unix platforms read a high-water mark; elsewhere the entry is null.
+        assert_eq!(last.peak_rss_bytes.is_some(), cfg!(unix));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn peak_rss_never_decreases_across_phases() {
+        // The kernel's high-water mark only grows, so the readings the
+        // phases carry are non-decreasing in submission order, whatever the
+        // allocator did between them.
+        time_phase("rss_growth_probe_a", || Vec::<u8>::with_capacity(1 << 12));
+        time_phase("rss_growth_probe_b", || Vec::<u8>::with_capacity(1 << 12));
+        let readings: Vec<Option<u64>> = phase_samples()
+            .iter()
+            .filter(|sample| sample.name.starts_with("rss_growth_probe"))
+            .map(|sample| sample.peak_rss_bytes)
+            .collect();
+        for pair in readings.windows(2) {
+            match (pair[0], pair[1]) {
+                (Some(earlier), Some(later)) => assert!(
+                    later >= earlier,
+                    "peak RSS went backwards: {earlier} then {later}"
+                ),
+                _ => panic!("this platform reads a peak RSS; got {readings:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn the_deterministic_counters_live_apart_from_the_phase_entries() {
+        // The stats document keeps the run's work counts under "counts" as a
+        // fixed set of keys, and the wall times and peak-RSS readings under
+        // "phase_seconds" and "phases". Nothing a phase records enters the
+        // counters, so the deterministic half of the document is the same
+        // document a run without the phase entries produced.
+        time_phase("count_separation_probe", || Vec::<u8>::with_capacity(64));
+        let value = snapshot_value();
+        let counts = value["counts"].as_object().expect("counts is an object");
+        for (key, value) in counts {
+            assert!(
+                value.is_u64(),
+                "counter {key} must stay a plain number, got {value}"
+            );
+        }
+        assert_eq!(
+            counts.len(),
+            14,
+            "the documented set of work counters changed"
+        );
+        let phases = value["phases"].as_array().expect("phases is an array");
+        assert!(
+            phases
+                .iter()
+                .any(|entry| entry["name"] == "count_separation_probe"),
+            "the phase sample is recorded under phases"
+        );
+        for entry in phases {
+            assert!(
+                entry["peak_rss_bytes"].is_null() || entry["peak_rss_bytes"].is_number(),
+                "a phase's peak RSS is a reading or null, never a counter"
+            );
+        }
+    }
 }
