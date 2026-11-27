@@ -1,0 +1,44 @@
+thirdparty/rusi/crates/rusi-rustc-wrapper/src/main.rs
+  s_f579657ee773f3::t_0d9cc3eea2cf64 2506,2520,7857
+  s_f579657ee773f3::t_2e011e116c8346 3497-3510
+  s_f579657ee773f3::t_9414980494a37e 2397-2424,2430,2443-2444,2446-2456,2458-2490,2493-2494,2497-2498,2500-2505,2508-2519,2521-2538,2540-2571
+  s_f579657ee773f3::t_343e5b073bb6ec 7837-7840
+  s_f579657ee773f3::t_2474e01fd9e16a 129-157
+  s_f579657ee773f3::t_ae6a187bb6d0cf 7721,7761-7794
+  s_f579657ee773f3::t_c8a2669852800a 2495-2496,2499
+  s_f579657ee773f3::t_d987324bc2d9b6 637-638,672,688,707
+  s_f579657ee773f3::t_ac80ca1e7c93e0 1174-1180,1191-1197,7841,7848-7856,7858-7869,7896
+  s_f579657ee773f3::t_b0506727e92223 2425-2426,2491,2507,2539
+  s_f579657ee773f3::t_dc9acc38315b93 2492
+  s_f579657ee773f3::t_01b8b5797491c6 1173,2457
+  s_f579657ee773f3::t_53d8a97140c0a3 709
+  s_f579657ee773f3::t_7f36dbdc9bd6b4 2427-2429
+  s_f579657ee773f3::t_11ced8680bf80e 2431-2442,2445
+thirdparty/rusi/crates/rusi-cli/tests/cli_smoke.rs
+  s_f579657ee773f3::t_9f0cdafa536dc9 1810-1823,2052-2054,2058,2061-2062,2070-2088,2092,2098-2099,2111,2117-2118,2124-2137
+  s_f579657ee773f3::t_53abcb73e1a474 2138-2139
+thirdparty/rusi/JSON_ATTRIBUTE_REFERENCE.md
+  s_f579657ee773f3::t_f759a75cee69d2 407-415
+thirdparty/rusi/docs/ANALYSIS_ARCHITECTURE.md
+  s_f579657ee773f3::t_241f47162aeea9 394-410
+thirdparty/rusi/crates/rusi-driver/src/lib.rs
+  s_f579657ee773f3::t_5cf61dbddaa26a 39-42,54,1154
+  s_f579657ee773f3::t_cfc0e58f7fca7b 3215,3239,3284,3333,3393,3452,3506,3542,3589,3899,3943
+  s_f579657ee773f3::t_00072d413ebae7 3655,3701,3770,4098,4255
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "73a85d633d8f02ae15f5ffd117412531a4c1106c",
+  "prompts": {},
+  "sessions": {
+    "s_f579657ee773f3": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_d612013f-11e4-4ec5-b2c4-7b55f3f92ed3",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

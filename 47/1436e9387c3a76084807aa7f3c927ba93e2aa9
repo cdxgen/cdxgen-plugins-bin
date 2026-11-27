@@ -1,0 +1,33 @@
+thirdparty/rusi/scripts/eval/golden/anyhow.compiler.digest.json
+  s_9a841b6bccbee8::t_0b56a96d4a16e8 2-3
+thirdparty/rusi/scripts/eval/golden/async-semantic-app.stable.digest.json
+  s_9a841b6bccbee8::t_48c3bcbf18df67 3
+thirdparty/rusi/scripts/eval/golden/context-impl-app.compiler.digest.json
+  s_9a841b6bccbee8::t_e97072b58b233b 2-5
+thirdparty/rusi/scripts/eval/golden/context-impl-app.stable.digest.json
+  s_9a841b6bccbee8::t_279687b885c009 2-5
+thirdparty/rusi/scripts/eval/golden/fixpoint-flow-app.compiler.digest.json
+  s_9a841b6bccbee8::t_b924438d8f6cc2 5
+thirdparty/rusi/scripts/eval/golden/fixpoint-flow-app.stable.digest.json
+  s_9a841b6bccbee8::t_9998688d83928c 5
+thirdparty/rusi/scripts/eval/golden/log.compiler.digest.json
+  s_9a841b6bccbee8::t_7e347e5cbfa88c 2-3
+thirdparty/rusi/scripts/eval/golden/mini-redis.compiler.digest.json
+  s_9a841b6bccbee8::t_bb03d518b34108 2-3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "471436e9387c3a76084807aa7f3c927ba93e2aa9",
+  "prompts": {},
+  "sessions": {
+    "s_9a841b6bccbee8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d6317d63-6d3e-4df0-bcaa-98ab71527b87",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

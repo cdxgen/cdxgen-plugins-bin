@@ -1,0 +1,21 @@
+thirdparty/rusi/crates/rusi-cli/tests/cli_smoke.rs
+  s_9a841b6bccbee8::t_74b33fd9bdd193 2409-2413
+thirdparty/rusi/crates/rusi-rustc-wrapper/src/main.rs
+  s_9a841b6bccbee8::t_8dd47b4fe40b55 2584-2585
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "eaed21849b115104c90220c0bbc88f0655a8b9ff",
+  "prompts": {},
+  "sessions": {
+    "s_9a841b6bccbee8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d6317d63-6d3e-4df0-bcaa-98ab71527b87",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
