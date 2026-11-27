@@ -126,6 +126,35 @@ impl<'tcx> FnDefArgs<'tcx> for ty::Binder<'tcx, GenericArgsRef<'tcx>> {
     }
 }
 
+/// One argument of a call, by index. The pinned window stores a call's
+/// generic arguments as an interned list whose `get` hands out a reference,
+/// and, from rust-lang/rust#165079, as a copy handle whose `get` hands out
+/// the value.
+trait CallArgAt<'tcx> {
+    fn arg_at(self, index: usize) -> Option<ty::GenericArg<'tcx>>;
+    fn args_len(self) -> usize;
+}
+
+#[cfg(rusi_rustc_generic_args_handle)]
+impl<'tcx> CallArgAt<'tcx> for ty::GenericArgs<'tcx> {
+    fn arg_at(self, index: usize) -> Option<ty::GenericArg<'tcx>> {
+        self.get(index)
+    }
+    fn args_len(self) -> usize {
+        self.len()
+    }
+}
+
+#[cfg(not(rusi_rustc_generic_args_handle))]
+impl<'tcx> CallArgAt<'tcx> for ty::GenericArgsRef<'tcx> {
+    fn arg_at(self, index: usize) -> Option<ty::GenericArg<'tcx>> {
+        self.get(index).copied()
+    }
+    fn args_len(self) -> usize {
+        self.len()
+    }
+}
+
 fn main() {
     let args = std::env::args().collect::<Vec<_>>();
     let mut callbacks = WrapperCallbacks::from_env();
@@ -605,6 +634,8 @@ impl EmbeddedCollector {
         // DefIds. Neither LocalDefId nor DefId is Ord, so use hashed containers
         // and sort by path string at emit time for deterministic output.
         let mut resolved: HashMap<(LocalDefId, String), Vec<DefId>> = HashMap::new();
+        let mut mono_walked = 0usize;
+        let mut mono_calls = 0usize;
 
         for cgu in tcx.collect_and_partition_mono_items(()).codegen_units {
             for mono_item in cgu.items().keys() {
@@ -638,6 +669,7 @@ impl EmbeddedCollector {
                         typing_env,
                         EarlyBinder::bind(tcx, generic_ty),
                     );
+                    mono_walked += 1;
                     let ty::TyKind::FnDef(callee_def, callee_args) = concrete_ty.kind() else {
                         continue;
                     };
@@ -653,6 +685,7 @@ impl EmbeddedCollector {
                     {
                         continue;
                     }
+                    mono_calls += 1;
                     let Ok(Some(callee_instance)) =
                         ty::Instance::try_resolve(tcx, typing_env, *callee_def, callee_args)
                     else {
@@ -671,7 +704,9 @@ impl EmbeddedCollector {
             }
         }
 
+        debug_log(self.debug, format_args!("DBGDEV walked={} calls={} buckets={}", mono_walked, mono_calls, resolved.len()));
         for ((owner, symbol), mut def_ids) in resolved {
+            debug_log(self.debug, format_args!("DBGDEV owner={:?} symbol={:?} targets={:?}", tcx.def_path_str(owner.to_def_id()), symbol, def_ids.iter().map(|d| def_path(tcx, *d)).collect::<Vec<_>>()));
             def_ids.sort_by_key(|def_id| def_path(tcx, *def_id));
             let mut target_ids = Vec::new();
             let mut target_names = Vec::new();
@@ -1135,8 +1170,14 @@ impl<'tcx> Visitor<'tcx> for BodyVisitor<'tcx, '_> {
             ExprKind::MethodCall(segment, receiver, _args, fn_span) => {
                 let def_id = self.typeck.type_dependent_def_id(expr.hir_id);
                 let receiver_ty = self.typeck.expr_ty(receiver);
-                let resolved =
-                    resolve_method_call(self.tcx, receiver_ty, def_id, self.function_ids);
+                let call_args = Some(self.typeck.node_args(expr.hir_id));
+                let resolved = resolve_method_call(
+                    self.tcx,
+                    receiver_ty,
+                    def_id,
+                    self.function_ids,
+                    call_args,
+                );
                 self.record_call(
                     segment.ident.span,
                     def_id.map(|callee| (fn_span, callee)),
@@ -1147,7 +1188,13 @@ impl<'tcx> Visitor<'tcx> for BodyVisitor<'tcx, '_> {
                 );
             }
             ExprKind::Call(func, _) => {
-                let resolved = resolve_expr_call(self.tcx, self.typeck, func, self.function_ids);
+                let resolved = resolve_expr_call(
+                    self.tcx,
+                    self.typeck,
+                    func,
+                    self.caller,
+                    self.function_ids,
+                );
                 self.record_call(
                     func.span,
                     hir_call_callee(self.typeck, func).map(|callee| (expr.span, callee)),
@@ -2347,6 +2394,181 @@ fn trait_call_local_impl<'tcx>(
     target.as_local()
 }
 
+/// The local impl methods a generic qualified call may reach, the fallback
+/// for `<Uuid as ToJson<Ctx>>::to_json(..)` inside `impl<Ctx> ToJson<Ctx>
+/// for Product`: the call's trait arguments still contain one of the
+/// caller's own generic parameters, so no single impl can be named, and
+/// every local impl of the trait for the written self type stays a
+/// candidate, the over-approximation a dyn dispatch already carries. The
+/// exact answer where the caller is monomorphic would come from
+/// `Instance::try_resolve` over the crate's mono items, but a `cargo check`
+/// run emits metadata only, so the collector those instances come from is
+/// empty and the fallback is what there is to build on.
+fn generic_call_impl_fallback<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    caller: LocalDefId,
+    callee_def_id: DefId,
+    call_args: Option<GenericArgsRef<'tcx>>,
+) -> Vec<DefId> {
+    let Some(call_args) = call_args else {
+        return Vec::new();
+    };
+    let Some(assoc) = tcx.opt_associated_item(callee_def_id) else {
+        return Vec::new();
+    };
+    let Some(trait_def_id) = assoc.trait_container(tcx) else {
+        return Vec::new();
+    };
+    // The call is ambiguous only when a trait argument is one of the
+    // caller's own generic parameters. Argument 0 is the self type, which
+    // the call wrote concretely (`Uuid` of `<Uuid as ToJson<Ctx>>`).
+    // A parameter of the caller is one whose index sits above the caller's
+    // parents (an impl block's own parameters, for a method).
+    // The caller's generics include the ones it inherits from its parent
+    // (an impl block's `Ctx`, for a method), and any of them is one the
+    // caller cannot pin.
+    let caller_generics = tcx.generics_of(caller.to_def_id());
+    let mut has_own_param = false;
+    for index in 1..call_args.args_len() {
+        if let Some(arg) = call_args.arg_at(index)
+            && let ty::GenericArgKind::Type(ty) = arg.kind()
+            && let ty::Param(param) = ty.kind()
+            && (param.index as usize) < caller_generics.count()
+        {
+            has_own_param = true;
+            break;
+        }
+    }
+    if !has_own_param {
+        return Vec::new();
+    }
+    let Some(self_ty) = call_args.arg_at(0).and_then(|arg| arg.as_type()) else {
+        return Vec::new();
+    };
+    let method_name = tcx.associated_item(callee_def_id).name();
+    let mut targets: Vec<DefId> = Vec::new();
+    for impl_def in tcx
+        .all_local_trait_impls(())
+        .get(&trait_def_id)
+        .into_iter()
+        .flatten()
+    {
+        let impl_trait_ref = tcx.impl_trait_ref(*impl_def);
+        if impl_trait_ref.skip_binder().self_ty() != self_ty {
+            continue;
+        }
+        for candidate in tcx.associated_items(*impl_def).in_definition_order() {
+            if candidate.is_fn() && candidate.name() == method_name {
+                targets.push(candidate.def_id);
+            }
+        }
+    }
+    targets.sort_by_key(|def_id| def_path(tcx, *def_id));
+    targets.dedup();
+    targets
+}
+
+/// The local impl methods a dependency's generic function calls back into,
+/// for the bound the call resolves: `enc` is `fn enc<T: ToJson<X>>(&self,
+/// t: &T)`, and the call site knows its generic arguments (`X = ApiCtx`,
+/// `T = Uuid`), so the bound `T: ToJson<X>` reads as `Uuid: ToJson<ApiCtx>`
+/// and the local impl of that trait for that self type is what the callee
+/// calls through the bound. Without this the user's own impls look like
+/// dead code to reachability: ORMs, serializers and codecs call user code
+/// this way.
+fn trait_callback_targets<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    callee_def_id: DefId,
+    call_args: Option<GenericArgsRef<'tcx>>,
+) -> Vec<DefId> {
+    let Some(call_args) = call_args else {
+        return Vec::new();
+    };
+    let generics = tcx.generics_of(callee_def_id);
+    // The call's arguments are indexed by the callee's generic parameter
+    // index, so a bound written over one of those parameters reads its
+    // concrete value at the same index.
+    let concrete_arg = |param_index: u32| -> Option<ty::GenericArg<'tcx>> {
+        call_args.arg_at(param_index as usize)
+    };
+    let mut targets: Vec<DefId> = Vec::new();
+    for (clause, _) in tcx.clauses_of(callee_def_id).clauses {
+        let Some(trait_clause) = clause.as_trait_clause() else {
+            continue;
+        };
+        let trait_ref = trait_clause.skip_binder().trait_ref;
+        // The bound's self type must be one of the callee's generic
+        // parameters: a bound on a concrete type says nothing this call
+        // resolves.
+        let ty::TyKind::Param(param) = trait_ref.self_ty().kind() else {
+            continue;
+        };
+        let trait_def_id = trait_ref.def_id;
+        let Some(concrete_self) = concrete_arg(param.index) else {
+            continue;
+        };
+        let concrete_self_ty = match concrete_self.as_type() {
+            Some(ty) => ty,
+            None => continue,
+        };
+        let Some(impls) = tcx.all_local_trait_impls(()).get(&trait_def_id) else {
+            continue;
+        };
+        for impl_def in impls {
+            let impl_trait_ref = tcx.impl_trait_ref(*impl_def);
+            let impl_trait_ref = impl_trait_ref.skip_binder();
+            if impl_trait_ref.self_ty() != concrete_self_ty {
+                continue;
+            }
+            // The bound's remaining arguments, made concrete by the call:
+            // `X` of `T: ToJson<X>` is `ApiCtx` when the call wrote
+            // `Client::<ApiCtx>::enc::<Uuid>`. An impl argument that is one
+            // of the impl's own generic parameters matches anything, the
+            // way a dyn dispatch's over-approximation does.
+            let bound_args_match = impl_trait_ref
+                .args
+                .iter()
+                .skip(1)
+                .zip(trait_ref.args.iter().skip(1))
+                .all(|(impl_arg, bound_arg)| {
+                    if impl_arg == bound_arg {
+                        return true;
+                    }
+                    let concrete_bound = match bound_arg.kind() {
+                        ty::GenericArgKind::Type(ty) => match ty.kind() {
+                            ty::Param(param) => concrete_arg(param.index),
+                            _ => None,
+                        },
+                        _ => None,
+                    };
+                    match concrete_bound {
+                        Some(concrete) => impl_arg == concrete,
+                        None => match impl_arg.kind() {
+                            ty::GenericArgKind::Type(ty) => {
+                                matches!(ty.kind(), ty::Param(_))
+                            }
+                            _ => true,
+                        },
+                    }
+                });
+            if !bound_args_match {
+                continue;
+            }
+            for method in tcx.associated_items(impl_def.to_def_id()).in_definition_order() {
+                if method.is_fn() {
+                    targets.push(method.def_id);
+                }
+            }
+        }
+    }
+    targets.sort_by_key(|def_id| def_path(tcx, *def_id));
+    targets.dedup();
+    // The same ceiling `--max-call-candidates` applies to an
+    // over-approximated call site.
+    targets.truncate(max_call_candidates());
+    targets
+}
+
 /// The trait a call target implements, asked from rustc rather than parsed
 /// from the printed name: the method's parent impl and that impl's trait
 /// reference. `Some` exactly when the target is a method of a `impl Trait
@@ -3272,6 +3494,20 @@ fn method_suffix(target_name: &str) -> String {
 /// the crate artifact so the `--stats-json` document can report the compiler
 /// backend's work next to the stable backend's. The wrapper analyzes crates
 /// sequentially in one process, so plain atomics are enough.
+/// Ceiling on the trait-callback targets one call site emits, the limit
+/// `--max-call-candidates` applies to the stable backend's over-approximated
+/// sites; the driver passes the same value through `RUSI_MAX_CALL_CANDIDATES`.
+fn max_call_candidates() -> usize {
+    static MAX: OnceLock<usize> = OnceLock::new();
+    *MAX.get_or_init(|| {
+        std::env::var("RUSI_MAX_CALL_CANDIDATES")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .filter(|value| *value > 0)
+            .unwrap_or(8)
+    })
+}
+
 static SUMMARY_EVALUATIONS: AtomicU64 = AtomicU64::new(0);
 static ABSTRACT_BLOCK_EVALUATIONS: AtomicU64 = AtomicU64::new(0);
 static CONCRETE_BLOCK_EVALUATIONS: AtomicU64 = AtomicU64::new(0);
@@ -7482,6 +7718,7 @@ fn resolve_method_call<'tcx>(
     receiver_ty: Ty<'tcx>,
     def_id: Option<DefId>,
     function_ids: &HashMap<LocalDefId, String>,
+    call_args: Option<GenericArgsRef<'tcx>>,
 ) -> Option<ResolvedCall> {
     let def_id = def_id?;
     let symbol = def_path(tcx, def_id);
@@ -7521,6 +7758,40 @@ fn resolve_method_call<'tcx>(
             dispatch_trait: None,
         }
     };
+    // A call into a generic function whose trait bounds name local impls
+    // (`Client::<ApiCtx>::enc::<Uuid>` calls `t.to_json()` under
+    // `T: ToJson<X>`) reaches those impls through the bound, with the
+    // arguments this call wrote: the callback the dependency makes into
+    // user code.
+    let mut callback_targets = Vec::new();
+    if call_type != "dyn-dispatch"
+        && !matches!(
+            tcx.def_kind(def_id),
+            DefKind::ForeignMod | DefKind::ForeignTy
+        )
+    {
+        callback_targets = trait_callback_targets(tcx, def_id, call_args);
+    }
+    let mut target_ids = target_ids;
+    let mut target_names = target_names;
+    let mut target_impl_traits = target_impl_traits;
+    let mut callback_used = false;
+    for callback in callback_targets {
+        let name = def_path(tcx, callback);
+        if target_names.contains(&name) {
+            continue;
+        }
+        target_names.push(name.clone());
+        target_impl_traits.push(impl_trait_path_of(tcx, callback));
+        match callback.as_local().and_then(|local| function_ids.get(&local)) {
+            Some(id) => target_ids.push(id.clone()),
+            None => {
+                target_ids.push(stable_id("cg-node", &["external", &name]));
+            }
+        }
+        callback_used = true;
+    }
+    let call_type = if callback_used { "trait-callback" } else { call_type };
     let native_boundary = modeled_native_boundary(&symbol)
         || target_names
             .iter()
@@ -7563,17 +7834,39 @@ fn resolve_method_call<'tcx>(
     })
 }
 
-fn resolve_expr_call(
-    tcx: TyCtxt<'_>,
-    typeck: &ty::TypeckResults<'_>,
-    func: &Expr<'_>,
+fn resolve_expr_call<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    typeck: &ty::TypeckResults<'tcx>,
+    func: &'tcx Expr<'tcx>,
+    caller: LocalDefId,
     function_ids: &HashMap<LocalDefId, String>,
 ) -> Option<ResolvedCall> {
     match func.kind {
         ExprKind::Path(qpath) => {
             let res = typeck.qpath_res(&qpath, func.hir_id);
             let def_id = res.opt_def_id()?;
-            let (target_ids, target_names) = target_for_def_id(tcx, def_id, function_ids);
+            let call_args = typeck.node_args(func.hir_id);
+            let (mut target_ids, mut target_names) =
+                target_for_def_id(tcx, def_id, function_ids);
+            let mut target_impl_traits = vec![impl_trait_path_of(tcx, def_id)];
+            // A trait-qualified call whose trait arguments are still the
+            // caller's own generic parameters resolves inside the caller to
+            // the trait's method, which no impl pins here; the local impls
+            // of that trait for the written self type are what it can reach,
+            // the same bounded set a dyn dispatch carries.
+            for fallback in generic_call_impl_fallback(tcx, caller, def_id, Some(call_args)) {
+                let name = def_path(tcx, fallback);
+                if !target_names.contains(&name) {
+                    target_names.push(name.clone());
+                    target_impl_traits.push(impl_trait_path_of(tcx, fallback));
+                    match fallback.as_local().and_then(|local| function_ids.get(&local)) {
+                        Some(id) => target_ids.push(id.clone()),
+                        None => {
+                            target_ids.push(stable_id("cg-node", &["external", &name]));
+                        }
+                    }
+                }
+            }
             let symbol = def_path(tcx, def_id);
             let native_symbol = foreign_link_symbol(tcx, def_id);
             let native_boundary = modeled_native_boundary(&symbol)
@@ -7600,7 +7893,7 @@ fn resolve_expr_call(
                 dispatch_confidence: dispatch_confidence_for("static", target_ids.len()),
                 target_ids,
                 target_names,
-                target_impl_traits: vec![impl_trait_path_of(tcx, def_id)],
+                target_impl_traits,
                 candidate_receivers: Vec::new(),
                 receiver_type: None,
                 dispatch_trait: None,

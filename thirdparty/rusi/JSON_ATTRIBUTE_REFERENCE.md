@@ -404,7 +404,15 @@ already present on the node.
 `trait-overapprox`, `higher-order`, `external`, `macro` (a dependency macro invocation,
 whose edge carries the crate's `targetPurl`; both backends emit it, once per call
 site), plus compiler-backend dispatch
-labels (`dyn-dispatch-exact`, `trait-static-bounded`, `async-logical`, ...).
+labels (`dyn-dispatch-exact`, `trait-static-bounded`, `async-logical`, ...)
+and `trait-callback` (compiler backend only). A `trait-callback` edge is the
+call a dependency's generic function makes through a trait bound on its own
+signature: `Client::<ApiCtx>::enc::<Uuid>` calls `t.to_json()` under
+`T: ToJson<X>`, and the call site knows the bound's arguments, so the edge
+goes to the local impl of that trait for that self type and those arguments
+(`context_impl_app::<impl ToJson<ApiCtx> for fakeuuid::Uuid>::to_json`). The
+fan-out is capped the way `--max-call-candidates` caps an over-approximated
+call site.
 Confidence follows from it. For the stable backend: `high` for `static`,
 `trait-impl`, and `higher-order`; `medium` for `receiver-typed`; `low`
 otherwise. A compiler-backend label carries the resolved target count as a

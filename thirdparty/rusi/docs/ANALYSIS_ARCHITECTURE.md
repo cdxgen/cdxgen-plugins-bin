@@ -391,6 +391,23 @@ asynchronous or task boundaries, such as future polling and task spawning, are p
 as logical edges rather than being devirtualized, because their value in the graph is the
 boundary they represent.
 
+Two calls the monomorphization pass cannot pin are resolved by enumeration instead. A
+`cargo check` run emits metadata only, so the crate generates no mono items and the
+collector behind the devirtualization pass sees none; a call inside a generic impl whose
+trait arguments are still the impl's own parameters
+(`<Uuid as ToJson<Ctx>>::to_json` inside `impl<Ctx> ToJson<Ctx> for Product`) resolves
+exactly nowhere, and a call into a dependency's generic function
+(`Client::<ApiCtx>::enc::<Uuid>`, whose body may not even be collected) names the
+dependency's function alone. Both are answered from the trait's local implementations: the
+generic call takes the bounded set of local impls of the trait for the self type it wrote,
+over the arguments it wrote, treating an argument that is one of the caller's own
+parameters as open; the dependency call reads the trait bounds on the callee's signature
+with the arguments the call site wrote (`T: ToJson<X>` becomes `Uuid: ToJson<ApiCtx>`) and
+adds an edge to the matching local impl, marked `trait-callback`. The callback's fan-out
+is capped the way `--max-call-candidates` caps an over-approximated call site. That edge
+is what connects a user's own impls to reachability when ORMs, serializers and codecs call
+them through bounds.
+
 ### 4.5 Edge reconciliation
 
 Because the compiler backend derives evidence from both HIR and MIR, and because the

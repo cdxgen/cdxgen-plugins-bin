@@ -1807,6 +1807,20 @@ const PRODUCT_IMPL_TO_JSON: &str = "::<impl ToJson<Ctx> for context_impl_app::Pr
 const MYUUID_IMPL_TO_JSON: &str = "::<impl ToJson for context_impl_app::MyUuid>::to_json";
 const PAIR_IMPL_FOR_UUID: &str = "::<impl Pair<ApiCtx,T> for fakeuuid::Uuid>::pair";
 
+// The compiler backend spells the same impls the way rustc prints them: a
+// foreign self type in the `<impl Trait for Type>` form with the trait's
+// crate path, a local one as `<Type as Trait<Args>>`.
+const COMPILER_API_CTX_IMPL_TO_JSON: &str =
+    "::<impl context_impl_tojson::ToJson<context_impl_app::ApiCtx> for fakeuuid::Uuid>::to_json";
+const COMPILER_RPC_CTX_IMPL_TO_JSON: &str =
+    "::<impl context_impl_tojson::ToJson<context_impl_app::RpcCtx> for fakeuuid::Uuid>::to_json";
+const COMPILER_PRODUCT_IMPL_TO_JSON: &str =
+    "<context_impl_app::Product as context_impl_tojson::ToJson<Ctx>>::to_json";
+const COMPILER_MYUUID_IMPL_TO_JSON: &str =
+    "<context_impl_app::MyUuid as context_impl_tojson::ToJson>::to_json";
+const COMPILER_PAIR_IMPL_FOR_UUID: &str =
+    "::<impl context_impl_tojson::Pair<context_impl_app::ApiCtx, T> for fakeuuid::Uuid>::pair";
+
 /// Qualified names of every edge target out of `source_suffix`, filtered to
 /// targets containing `target_part` (empty means all targets).
 fn context_impl_edge_targets(
@@ -2035,15 +2049,17 @@ fn compiler_backend_resolves_context_impl_dispatch() -> Result<()> {
     // Expectation 1: handler -> api -> Product's generic impl -> the ApiCtx
     // impl on the foreign Uuid type -> the process sink.
     assert_context_impl_edge(&report, "::handler", "::api");
-    assert_context_impl_dispatch(&report, "::api", PRODUCT_IMPL_TO_JSON);
-    let product_targets = context_impl_edge_targets(&report, PRODUCT_IMPL_TO_JSON, "to_json");
+    assert_context_impl_dispatch(&report, "::api", COMPILER_PRODUCT_IMPL_TO_JSON);
+    let product_targets =
+        context_impl_edge_targets(&report, COMPILER_PRODUCT_IMPL_TO_JSON, "to_json");
     assert!(
         product_targets
             .iter()
-            .any(|name| name.ends_with(API_CTX_IMPL_TO_JSON)),
+            .any(|name| name.ends_with(COMPILER_API_CTX_IMPL_TO_JSON)),
         "Product's impl should reach the ApiCtx impl on Uuid, got {product_targets:?}"
     );
-    let sink_targets = context_impl_edge_targets(&report, API_CTX_IMPL_TO_JSON, "Command::arg");
+    let sink_targets =
+        context_impl_edge_targets(&report, COMPILER_API_CTX_IMPL_TO_JSON, "Command::arg");
     assert!(
         !sink_targets.is_empty(),
         "the ApiCtx impl should call Command::arg"
@@ -2051,20 +2067,36 @@ fn compiler_backend_resolves_context_impl_dispatch() -> Result<()> {
 
     // Expectations 3 and 4: the dyn receivers dispatch only to the impl of
     // their context argument, in the `<impl Trait<Args> for Type>` spelling
-    // rustc prints for a foreign self type.
-    assert_context_impl_dispatch(&report, "::method_api", API_CTX_IMPL_TO_JSON);
-    assert_context_impl_dispatch(&report, "::plain_method", RPC_CTX_IMPL_TO_JSON);
+    // rustc prints for a foreign self type. The generic Product impl stays
+    // in the bounded set: a `dyn ToJson<ApiCtx>` may hold a `Product`.
+    assert_context_impl_reaches(&report, "::method_api", COMPILER_API_CTX_IMPL_TO_JSON);
+    assert_context_impl_reaches(&report, "::plain_method", COMPILER_RPC_CTX_IMPL_TO_JSON);
+    assert!(
+        context_impl_edge_targets(&report, "::method_api", COMPILER_RPC_CTX_IMPL_TO_JSON)
+            .is_empty(),
+        "method_api must not dispatch to the RpcCtx impl"
+    );
+    assert!(
+        context_impl_edge_targets(&report, "::plain_method", COMPILER_API_CTX_IMPL_TO_JSON)
+            .is_empty(),
+        "plain_method must not dispatch to the ApiCtx impl"
+    );
+    assert!(
+        context_impl_edge_targets(&report, "::method_api", COMPILER_MYUUID_IMPL_TO_JSON)
+            .is_empty(),
+        "method_api must not dispatch to the ToJson<()> impl"
+    );
 
     // Expectation 5: fully qualified calls reach the impl of the written
     // context, and the abstract trait item edge is superseded.
-    assert_context_impl_dispatch(&report, "::rpc", RPC_CTX_IMPL_TO_JSON);
+    assert_context_impl_dispatch(&report, "::rpc", COMPILER_RPC_CTX_IMPL_TO_JSON);
     assert!(
         context_impl_edge_targets(&report, "::rpc", "context_impl_tojson::ToJson::to_json")
             .is_empty(),
         "rpc's abstract trait item edge should be superseded by the impl edge"
     );
-    assert_context_impl_dispatch(&report, "::newtype", MYUUID_IMPL_TO_JSON);
-    assert_context_impl_dispatch(&report, "::pair", PAIR_IMPL_FOR_UUID);
+    assert_context_impl_dispatch(&report, "::newtype", COMPILER_MYUUID_IMPL_TO_JSON);
+    assert_context_impl_dispatch(&report, "::pair", COMPILER_PAIR_IMPL_FOR_UUID);
 
     // The dependency's generic `enc` is called with its generic arguments
     // known at the call site, so the bound's method reaches the ApiCtx impl
@@ -2076,16 +2108,33 @@ fn compiler_backend_resolves_context_impl_dispatch() -> Result<()> {
         "via_client should call the dependency's Client::enc"
     );
     let callback_targets =
-        context_impl_edge_targets(&report, "::via_client", API_CTX_IMPL_TO_JSON);
+        context_impl_edge_targets(&report, "::via_client", COMPILER_API_CTX_IMPL_TO_JSON);
     assert!(
         !callback_targets.is_empty(),
         "via_client's trait bound should call back into the ApiCtx impl"
     );
     assert!(
-        context_impl_edge_targets(&report, "::via_client", RPC_CTX_IMPL_TO_JSON).is_empty(),
+        context_impl_edge_targets(&report, "::via_client", COMPILER_RPC_CTX_IMPL_TO_JSON)
+            .is_empty(),
         "the ApiCtx callback must not reach the RpcCtx impl"
     );
     Ok(())
+}
+
+/// A call from `source_suffix` reaches a target ending with `target_suffix`
+/// among the targets that share its method name (other calls of the same
+/// function, to other methods, are not part of the dispatch).
+fn assert_context_impl_reaches(report: &serde_json::Value, source: &str, target: &str) {
+    let method = format!("::{}", target.rsplit("::").next().unwrap_or(target));
+    let targets = context_impl_edge_targets(report, source, "");
+    let dispatches: Vec<&String> = targets
+        .iter()
+        .filter(|name| name.ends_with(method.as_str()))
+        .collect();
+    assert!(
+        dispatches.iter().any(|name| name.ends_with(target)),
+        "{source} should reach {target}, got {targets:?}"
+    );
 }
 
 #[test]
