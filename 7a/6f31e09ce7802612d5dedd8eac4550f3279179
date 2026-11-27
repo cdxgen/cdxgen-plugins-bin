@@ -1,0 +1,21 @@
+thirdparty/rusi/crates/rusi-core/src/stats.rs
+  s_9a841b6bccbee8::t_bb72538f167d2f 157,322,330-331,334
+thirdparty/rusi/scripts/eval/deps_baseline.py
+  s_9a841b6bccbee8::t_b3daafcb29b0f3 135,137-139,141-143,210
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7a6f31e09ce7802612d5dedd8eac4550f3279179",
+  "prompts": {},
+  "sessions": {
+    "s_9a841b6bccbee8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d6317d63-6d3e-4df0-bcaa-98ab71527b87",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
