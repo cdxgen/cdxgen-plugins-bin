@@ -1879,7 +1879,7 @@ fn context_impl_slice_from(report: &serde_json::Value, function_suffix: &str) {
         .expect("data flow slices");
     assert!(
         slices.iter().any(|slice| {
-            slice["source_category"] == "environment"
+            slice["source_category"] == "env"
                 && slice["sink_category"] == "process-exec"
                 && slice["source_function"]
                     .as_str()

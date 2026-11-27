@@ -171,6 +171,15 @@ This document describes the report emitted by `rusi`. Field names map directly t
 > type can carry several same-named, same-shaped trait methods
 > (`impl Section for T` and `impl ComponentSection for T` both defining
 > `fn id(&self) -> u8`).
+>
+> A trait impl's method is named after the impl block, rustc's spelling:
+> `app::<impl ToJson<ApiCtx> for uuid::Uuid>::to_json`, with the trait's
+> generic arguments as written and the self type qualified to the crate that
+> owns it. The generic arguments are part of the name, so two impls of one
+> trait for one type under different context arguments get distinct ids and
+> distinct nodes. `canonical_name` reduces both this spelling and the
+> `<impl Trait for Type>` one the compiler backend prints to the
+> implementing type, so the two backends join on it (`uuid::Uuid::to_json`).
 
 ### `LibraryUsage`
 
