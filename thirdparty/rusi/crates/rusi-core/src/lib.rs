@@ -15467,6 +15467,14 @@ fn resolve_package_purl(package_path: &str, package_purls: &HashMap<String, Stri
         .next()
         .unwrap_or(package_path)
         .trim();
+    // A qualified self (`<Type as Trait>` or `<impl Trait for Type>`) is not
+    // a crate segment, and neither is a bare standard-library type whose
+    // path lost its `std::` root (`String::from_utf8_lossy`). Both name no
+    // crate this report can attribute, so they carry no purl rather than
+    // `pkg:cargo/String` or the percent-encoded leftover of `<std`.
+    if key.starts_with('<') || KNOWN_STD_TYPES.contains(&key) {
+        return String::new();
+    }
     if key.is_empty() {
         return String::new();
     }
@@ -15481,6 +15489,72 @@ fn resolve_package_purl(package_path: &str, package_purls: &HashMap<String, Stri
         String::new()
     } else {
         build_cargo_purl(&normalized, None)
+    }
+}
+
+#[cfg(test)]
+mod package_purl_tests {
+    use super::resolve_package_purl;
+
+    fn empty_purls() -> std::collections::HashMap<String, String> {
+        std::collections::HashMap::new()
+    }
+
+    #[test]
+    fn a_workspace_crate_carries_its_purl() {
+        assert_eq!(
+            resolve_package_purl("dep_helper_lib::run_command", &empty_purls()),
+            "pkg:cargo/dep-helper-lib"
+        );
+    }
+
+    #[test]
+    fn a_standard_library_root_carries_no_purl() {
+        assert_eq!(
+            resolve_package_purl("std::process::Command::new", &empty_purls()),
+            ""
+        );
+    }
+
+    #[test]
+    fn a_bare_standard_library_type_carries_no_purl() {
+        // `String::from_utf8_lossy` reads as a crate named `String` when only
+        // the first segment is taken, which attributed std code to a crate
+        // that does not exist.
+        assert_eq!(
+            resolve_package_purl("String::from_utf8_lossy", &empty_purls()),
+            ""
+        );
+        assert_eq!(resolve_package_purl("Vec::push", &empty_purls()), "");
+    }
+
+    #[test]
+    fn a_qualified_self_is_not_a_crate() {
+        // The compiler backend prints a deref through a standard-library type
+        // this way; the first segment `<std` was percent-encoded into
+        // `pkg:cargo/%3Cstd`.
+        assert_eq!(
+            resolve_package_purl("<std::vec::Vec<u8> as std::ops::Deref>::deref", &empty_purls()),
+            ""
+        );
+        assert_eq!(
+            resolve_package_purl("<std::string::String as std::ops::Deref>::deref", &empty_purls()),
+            ""
+        );
+    }
+
+    #[test]
+    fn a_known_purl_wins_over_the_inference() {
+        let purls = [(
+            "context_impl_tojson".to_string(),
+            "pkg:cargo/context-impl-tojson@0.1.0".to_string(),
+        )]
+        .into_iter()
+        .collect();
+        assert_eq!(
+            resolve_package_purl("context_impl_tojson::ToJson::to_json", &purls),
+            "pkg:cargo/context-impl-tojson@0.1.0"
+        );
     }
 }
 
