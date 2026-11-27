@@ -791,6 +791,7 @@ impl EmbeddedCollector {
             };
             let resolved = ResolvedCall {
                 callee_display: declaration.name.clone(),
+                candidate_count: None,
                 call_type: "static".to_string(),
                 dispatch_confidence: "high".to_string(),
                 target_ids: vec![function_id.clone()],
@@ -852,6 +853,7 @@ impl EmbeddedCollector {
             let semantic_tags = vec!["closure".to_string(), "callable".to_string()];
             index.entry(body.arg_count).or_default().push(ResolvedCall {
                 callee_display: declaration.qualified_name.clone(),
+                candidate_count: None,
                 call_type: "closure".to_string(),
                 dispatch_confidence: dispatch_confidence_for("closure", 1),
                 target_ids: vec![function_id],
@@ -1199,8 +1201,7 @@ impl<'tcx> Visitor<'tcx> for BodyVisitor<'tcx, '_> {
                 );
             }
             ExprKind::Call(func, _) => {
-                let resolved =
-                    resolve_expr_call(self.tcx, self.typeck, func, self.caller, self.function_ids);
+                let resolved = resolve_expr_call(self.tcx, self.typeck, func, self.function_ids);
                 self.record_call(
                     func.span,
                     hir_call_callee(self.typeck, func).map(|callee| (expr.span, callee)),
@@ -1641,6 +1642,10 @@ impl<'tcx> BodyVisitor<'tcx, '_> {
 #[derive(Debug, Clone)]
 struct ResolvedCall {
     callee_display: String,
+    /// The size of the candidate set before `--max-call-candidates` cut it,
+    /// `Some` only when it was cut; the edges then carry `candidateCount`
+    /// and `candidatesTruncated`.
+    candidate_count: Option<usize>,
     call_type: String,
     dispatch_confidence: String,
     target_ids: Vec<String>,
@@ -1668,6 +1673,7 @@ impl ResolvedCall {
     fn unresolved(name: String) -> Self {
         Self {
             callee_display: name,
+            candidate_count: None,
             call_type: "unresolved".to_string(),
             dispatch_confidence: "low".to_string(),
             target_ids: Vec::new(),
@@ -1933,6 +1939,7 @@ impl MirBlock {
                         dest: place_to_path(debug_names, *destination),
                         dest_type: Some(body.local_decls[destination.local].ty.to_string()),
                         callee_display: resolved.callee_display,
+                        candidate_count: resolved.candidate_count,
                         call_type: resolved.call_type,
                         dispatch_confidence: resolved.dispatch_confidence,
                         target_ids: resolved.target_ids,
@@ -2008,6 +2015,7 @@ fn callable_candidate_resolution(
         .collect();
     Some(ResolvedCall {
         callee_display: unresolved_display.to_string(),
+        candidate_count: None,
         call_type: "closure".to_string(),
         dispatch_confidence: dispatch_confidence_for("closure", target_ids.len()),
         target_ids,
@@ -2113,6 +2121,8 @@ impl AssignAction {
 
 #[derive(Debug, Clone)]
 struct MirCall {
+    /// See [`ResolvedCall::candidate_count`].
+    candidate_count: Option<usize>,
     dest: PlacePath,
     dest_type: Option<String>,
     callee_display: String,
@@ -2400,19 +2410,136 @@ fn trait_call_local_impl<'tcx>(
     target.as_local()
 }
 
+/// The ceiling on the targets one call site emits, the limit
+/// `--max-call-candidates` applies to the stable backend's over-approximated
+/// sites; the driver passes the same value through `RUSI_MAX_CALL_CANDIDATES`.
+/// `None` means no ceiling.
+fn max_call_candidates() -> Option<usize> {
+    static MAX: OnceLock<Option<usize>> = OnceLock::new();
+    *MAX.get_or_init(|| {
+        parse_max_call_candidates(std::env::var("RUSI_MAX_CALL_CANDIDATES").ok().as_deref())
+    })
+}
+
+/// Reads the `RUSI_MAX_CALL_CANDIDATES` value: `0` disables the ceiling, as
+/// it does on the command line, and an absent or unreadable value falls back
+/// to the command line's default of 8.
+fn parse_max_call_candidates(value: Option<&str>) -> Option<usize> {
+    match value.and_then(|value| value.trim().parse::<usize>().ok()) {
+        Some(0) => None,
+        Some(limit) => Some(limit),
+        None => Some(8),
+    }
+}
+
+/// Appends `extra` targets to a call's target lists, skipping names already
+/// there, and caps the appended part so the whole set stays within
+/// [`max_call_candidates`] (the targets the call resolved to on its own are
+/// never cut). Returns how many targets the set would have held uncut when
+/// the cap removed any, and whether anything was appended.
+fn append_capped_targets(
+    tcx: TyCtxt<'_>,
+    extra: Vec<DefId>,
+    function_ids: &HashMap<LocalDefId, String>,
+    target_ids: &mut Vec<String>,
+    target_names: &mut Vec<String>,
+    target_impl_traits: &mut Vec<Option<String>>,
+) -> (Option<usize>, bool) {
+    let mut fresh: Vec<(String, DefId)> = Vec::new();
+    for def_id in extra {
+        let name = def_path(tcx, def_id);
+        if !target_names.contains(&name) && !fresh.iter().any(|(seen, _)| *seen == name) {
+            fresh.push((name, def_id));
+        }
+    }
+    let total = target_names.len() + fresh.len();
+    let mut truncated = None;
+    if let Some(limit) = max_call_candidates()
+        && total > limit
+    {
+        fresh.truncate(limit.saturating_sub(target_names.len()));
+        truncated = Some(total);
+    }
+    let appended = !fresh.is_empty();
+    for (name, def_id) in fresh {
+        target_impl_traits.push(impl_trait_path_of(tcx, def_id));
+        target_ids.push(
+            def_id
+                .as_local()
+                .and_then(|local| function_ids.get(&local))
+                .cloned()
+                .unwrap_or_else(|| stable_id("cg-node", &["external", &name])),
+        );
+        target_names.push(name);
+    }
+    (truncated, appended)
+}
+
+/// Whether two types may be the same type once generic parameters are
+/// instantiated. A parameter on either side matches anything, regions never
+/// decide, and a projection, an inference variable, a trait object, a
+/// function pointer or a closure is not taken apart, so anything uncertain
+/// matches. Only two types whose rigid structure differs do not.
+fn types_may_match<'tcx>(left: Ty<'tcx>, right: Ty<'tcx>) -> bool {
+    if left == right {
+        return true;
+    }
+    match (left.kind(), right.kind()) {
+        (ty::Param(_), _) | (_, ty::Param(_)) => true,
+        (ty::Alias(..), _) | (_, ty::Alias(..)) => true,
+        (ty::Infer(_), _) | (_, ty::Infer(_)) => true,
+        (ty::Error(_), _) | (_, ty::Error(_)) => true,
+        (ty::Dynamic(..), ty::Dynamic(..)) => true,
+        (ty::FnPtr(..), ty::FnPtr(..)) => true,
+        (ty::RawPtr(..), ty::RawPtr(..)) => true,
+        (ty::Closure(..), _) | (_, ty::Closure(..)) => true,
+        (ty::Adt(left_def, left_args), ty::Adt(right_def, right_args)) => {
+            left_def.did() == right_def.did()
+                && left_args
+                    .iter()
+                    .zip(right_args.iter())
+                    .all(|(left, right)| generic_arg_may_match(left, right))
+        }
+        (ty::Ref(_, left, left_mut), ty::Ref(_, right, right_mut)) => {
+            left_mut == right_mut && types_may_match(*left, *right)
+        }
+        (ty::Slice(left), ty::Slice(right)) | (ty::Array(left, _), ty::Array(right, _)) => {
+            types_may_match(*left, *right)
+        }
+        (ty::Tuple(left), ty::Tuple(right)) => {
+            left.len() == right.len()
+                && left
+                    .iter()
+                    .zip(right.iter())
+                    .all(|(left, right)| types_may_match(left, right))
+        }
+        _ => false,
+    }
+}
+
+/// [`types_may_match`] for generic arguments: lifetimes and constants never
+/// rule a pair out.
+fn generic_arg_may_match<'tcx>(left: ty::GenericArg<'tcx>, right: ty::GenericArg<'tcx>) -> bool {
+    match (left.kind(), right.kind()) {
+        (ty::GenericArgKind::Type(left), ty::GenericArgKind::Type(right)) => {
+            types_may_match(left, right)
+        }
+        _ => true,
+    }
+}
+
 /// The local impl methods a generic qualified call may reach, the fallback
 /// for `<Uuid as ToJson<Ctx>>::to_json(..)` inside `impl<Ctx> ToJson<Ctx>
-/// for Product`: the call's trait arguments still contain one of the
-/// caller's own generic parameters, so no single impl can be named, and
-/// every local impl of the trait for the written self type stays a
-/// candidate, the over-approximation a dyn dispatch already carries. The
+/// for Product`: a trait argument of the call still mentions a generic
+/// parameter of the caller, so no single impl can be named, and every local
+/// impl of the trait whose self type and arguments may match the call's
+/// stays a candidate, the over-approximation a dyn dispatch carries. The
 /// exact answer where the caller is monomorphic would come from
 /// `Instance::try_resolve` over the crate's mono items, but a `cargo check`
 /// run emits metadata only, so the collector those instances come from is
-/// empty and the fallback is what there is to build on.
+/// empty.
 fn generic_call_impl_fallback<'tcx>(
     tcx: TyCtxt<'tcx>,
-    caller: LocalDefId,
     callee_def_id: DefId,
     call_args: Option<GenericArgsRef<'tcx>>,
 ) -> Vec<DefId> {
@@ -2425,27 +2552,17 @@ fn generic_call_impl_fallback<'tcx>(
     let Some(trait_def_id) = assoc.trait_container(tcx) else {
         return Vec::new();
     };
-    // The call is ambiguous only when a trait argument is one of the
-    // caller's own generic parameters. Argument 0 is the self type, which
-    // the call wrote concretely (`Uuid` of `<Uuid as ToJson<Ctx>>`).
-    // A parameter of the caller is one whose index sits above the caller's
-    // parents (an impl block's own parameters, for a method).
-    // The caller's generics include the ones it inherits from its parent
-    // (an impl block's `Ctx`, for a method), and any of them is one the
-    // caller cannot pin.
-    let caller_generics = tcx.generics_of(caller.to_def_id());
-    let mut has_own_param = false;
-    for index in 1..call_args.args_len() {
-        if let Some(arg) = call_args.arg_at(index)
-            && let ty::GenericArgKind::Type(ty) = arg.kind()
-            && let ty::Param(param) = ty.kind()
-            && (param.index as usize) < caller_generics.count()
-        {
-            has_own_param = true;
-            break;
-        }
-    }
-    if !has_own_param {
+    // Argument 0 is the self type the call wrote; the rest are the trait's
+    // arguments, and the call is open when one of them mentions a parameter.
+    let mentions_param = |arg: ty::GenericArg<'tcx>| {
+        arg.walk().any(|inner| {
+            matches!(inner.kind(), ty::GenericArgKind::Type(ty) if matches!(ty.kind(), ty::Param(_)))
+        })
+    };
+    let open = (1..call_args.args_len())
+        .filter_map(|index| call_args.arg_at(index))
+        .any(mentions_param);
+    if !open {
         return Vec::new();
     }
     let Some(self_ty) = call_args.arg_at(0).and_then(|arg| arg.as_type()) else {
@@ -2459,8 +2576,17 @@ fn generic_call_impl_fallback<'tcx>(
         .into_iter()
         .flatten()
     {
-        let impl_trait_ref = tcx.impl_trait_ref(*impl_def);
-        if impl_trait_ref.skip_binder().self_ty() != self_ty {
+        let impl_trait_ref = tcx.impl_trait_ref(*impl_def).skip_binder();
+        if !types_may_match(impl_trait_ref.self_ty(), self_ty) {
+            continue;
+        }
+        let args_match = (1..call_args.args_len()).all(|index| {
+            match (impl_trait_ref.args.get(index), call_args.arg_at(index)) {
+                (Some(impl_arg), Some(call_arg)) => generic_arg_may_match(*impl_arg, call_arg),
+                _ => true,
+            }
+        });
+        if !args_match {
             continue;
         }
         for candidate in tcx.associated_items(*impl_def).in_definition_order() {
@@ -2490,7 +2616,6 @@ fn trait_callback_targets<'tcx>(
     let Some(call_args) = call_args else {
         return Vec::new();
     };
-    let generics = tcx.generics_of(callee_def_id);
     // The call's arguments are indexed by the callee's generic parameter
     // index, so a bound written over one of those parameters reads its
     // concrete value at the same index.
@@ -2510,52 +2635,35 @@ fn trait_callback_targets<'tcx>(
             continue;
         };
         let trait_def_id = trait_ref.def_id;
-        let Some(concrete_self) = concrete_arg(param.index) else {
+        let Some(concrete_self_ty) = concrete_arg(param.index).and_then(|arg| arg.as_type()) else {
             continue;
-        };
-        let concrete_self_ty = match concrete_self.as_type() {
-            Some(ty) => ty,
-            None => continue,
         };
         let Some(impls) = tcx.all_local_trait_impls(()).get(&trait_def_id) else {
             continue;
         };
+        // A bound argument that is one of the callee's parameters reads its
+        // value from the call (`X` of `T: ToJson<X>` is `ApiCtx` when the
+        // call wrote `Client::<ApiCtx>::enc::<Uuid>`); a nested parameter
+        // stays a parameter and matches anything.
+        let instantiate = |arg: ty::GenericArg<'tcx>| match arg.kind() {
+            ty::GenericArgKind::Type(ty) => match ty.kind() {
+                ty::Param(param) => concrete_arg(param.index).unwrap_or(arg),
+                _ => arg,
+            },
+            _ => arg,
+        };
         for impl_def in impls {
-            let impl_trait_ref = tcx.impl_trait_ref(*impl_def);
-            let impl_trait_ref = impl_trait_ref.skip_binder();
-            if impl_trait_ref.self_ty() != concrete_self_ty {
+            let impl_trait_ref = tcx.impl_trait_ref(*impl_def).skip_binder();
+            if !types_may_match(impl_trait_ref.self_ty(), concrete_self_ty) {
                 continue;
             }
-            // The bound's remaining arguments, made concrete by the call:
-            // `X` of `T: ToJson<X>` is `ApiCtx` when the call wrote
-            // `Client::<ApiCtx>::enc::<Uuid>`. An impl argument that is one
-            // of the impl's own generic parameters matches anything, the
-            // way a dyn dispatch's over-approximation does.
             let bound_args_match = impl_trait_ref
                 .args
                 .iter()
                 .skip(1)
                 .zip(trait_ref.args.iter().skip(1))
                 .all(|(impl_arg, bound_arg)| {
-                    if impl_arg == bound_arg {
-                        return true;
-                    }
-                    let concrete_bound = match bound_arg.kind() {
-                        ty::GenericArgKind::Type(ty) => match ty.kind() {
-                            ty::Param(param) => concrete_arg(param.index),
-                            _ => None,
-                        },
-                        _ => None,
-                    };
-                    match concrete_bound {
-                        Some(concrete) => impl_arg == concrete,
-                        None => match impl_arg.kind() {
-                            ty::GenericArgKind::Type(ty) => {
-                                matches!(ty.kind(), ty::Param(_))
-                            }
-                            _ => true,
-                        },
-                    }
+                    generic_arg_may_match(impl_arg, instantiate(bound_arg))
                 });
             if !bound_args_match {
                 continue;
@@ -2572,9 +2680,6 @@ fn trait_callback_targets<'tcx>(
     }
     targets.sort_by_key(|def_id| def_path(tcx, *def_id));
     targets.dedup();
-    // The same ceiling `--max-call-candidates` applies to an
-    // over-approximated call site.
-    targets.truncate(max_call_candidates());
     targets
 }
 
@@ -3109,8 +3214,10 @@ fn build_call_graph(
                             callee_text: Some(call.callee_display.clone()),
                             receiver: call.receiver_type.clone(),
                             method: None,
-                            candidate_count: None,
-                            emitted_candidate_count: None,
+                            candidate_count: call.candidate_count,
+                            emitted_candidate_count: call
+                                .candidate_count
+                                .map(|_| call.target_ids.len()),
                             dispatch_trait: call.dispatch_trait.clone(),
                             properties,
                             target_purl: String::new(),
@@ -3289,8 +3396,11 @@ fn build_call_graph(
                     callee_text: Some(call.resolved.callee_display.clone()),
                     receiver: call.resolved.receiver_type.clone(),
                     method: None,
-                    candidate_count: None,
-                    emitted_candidate_count: None,
+                    candidate_count: call.resolved.candidate_count,
+                    emitted_candidate_count: call
+                        .resolved
+                        .candidate_count
+                        .map(|_| call.resolved.target_ids.len()),
                     dispatch_trait: call.resolved.dispatch_trait.clone(),
                     properties,
                     target_purl: String::new(),
@@ -3503,20 +3613,6 @@ fn method_suffix(target_name: &str) -> String {
 /// the crate artifact so the `--stats-json` document can report the compiler
 /// backend's work next to the stable backend's. The wrapper analyzes crates
 /// sequentially in one process, so plain atomics are enough.
-/// Ceiling on the trait-callback targets one call site emits, the limit
-/// `--max-call-candidates` applies to the stable backend's over-approximated
-/// sites; the driver passes the same value through `RUSI_MAX_CALL_CANDIDATES`.
-fn max_call_candidates() -> usize {
-    static MAX: OnceLock<usize> = OnceLock::new();
-    *MAX.get_or_init(|| {
-        std::env::var("RUSI_MAX_CALL_CANDIDATES")
-            .ok()
-            .and_then(|value| value.parse::<usize>().ok())
-            .filter(|value| *value > 0)
-            .unwrap_or(8)
-    })
-}
-
 static SUMMARY_EVALUATIONS: AtomicU64 = AtomicU64::new(0);
 static ABSTRACT_BLOCK_EVALUATIONS: AtomicU64 = AtomicU64::new(0);
 static CONCRETE_BLOCK_EVALUATIONS: AtomicU64 = AtomicU64::new(0);
@@ -7781,25 +7877,14 @@ fn resolve_method_call<'tcx>(
     let mut target_ids = target_ids;
     let mut target_names = target_names;
     let mut target_impl_traits = target_impl_traits;
-    let mut callback_used = false;
-    for callback in callback_targets {
-        let name = def_path(tcx, callback);
-        if target_names.contains(&name) {
-            continue;
-        }
-        target_names.push(name.clone());
-        target_impl_traits.push(impl_trait_path_of(tcx, callback));
-        match callback
-            .as_local()
-            .and_then(|local| function_ids.get(&local))
-        {
-            Some(id) => target_ids.push(id.clone()),
-            None => {
-                target_ids.push(stable_id("cg-node", &["external", &name]));
-            }
-        }
-        callback_used = true;
-    }
+    let (candidate_count, callback_used) = append_capped_targets(
+        tcx,
+        callback_targets,
+        function_ids,
+        &mut target_ids,
+        &mut target_names,
+        &mut target_impl_traits,
+    );
     let call_type = if callback_used {
         "trait-callback"
     } else {
@@ -7823,6 +7908,7 @@ fn resolve_method_call<'tcx>(
         specialization_key_from_parts(receiver_type.as_deref(), &semantic_tags, &target_names);
     Some(ResolvedCall {
         callee_display: symbol,
+        candidate_count,
         call_type: if native_boundary
             || matches!(
                 tcx.def_kind(def_id),
@@ -7851,7 +7937,6 @@ fn resolve_expr_call<'tcx>(
     tcx: TyCtxt<'tcx>,
     typeck: &ty::TypeckResults<'tcx>,
     func: &'tcx Expr<'tcx>,
-    caller: LocalDefId,
     function_ids: &HashMap<LocalDefId, String>,
 ) -> Option<ResolvedCall> {
     match func.kind {
@@ -7861,27 +7946,30 @@ fn resolve_expr_call<'tcx>(
             let call_args = typeck.node_args(func.hir_id);
             let (mut target_ids, mut target_names) = target_for_def_id(tcx, def_id, function_ids);
             let mut target_impl_traits = vec![impl_trait_path_of(tcx, def_id)];
-            // A trait-qualified call whose trait arguments are still the
-            // caller's own generic parameters resolves inside the caller to
-            // the trait's method, which no impl pins here; the local impls
-            // of that trait for the written self type are what it can reach,
-            // the same bounded set a dyn dispatch carries.
-            for fallback in generic_call_impl_fallback(tcx, caller, def_id, Some(call_args)) {
-                let name = def_path(tcx, fallback);
-                if !target_names.contains(&name) {
-                    target_names.push(name.clone());
-                    target_impl_traits.push(impl_trait_path_of(tcx, fallback));
-                    match fallback
-                        .as_local()
-                        .and_then(|local| function_ids.get(&local))
-                    {
-                        Some(id) => target_ids.push(id.clone()),
-                        None => {
-                            target_ids.push(stable_id("cg-node", &["external", &name]));
-                        }
-                    }
-                }
-            }
+            // A trait-qualified call whose trait arguments still mention the
+            // caller's generic parameters resolves inside the caller to the
+            // trait's method, which no impl pins here; the local impls that
+            // may match are what it can reach, the bounded set a dyn dispatch
+            // carries. A call of a generic function whose bounds name local
+            // impls (`to_string::<T>(&x)` under `T: Serialize`) calls back into
+            // those impls.
+            let (fallback_count, _) = append_capped_targets(
+                tcx,
+                generic_call_impl_fallback(tcx, def_id, Some(call_args)),
+                function_ids,
+                &mut target_ids,
+                &mut target_names,
+                &mut target_impl_traits,
+            );
+            let (callback_count, callback_used) = append_capped_targets(
+                tcx,
+                trait_callback_targets(tcx, def_id, Some(call_args)),
+                function_ids,
+                &mut target_ids,
+                &mut target_names,
+                &mut target_impl_traits,
+            );
+            let candidate_count = callback_count.or(fallback_count);
             let symbol = def_path(tcx, def_id);
             let native_symbol = foreign_link_symbol(tcx, def_id);
             let native_boundary = modeled_native_boundary(&symbol)
@@ -7898,10 +7986,13 @@ fn resolve_expr_call<'tcx>(
             );
             Some(ResolvedCall {
                 callee_display: symbol,
+                candidate_count,
                 call_type: if native_boundary {
                     "native".to_string()
                 } else if matches!(typeck.expr_ty(func).kind(), ty::FnPtr(..)) {
                     "fn-pointer".to_string()
+                } else if callback_used {
+                    "trait-callback".to_string()
                 } else {
                     "static".to_string()
                 },
@@ -7932,6 +8023,7 @@ fn resolve_expr_call<'tcx>(
                 );
                 Some(ResolvedCall {
                     callee_display: def_path(tcx, def_id),
+                    candidate_count: None,
                     call_type: "closure".to_string(),
                     dispatch_confidence: dispatch_confidence_for("closure", target_ids.len()),
                     target_ids,
@@ -7963,6 +8055,7 @@ fn resolve_expr_call<'tcx>(
                     .is_some_and(modeled_native_boundary);
                 Some(ResolvedCall {
                     callee_display: def_path(tcx, def_id),
+                    candidate_count: None,
                     call_type: if native_boundary { "native" } else { "static" }.to_string(),
                     dispatch_confidence: dispatch_confidence_for("static", target_ids.len()),
                     target_ids,
@@ -7980,6 +8073,7 @@ fn resolve_expr_call<'tcx>(
             }
             ty::FnPtr(..) => Some(ResolvedCall {
                 callee_display: "fn-pointer".to_string(),
+                candidate_count: None,
                 call_type: "fn-pointer".to_string(),
                 dispatch_confidence: "low".to_string(),
                 target_ids: Vec::new(),
@@ -8212,36 +8306,23 @@ fn enumerate_dyn_candidates<'tcx>(
 }
 
 /// Whether an impl can back a trait object with the object's principal
-/// arguments: every argument pair must be equal, and an impl argument that
-/// is still one of the impl's own generic parameters counts as a match,
-/// because the impl may be instantiated at the object's argument. Arguments
-/// that cannot be compared (lifetimes, non-type arguments of unequal kinds)
-/// also keep the candidate: an over-approximation never drops a possible
-/// target.
+/// arguments: no argument pair may provably name different types (see
+/// [`generic_arg_may_match`]). A lifetime never decides, and an argument
+/// that mentions a generic parameter on either side, the impl's own or the
+/// caller's (`&dyn ToJson<C>`), matches.
 fn impl_trait_args_match_object<'tcx>(
     impl_trait_ref: ty::EarlyBinder<'tcx, ty::TraitRef<'tcx>>,
     object_args: GenericArgsRef<'tcx>,
 ) -> bool {
     // Argument 0 is the impl's self type, which the object's principal
     // arguments do not carry.
-    for (impl_arg, object_arg) in impl_trait_ref
+    impl_trait_ref
         .skip_binder()
         .args
         .iter()
         .skip(1)
-        .zip(object_args)
-    {
-        if impl_arg == object_arg {
-            continue;
-        }
-        if let ty::GenericArgKind::Type(impl_ty) = impl_arg.kind()
-            && matches!(impl_ty.kind(), ty::Param(_))
-        {
-            continue;
-        }
-        return false;
-    }
-    true
+        .zip(object_args.iter())
+        .all(|(impl_arg, object_arg)| generic_arg_may_match(impl_arg, object_arg))
 }
 
 fn receiver_matches_hint(candidate: &str, hint: &str) -> bool {
@@ -8821,6 +8902,7 @@ mod tests {
             dest: local(dest),
             dest_type: None,
             callee_display: callee.to_string(),
+            candidate_count: None,
             call_type: if target_ids.is_empty() {
                 "static".to_string()
             } else {
@@ -8911,6 +8993,15 @@ mod tests {
                 function(&name, &["p"], vec![block(0, vec![op], &[], true)])
             })
             .collect()
+    }
+
+    #[test]
+    fn max_call_candidates_reads_zero_as_no_ceiling() {
+        assert_eq!(super::parse_max_call_candidates(Some("0")), None);
+        assert_eq!(super::parse_max_call_candidates(Some("3")), Some(3));
+        assert_eq!(super::parse_max_call_candidates(Some(" 12 ")), Some(12));
+        assert_eq!(super::parse_max_call_candidates(Some("many")), Some(8));
+        assert_eq!(super::parse_max_call_candidates(None), Some(8));
     }
 
     #[test]

@@ -173,9 +173,9 @@ This document describes the report emitted by `rusi`. Field names map directly t
 > `fn id(&self) -> u8`).
 >
 > A trait impl's method is named after the impl block, rustc's spelling:
-> `app::<impl ToJson<ApiCtx> for uuid::Uuid>::to_json`, with the trait's
-> generic arguments as written and the self type qualified to the crate that
-> owns it. The generic arguments are part of the name, so two impls of one
+> `app::<impl ToJson<ApiCtx> for uuid::Uuid>::to_json`, with the module the
+> impl sits in, the trait's generic arguments as written, and the self type
+> qualified to the crate and module that own it. The generic arguments are part of the name, so two impls of one
 > trait for one type under different context arguments get distinct ids and
 > distinct nodes. `canonical_name` reduces both this spelling and the
 > `<impl Trait for Type>` one the compiler backend prints to the
@@ -406,13 +406,16 @@ whose edge carries the crate's `targetPurl`; both backends emit it, once per cal
 site), plus compiler-backend dispatch
 labels (`dyn-dispatch-exact`, `trait-static-bounded`, `async-logical`, ...)
 and `trait-callback` (compiler backend only). A `trait-callback` edge is the
-call a dependency's generic function makes through a trait bound on its own
-signature: `Client::<ApiCtx>::enc::<Uuid>` calls `t.to_json()` under
+call a generic function (usually a dependency's) makes through a trait bound
+on its own signature, whether it is called as a method or as a path:
+`Client::<ApiCtx>::enc::<Uuid>` calls `t.to_json()` under
 `T: ToJson<X>`, and the call site knows the bound's arguments, so the edge
 goes to the local impl of that trait for that self type and those arguments
 (`context_impl_app::<impl ToJson<ApiCtx> for fakeuuid::Uuid>::to_json`). The
 fan-out is capped the way `--max-call-candidates` caps an over-approximated
-call site.
+call site: the call's own targets are kept, the callback targets fill the
+rest of the limit, and a cut edge carries `candidateCount` and
+`candidatesTruncated`.
 Confidence follows from it. For the stable backend: `high` for `static`,
 `trait-impl`, and `higher-order`; `medium` for `receiver-typed`; `low`
 otherwise. A compiler-backend label carries the resolved target count as a

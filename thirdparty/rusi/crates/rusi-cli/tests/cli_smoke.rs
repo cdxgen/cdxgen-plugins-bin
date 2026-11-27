@@ -1798,8 +1798,8 @@ fn single_directory_report_is_the_same_with_and_without_discovery() -> Result<()
 // The context-impl-app fixture: a trait with a defaulted context parameter,
 // implemented for a foreign type under local marker types. The qualified
 // names below follow rustc's impl spelling (`crate::<impl Trait<Args> for
-// Type>::method`), which is what both backends name the impl methods after
-// the identity fix, so the two backends join on their canonical names.
+// Type>::method`), which both backends name impl methods with, so the two
+// backends join on their canonical names.
 
 const API_CTX_IMPL_TO_JSON: &str = "::<impl ToJson<ApiCtx> for fakeuuid::Uuid>::to_json";
 const RPC_CTX_IMPL_TO_JSON: &str = "::<impl ToJson<RpcCtx> for fakeuuid::Uuid>::to_json";

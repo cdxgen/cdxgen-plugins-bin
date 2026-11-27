@@ -8005,11 +8005,6 @@ fn resolve_call_targets(
     Vec::new()
 }
 
-/// Resolves a fully qualified call against the trait-impl index, by the self
-/// type and the trait arguments the call names. A trait argument that is one
-/// of the caller's own generic parameters cannot be pinned, so every local
-/// impl of the trait for the named self type stays a candidate: an
-/// over-approximation never drops a possible target.
 /// The trait's name as written with its generic arguments
 /// (`context_impl_tojson::ToJson<ApiCtx>`), reduced to the trait's own last
 /// path segment, which is the key the impl records are indexed by.
@@ -8168,6 +8163,10 @@ fn resolve_qualified_trait_target_ids(
     matched
 }
 
+/// Resolves a fully qualified call against the trait-impl index, by the self
+/// type and the trait arguments the call names; a trait-form call takes the
+/// self type from its first argument's type. One impl is a `trait-impl`
+/// edge, several are a bounded over-approximation.
 fn resolve_qualified_trait_call(
     parts: &QualifiedTraitCall,
     call: &SimplifiedCall,
@@ -8808,10 +8807,6 @@ fn type_qualified_name_matches(qname: &str, type_token: &str, method: &str) -> b
     last_segment(qname) == method
 }
 
-/// The implementing type of a qualified name spelled after an impl block
-/// (`fakeuuid::Uuid` of
-/// `app::<impl ToJson<ApiCtx> for fakeuuid::Uuid>::to_json`), when the name
-/// has that shape.
 #[cfg(test)]
 mod impl_form_matching_tests {
     use super::type_qualified_name_matches;
@@ -8843,6 +8838,10 @@ mod impl_form_matching_tests {
     }
 }
 
+/// The implementing type of a qualified name spelled after an impl block
+/// (`fakeuuid::Uuid` of
+/// `app::<impl ToJson<ApiCtx> for fakeuuid::Uuid>::to_json`), when the name
+/// has that shape.
 fn qualified_impl_self_type(qname: &str) -> Option<&str> {
     // The impl part is the first top-level `<...>` group that starts with
     // `impl `, followed by the crate path's `::`. The bracket is the
@@ -9749,6 +9748,7 @@ fn inferred_package_path(callee: &str) -> String {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_data_flow(
     mode: &str,
     functions: &[FunctionRecord],
@@ -15947,9 +15947,8 @@ mod package_purl_tests {
 
     #[test]
     fn a_bare_standard_library_type_carries_no_purl() {
-        // `String::from_utf8_lossy` reads as a crate named `String` when only
-        // the first segment is taken, which attributed std code to a crate
-        // that does not exist.
+        // A standard-library type named without its `std::` root is not a
+        // crate.
         assert_eq!(
             resolve_package_purl("String::from_utf8_lossy", &empty_purls()),
             ""
@@ -15960,8 +15959,7 @@ mod package_purl_tests {
     #[test]
     fn a_qualified_self_is_not_a_crate() {
         // The compiler backend prints a deref through a standard-library type
-        // this way; the first segment `<std` was percent-encoded into
-        // `pkg:cargo/%3Cstd`.
+        // as a qualified self, whose first segment names no crate.
         assert_eq!(
             resolve_package_purl(
                 "<std::vec::Vec<u8> as std::ops::Deref>::deref",

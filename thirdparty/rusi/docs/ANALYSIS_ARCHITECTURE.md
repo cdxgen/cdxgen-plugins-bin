@@ -399,9 +399,10 @@ trait arguments are still the impl's own parameters
 exactly nowhere, and a call into a dependency's generic function
 (`Client::<ApiCtx>::enc::<Uuid>`, whose body may not even be collected) names the
 dependency's function alone. Both are answered from the trait's local implementations: the
-generic call takes the bounded set of local impls of the trait for the self type it wrote,
-over the arguments it wrote, treating an argument that is one of the caller's own
-parameters as open; the dependency call reads the trait bounds on the callee's signature
+generic call takes the bounded set of local impls of the trait whose self type and
+arguments may match the ones it wrote, where a generic parameter on either side, a
+lifetime, or a type the matcher does not take apart (a projection, a trait object, a
+closure) never rules an impl out; the dependency call reads the trait bounds on the callee's signature
 with the arguments the call site wrote (`T: ToJson<X>` becomes `Uuid: ToJson<ApiCtx>`) and
 adds an edge to the matching local impl, marked `trait-callback`. The callback's fan-out
 is capped the way `--max-call-candidates` caps an over-approximated call site. That edge
