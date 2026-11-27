@@ -1,0 +1,10 @@
+[package]
+name = "context-impl-app"
+version = "0.1.0"
+edition = "2024"
+
+[workspace]
+
+[dependencies]
+context-impl-tojson = { path = "../context-impl-tojson" }
+fakeuuid = { path = "../context-impl-fakeuuid" }

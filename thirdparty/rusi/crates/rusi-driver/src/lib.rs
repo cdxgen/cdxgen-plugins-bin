@@ -36,6 +36,10 @@ pub struct DriverOptions {
     pub include_tests: bool,
     pub rustc_toolchain: String,
     pub debug: bool,
+    /// Ceiling on call-graph edges per ambiguous call site, which bounds the
+    /// compiler backend's trait-callback fan-out the way it bounds the stable
+    /// backend's over-approximated sites.
+    pub max_call_candidates: usize,
 }
 
 impl DriverOptions {
@@ -47,6 +51,7 @@ impl DriverOptions {
             include_tests: options.include_tests,
             rustc_toolchain: "auto".to_string(),
             debug: options.debug,
+            max_call_candidates: options.max_call_candidates,
         }
     }
 }
@@ -1146,6 +1151,10 @@ fn collect_embedded_compiler_evidence(
     command.env("RUSI_EMIT_DIR", &emit_dir);
     command.env("RUSI_ANALYSIS_ROOT", analysis_root);
     command.env("RUSI_DATA_FLOW_MODE", &options.data_flow_mode);
+    command.env(
+        "RUSI_MAX_CALL_CANDIDATES",
+        options.max_call_candidates.to_string(),
+    );
     if options.debug {
         command.env("RUSI_DEBUG", "1");
     }
@@ -3206,6 +3215,7 @@ mod tests {
             include_tests: false,
             rustc_toolchain: "nightly".to_string(),
             debug: false,
+            max_call_candidates: rusi_core::DEFAULT_MAX_CALL_CANDIDATES,
         };
         let envelope = run_driver(&options).expect("driver run succeeds");
         assert_eq!(envelope.protocol_version, DRIVER_PROTOCOL_VERSION);
@@ -3229,6 +3239,7 @@ mod tests {
             include_tests: false,
             rustc_toolchain: "auto".to_string(),
             debug: false,
+            max_call_candidates: rusi_core::DEFAULT_MAX_CALL_CANDIDATES,
         };
         let capabilities = detect_capabilities(&options, &options.analysis_root);
         assert!(!capabilities.resolved_toolchain.is_empty());
@@ -3273,6 +3284,7 @@ mod tests {
             include_tests: false,
             rustc_toolchain: "stable".to_string(),
             debug: false,
+            max_call_candidates: rusi_core::DEFAULT_MAX_CALL_CANDIDATES,
         };
         let envelope = run_driver(&options).expect("driver run succeeds");
         assert_eq!(envelope.capabilities.requested_toolchain, "stable");
@@ -3321,6 +3333,7 @@ mod tests {
             include_tests: false,
             rustc_toolchain: test_toolchain(),
             debug: false,
+            max_call_candidates: rusi_core::DEFAULT_MAX_CALL_CANDIDATES,
         };
         let envelope = run_driver(&options).expect("driver run succeeds");
 
@@ -3380,6 +3393,7 @@ mod tests {
             include_tests: false,
             rustc_toolchain: test_toolchain(),
             debug: false,
+            max_call_candidates: rusi_core::DEFAULT_MAX_CALL_CANDIDATES,
         };
         let envelope = run_driver(&options).expect("driver run succeeds");
 
@@ -3438,6 +3452,7 @@ mod tests {
             include_tests: false,
             rustc_toolchain: test_toolchain(),
             debug: false,
+            max_call_candidates: rusi_core::DEFAULT_MAX_CALL_CANDIDATES,
         };
         // The phantom `Store::persist` node and the hash-order bare-name guess
         // showed up in roughly a third of runs, so a handful catches a
@@ -3491,6 +3506,7 @@ mod tests {
             include_tests: false,
             rustc_toolchain: "auto".to_string(),
             debug: false,
+            max_call_candidates: rusi_core::DEFAULT_MAX_CALL_CANDIDATES,
         };
         let envelope = run_driver(&options).expect("driver run succeeds");
         assert!(
@@ -3526,6 +3542,7 @@ mod tests {
             include_tests: false,
             rustc_toolchain: "auto".to_string(),
             debug: false,
+            max_call_candidates: rusi_core::DEFAULT_MAX_CALL_CANDIDATES,
         };
         let envelope = run_driver(&options).expect("driver run succeeds");
         let signals = &envelope.payload.security_signals;
@@ -3572,6 +3589,7 @@ mod tests {
             include_tests: false,
             rustc_toolchain: test_toolchain(),
             debug: false,
+            max_call_candidates: rusi_core::DEFAULT_MAX_CALL_CANDIDATES,
         };
         let envelope = run_driver(&options).expect("driver run succeeds");
         if envelope.backend_kind != BACKEND_KIND_EMBEDDED {
@@ -3637,6 +3655,7 @@ mod tests {
             include_tests: false,
             rustc_toolchain: "auto".to_string(),
             debug: false,
+            max_call_candidates: rusi_core::DEFAULT_MAX_CALL_CANDIDATES,
         })
         .expect("driver run succeeds");
 
@@ -3682,6 +3701,7 @@ mod tests {
             include_tests: false,
             rustc_toolchain: "auto".to_string(),
             debug: false,
+            max_call_candidates: rusi_core::DEFAULT_MAX_CALL_CANDIDATES,
         })
         .expect("driver run succeeds");
 
@@ -3750,6 +3770,7 @@ mod tests {
             include_tests: false,
             rustc_toolchain: "auto".to_string(),
             debug: false,
+            max_call_candidates: rusi_core::DEFAULT_MAX_CALL_CANDIDATES,
         })
         .expect("driver run succeeds");
 
@@ -3878,6 +3899,7 @@ mod tests {
             include_tests: false,
             rustc_toolchain: test_toolchain(),
             debug: false,
+            max_call_candidates: rusi_core::DEFAULT_MAX_CALL_CANDIDATES,
         };
         let envelope = run_driver(&options).expect("driver run succeeds");
         if envelope.backend_kind != BACKEND_KIND_EMBEDDED {
@@ -3921,6 +3943,7 @@ mod tests {
             include_tests: false,
             rustc_toolchain: test_toolchain(),
             debug: false,
+            max_call_candidates: rusi_core::DEFAULT_MAX_CALL_CANDIDATES,
         };
         let envelope = run_driver(&options).expect("driver run succeeds");
         if envelope.backend_kind != BACKEND_KIND_EMBEDDED {
@@ -4075,6 +4098,7 @@ mod tests {
             include_tests: false,
             rustc_toolchain: "auto".to_string(),
             debug: false,
+            max_call_candidates: rusi_core::DEFAULT_MAX_CALL_CANDIDATES,
         })
         .expect("driver run succeeds");
 
@@ -4231,6 +4255,7 @@ mod tests {
             include_tests: false,
             rustc_toolchain: "auto".to_string(),
             debug: false,
+            max_call_candidates: rusi_core::DEFAULT_MAX_CALL_CANDIDATES,
         })
         .expect("driver run succeeds");
 
