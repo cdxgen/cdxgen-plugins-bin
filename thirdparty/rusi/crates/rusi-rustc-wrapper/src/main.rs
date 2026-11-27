@@ -704,9 +704,14 @@ impl EmbeddedCollector {
             }
         }
 
-        debug_log(self.debug, format_args!("DBGDEV walked={} calls={} buckets={}", mono_walked, mono_calls, resolved.len()));
+        debug_log(
+            self.debug,
+            format_args!(
+                "pass=mono-devirtualization walked={} calls={} resolved={}",
+                mono_walked, mono_calls, resolved.len()
+            ),
+        );
         for ((owner, symbol), mut def_ids) in resolved {
-            debug_log(self.debug, format_args!("DBGDEV owner={:?} symbol={:?} targets={:?}", tcx.def_path_str(owner.to_def_id()), symbol, def_ids.iter().map(|d| def_path(tcx, *d)).collect::<Vec<_>>()));
             def_ids.sort_by_key(|def_id| def_path(tcx, *def_id));
             let mut target_ids = Vec::new();
             let mut target_names = Vec::new();
