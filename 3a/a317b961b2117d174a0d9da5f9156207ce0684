@@ -1,0 +1,23 @@
+thirdparty/rusi/crates/rusi-core/src/lib.rs
+  s_f579657ee773f3::t_5579aac7f939a4 1358-1359
+thirdparty/rusi/scripts/eval/deps_baseline.py
+  s_f579657ee773f3::t_5b460e1926a95a 112-120
+  s_f579657ee773f3::t_df5a8698de6cfd 1-29,31-111,121-123,127,132-180,189-260
+  s_f579657ee773f3::t_76627cbf5d9465 30,124-126,128-131,181-188
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "3aa317b961b2117d174a0d9da5f9156207ce0684",
+  "prompts": {},
+  "sessions": {
+    "s_f579657ee773f3": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_d612013f-11e4-4ec5-b2c4-7b55f3f92ed3",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
