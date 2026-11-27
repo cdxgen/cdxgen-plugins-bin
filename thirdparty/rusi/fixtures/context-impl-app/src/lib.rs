@@ -4,6 +4,8 @@
 // through these impls, which is where a source-to-sink flow passes.
 use std::process::Command;
 
+pub mod probes;
+
 use context_impl_tojson::{Client, Pair, ToJson};
 use fakeuuid::Uuid;
 
@@ -23,6 +25,7 @@ impl ToJson<ApiCtx> for Uuid {
 
 impl ToJson<RpcCtx> for Uuid {
     fn to_json(&self) -> String {
+        std::fs::write("rpc.json", self.to_string()).ok();
         format!("{}", self.as_u128())
     }
 }
@@ -100,4 +103,16 @@ pub fn handler2() -> String {
     let raw = std::env::var("ID").unwrap();
     let id = Uuid::parse_str(&raw).unwrap();
     via_client(id)
+}
+
+pub fn api_direct() -> String {
+    let raw = std::env::var("ID").unwrap();
+    let id = Uuid::parse_str(&raw).unwrap();
+    <Uuid as ToJson<ApiCtx>>::to_json(&id)
+}
+
+pub fn rpc_direct() -> String {
+    let raw = std::env::var("ID").unwrap();
+    let id = Uuid::parse_str(&raw).unwrap();
+    <Uuid as ToJson<RpcCtx>>::to_json(&id)
 }

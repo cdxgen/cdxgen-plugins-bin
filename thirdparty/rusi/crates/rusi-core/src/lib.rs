@@ -248,6 +248,11 @@ struct FunctionRecord {
     /// type, which is what makes the resolver fall back to every local impl
     /// instead of dropping the call.
     generic_params: Vec<String>,
+    /// The trait bounds on those parameters, as written with their generic
+    /// arguments (`T` bound by `ToJson<X>`), from the parameter list and the
+    /// `where` clause. A method call on a value of a bounded parameter's type
+    /// dispatches to the impls of these traits.
+    generic_bounds: Vec<(String, Vec<String>)>,
     param_source_categories: BTreeMap<usize, String>,
     return_type: String,
     operations: Vec<Operation>,
@@ -899,9 +904,9 @@ struct TraitImplIndex {
 struct ImplMethodFacts {
     trait_name: String,
     trait_args: Vec<String>,
-    /// Per trait argument: it is one of the impl's own generic parameters, so
-    /// the impl may be instantiated at whatever type the caller writes there.
-    trait_args_open: Vec<bool>,
+    /// The impl's own generic type parameters: a trait argument that
+    /// mentions one may be instantiated at whatever type the caller writes.
+    impl_generic_params: Vec<String>,
     impl_type: String,
     impl_type_qualified: String,
 }
@@ -1574,6 +1579,7 @@ fn analyze_on_this_thread(
             &field_types,
             &field_element_types,
             &trait_index,
+            options.max_call_candidates,
         ))
     } else {
         None
@@ -2575,10 +2581,9 @@ struct SourceCollector {
     /// Element type of each container-typed struct field, keyed like
     /// [`SourceCollector::field_types`].
     field_element_types: HashMap<String, String>,
-    /// Type names declared in this file so far (`struct`/`enum`/`union`/
-    /// `trait`/`type`), which is how an impl's self type is told apart from
-    /// an imported one. Visit order follows the source, so a self type
-    /// declared later in the file stays as written.
+    /// Type names declared in this file (`struct`/`enum`/`union`/`trait`/
+    /// `type`), keyed by module path and name (see [`module_item_key`]),
+    /// which is how an impl's self type is told apart from an imported one.
     local_type_names: HashSet<String>,
     /// Macro invocations whose token stream could not be recovered as Rust, so
     /// the gap is reported instead of silently swallowed.
@@ -2659,9 +2664,8 @@ struct TraitImplRecord {
     /// one type under different context arguments are different impls, so
     /// the arguments are part of what tells them apart.
     trait_args: Vec<String>,
-    /// Per trait argument: it is one of the impl's own generic parameters,
-    /// or a lifetime, either of which cannot be pinned at a call site.
-    trait_args_open: Vec<bool>,
+    /// The impl's own generic type parameters.
+    impl_generic_params: Vec<String>,
     /// The self type qualified to the crate that owns it (`fakeuuid::Uuid`),
     /// which is what a qualified call or a receiver type is matched against.
     impl_type_qualified: String,
@@ -3194,18 +3198,24 @@ impl SourceCollector {
         }
     }
 
-    /// An impl's self type qualified to the crate that owns it, which is
-    /// how rustc names the impl: a type this file imports (`Uuid` under
-    /// `use fakeuuid::Uuid`) is `fakeuuid::Uuid`, a type declared locally
-    /// (before the impl, in source order) is `app::Product`, and anything
-    /// else stays as written. Generic arguments are carried along untouched.
+    /// An impl's self type qualified to the crate and module that own it,
+    /// which is how rustc names the impl: a type this module imports (`Uuid`
+    /// under `use fakeuuid::Uuid`) is `fakeuuid::Uuid`, a type declared in
+    /// this module is `app::model::Err`, a `crate::`, `self::` or `super::`
+    /// path is made absolute, and anything else (a primitive, a prelude
+    /// type) stays as written. Generic arguments are carried along untouched.
     fn qualified_self_type(&self, self_type: &str) -> String {
         let head_end = self_type.find('<').unwrap_or(self_type.len());
         let (head, rest) = self_type.split_at(head_end);
-        if head.contains("::") {
-            return self_type.to_string();
-        }
         let module_path = &self.file_ctx.module_path;
+        let crate_path = &self.file_ctx.crate_path;
+        if head.contains("::") {
+            return format!(
+                "{}{}",
+                absolute_item_path(head, module_path, crate_path),
+                rest
+            );
+        }
         for record in self.use_records.iter().rev() {
             let binding = record.alias.as_deref().unwrap_or_else(|| {
                 record
@@ -3215,13 +3225,48 @@ impl SourceCollector {
                     .unwrap_or(record.path.as_str())
             });
             if binding == head && &record.module_path == module_path {
-                return format!("{}{}", record.path, rest);
+                return format!(
+                    "{}{}",
+                    absolute_item_path(&record.path, &record.module_path, crate_path),
+                    rest
+                );
             }
         }
-        if self.local_type_names.contains(head) {
-            return format!("{}::{}{}", self.file_ctx.crate_path, head, rest);
+        if self
+            .local_type_names
+            .contains(&module_item_key(module_path, head))
+        {
+            return format!("{}{}", self.module_qualified(head), rest);
         }
         self_type.to_string()
+    }
+
+    /// `name` qualified with this file's crate and current module path.
+    fn module_qualified(&self, name: &str) -> String {
+        let mut segments = vec![self.file_ctx.crate_path.clone()];
+        segments.extend(self.file_ctx.module_path.iter().cloned());
+        segments.push(name.to_string());
+        segments.join("::")
+    }
+
+    /// Records the type names an item list declares, under the current
+    /// module path, before any of the items is visited, so an impl written
+    /// above its type's declaration still finds it.
+    fn record_local_type_names(&mut self, items: &[Item]) {
+        for item in items {
+            let ident = match item {
+                Item::Struct(item) => &item.ident,
+                Item::Enum(item) => &item.ident,
+                Item::Union(item) => &item.ident,
+                Item::Trait(item) => &item.ident,
+                Item::Type(item) => &item.ident,
+                _ => continue,
+            };
+            self.local_type_names.insert(module_item_key(
+                &self.file_ctx.module_path,
+                &ident.to_string(),
+            ));
+        }
     }
 
     /// The symbol name of a closure, unique within the module even when the
@@ -4154,6 +4199,7 @@ impl SourceCollector {
             params: closure_parameters(closure),
             param_types: param_types.clone(),
             generic_params: Vec::new(),
+            generic_bounds: Vec::new(),
             param_source_categories: if let Some(category) = source_category {
                 closure_source_categories(closure, category)
             } else {
@@ -4178,6 +4224,11 @@ impl SourceCollector {
 }
 
 impl<'ast> Visit<'ast> for SourceCollector {
+    fn visit_file(&mut self, node: &'ast syn::File) {
+        self.record_local_type_names(&node.items);
+        syn::visit::visit_file(self, node);
+    }
+
     fn visit_item_use(&mut self, item_use: &'ast syn::ItemUse) {
         collect_use_records(item_use, &self.file_ctx.module_path, &mut self.use_records);
         let before = self.imports.len();
@@ -4261,6 +4312,7 @@ impl<'ast> Visit<'ast> for SourceCollector {
             params: function_parameters(&node.sig),
             param_types: param_types.clone(),
             generic_params: sig_generic_params(&node.sig.generics),
+            generic_bounds: generic_bound_texts(&node.sig.generics),
             param_source_categories: infer_param_source_categories_with_attrs(
                 &node.sig,
                 &node.attrs,
@@ -4306,17 +4358,6 @@ impl<'ast> Visit<'ast> for SourceCollector {
         let trait_args = trait_with_args
             .as_deref()
             .map_or_else(Vec::new, trait_argument_texts);
-        let trait_args_open: Vec<bool> = trait_args
-            .iter()
-            .map(|arg| {
-                // A lifetime cannot be compared across spellings, so it
-                // counts as open; a type argument counts as open when it is
-                // one of the impl's own generic parameters.
-                arg.starts_with('\'')
-                    || arg == "Self"
-                    || impl_generic_params.iter().any(|param| param == arg)
-            })
-            .collect();
         let previous_impl_trait = self.current_impl_trait.replace(
             trait_with_args
                 .clone()
@@ -4325,10 +4366,7 @@ impl<'ast> Visit<'ast> for SourceCollector {
         // A trait impl's methods are named after the impl block, rustc's
         // spelling. An inherent impl's methods keep `Type::method`.
         let method_qualified_prefix = trait_with_args.as_ref().map(|trait_text| {
-            format!(
-                "{}::<impl {} for {}>",
-                self.file_ctx.crate_path, trait_text, impl_type_qualified
-            )
+            self.module_qualified(&format!("<impl {trait_text} for {impl_type_qualified}>"))
         });
         let mut method_ids = Vec::new();
         let mut method_names = Vec::new();
@@ -4400,7 +4438,15 @@ impl<'ast> Visit<'ast> for SourceCollector {
                     file_path: self.file_ctx.relative_file_path.clone(),
                     params: function_parameters(&method.sig),
                     param_types: param_types.clone(),
-                    generic_params: impl_generic_params.clone(),
+                    generic_params: impl_generic_params
+                        .iter()
+                        .cloned()
+                        .chain(sig_generic_params(&method.sig.generics))
+                        .collect(),
+                    generic_bounds: generic_bound_texts(&node.generics)
+                        .into_iter()
+                        .chain(generic_bound_texts(&method.sig.generics))
+                        .collect(),
                     param_source_categories: infer_param_source_categories_with_attrs(
                         &method.sig,
                         &method.attrs,
@@ -4432,7 +4478,7 @@ impl<'ast> Visit<'ast> for SourceCollector {
                 method_ids,
                 method_names,
                 trait_args,
-                trait_args_open,
+                impl_generic_params: impl_generic_params.clone(),
                 impl_type_qualified,
             });
         }
@@ -4460,8 +4506,9 @@ impl<'ast> Visit<'ast> for SourceCollector {
         // Items inside an inline module live one level deeper, so the module
         // segment has to be in scope while they are collected; otherwise they
         // are qualified as if they sat at file level.
-        if node.content.is_some() {
+        if let Some((_, items)) = &node.content {
             self.file_ctx.module_path.push(node.ident.to_string());
+            self.record_local_type_names(items);
             syn::visit::visit_item_mod(self, node);
             self.file_ctx.module_path.pop();
         } else {
@@ -4490,7 +4537,6 @@ impl<'ast> Visit<'ast> for SourceCollector {
                     None,
                     item.ident.span(),
                 );
-                self.local_type_names.insert(item.ident.to_string());
                 for field in &item.fields {
                     if let Some(ident) = field.ident.as_ref() {
                         let field_text = field.ty.to_token_stream().to_string();
@@ -4532,7 +4578,6 @@ impl<'ast> Visit<'ast> for SourceCollector {
                     None,
                     item.ident.span(),
                 );
-                self.local_type_names.insert(item.ident.to_string());
             }
             Item::Trait(item) => {
                 self.push_declaration(
@@ -4542,7 +4587,6 @@ impl<'ast> Visit<'ast> for SourceCollector {
                     None,
                     item.ident.span(),
                 );
-                self.local_type_names.insert(item.ident.to_string());
                 // Object safety is a fact about the trait definition, so it is
                 // recorded where the definition is visited. The name stored is
                 // the bare identifier — the same key the type token reducer
@@ -6557,6 +6601,44 @@ fn signature_text(sig: &Signature) -> String {
     text
 }
 
+/// The key [`SourceCollector::local_type_names`] stores a type under.
+fn module_item_key(module_path: &[String], name: &str) -> String {
+    let mut key = module_path.join("::");
+    key.push_str("::");
+    key.push_str(name);
+    key
+}
+
+/// A `use` path or a written type path made absolute: `crate::` becomes
+/// the crate's own name, `self::` the module the path is written in, and
+/// each leading `super::` one module up. Any other path is returned as is,
+/// since it already starts at a crate.
+fn absolute_item_path(path: &str, module_path: &[String], crate_path: &str) -> String {
+    let path = path.strip_prefix("::").unwrap_or(path);
+    if let Some(rest) = path.strip_prefix("crate::") {
+        return format!("{crate_path}::{rest}");
+    }
+    let mut base: Vec<&str> = module_path.iter().map(String::as_str).collect();
+    let mut rest = path;
+    let mut relative = false;
+    if let Some(after) = rest.strip_prefix("self::") {
+        rest = after;
+        relative = true;
+    }
+    while let Some(after) = rest.strip_prefix("super::") {
+        base.pop();
+        rest = after;
+        relative = true;
+    }
+    if !relative {
+        return path.to_string();
+    }
+    let mut segments = vec![crate_path];
+    segments.extend(base);
+    segments.push(rest);
+    segments.join("::")
+}
+
 fn qualify_name(file_ctx: &FileContext, receiver: Option<&str>, name: &str) -> String {
     let mut segments = vec![file_ctx.crate_path.clone()];
     segments.extend(file_ctx.module_path.clone());
@@ -6835,7 +6917,7 @@ fn qualified_trait_call_parts(func: &Expr) -> Option<QualifiedTraitCall> {
     let segment_text = |segment: &syn::PathSegment| {
         let arguments = match &segment.arguments {
             syn::PathArguments::None => String::new(),
-            other => other.to_token_stream().to_string().replace(' ', ""),
+            other => compact_type_text(&other.to_token_stream().to_string()),
         };
         format!("{}{}", segment.ident, arguments)
     };
@@ -6859,7 +6941,7 @@ fn qualified_trait_call_parts(func: &Expr) -> Option<QualifiedTraitCall> {
             return None;
         }
         return Some(QualifiedTraitCall {
-            self_type: Some(qself.ty.to_token_stream().to_string().replace(' ', "")),
+            self_type: Some(compact_type_text(&qself.ty.to_token_stream().to_string())),
             trait_with_args,
             method,
         });
@@ -6894,6 +6976,30 @@ fn path_to_string(path: &syn::Path) -> String {
         .join("::")
 }
 
+/// Type text with the spaces a token stream puts between tokens removed,
+/// except a space between two words (`&'a str`, `dyn Trait`), which is
+/// part of the type.
+fn compact_type_text(text: &str) -> String {
+    let is_word = |ch: char| ch.is_alphanumeric() || ch == '_';
+    let chars: Vec<char> = text.trim().chars().collect();
+    let mut out = String::with_capacity(chars.len());
+    for (index, &ch) in chars.iter().enumerate() {
+        if ch.is_whitespace() {
+            let before = out.chars().last();
+            let after = chars[index + 1..].iter().find(|next| !next.is_whitespace());
+            if before.is_some_and(is_word)
+                && after.is_some_and(|next| is_word(*next) || *next == '\'')
+                && !out.ends_with(' ')
+            {
+                out.push(' ');
+            }
+            continue;
+        }
+        out.push(ch);
+    }
+    out
+}
+
 /// A path as written, with each segment's generic arguments kept
 /// (`ToJson<ApiCtx>`), whitespace-normalized.
 fn path_with_arguments_text(path: &syn::Path) -> String {
@@ -6902,7 +7008,7 @@ fn path_with_arguments_text(path: &syn::Path) -> String {
         .map(|segment| {
             let arguments = match &segment.arguments {
                 syn::PathArguments::None => String::new(),
-                other => other.to_token_stream().to_string().replace(' ', ""),
+                other => compact_type_text(&other.to_token_stream().to_string()),
             };
             format!("{}{}", segment.ident, arguments)
         })
@@ -6930,7 +7036,7 @@ fn trait_argument_texts(trait_text: &str) -> Vec<String> {
             '>' | ')' | ']' => depth = depth.saturating_sub(1),
             ',' if depth == 0 => {
                 if !inner[start..index].trim().is_empty() {
-                    arguments.push(inner[start..index].trim().replace(' ', ""));
+                    arguments.push(compact_type_text(&inner[start..index]));
                 }
                 start = index + 1;
             }
@@ -6938,9 +7044,50 @@ fn trait_argument_texts(trait_text: &str) -> Vec<String> {
         }
     }
     if !inner[start..].trim().is_empty() {
-        arguments.push(inner[start..].trim().replace(' ', ""));
+        arguments.push(compact_type_text(&inner[start..]));
     }
     arguments
+}
+
+/// The trait bounds a generic parameter list and its `where` clause put on
+/// each type parameter, with the traits' generic arguments as written.
+fn generic_bound_texts(generics: &syn::Generics) -> Vec<(String, Vec<String>)> {
+    let trait_bounds = |bounds: &syn::punctuated::Punctuated<
+        syn::TypeParamBound,
+        syn::Token![+],
+    >| {
+        bounds
+            .iter()
+            .filter_map(|bound| match bound {
+                syn::TypeParamBound::Trait(bound) => Some(path_with_arguments_text(&bound.path)),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let mut out: Vec<(String, Vec<String>)> = Vec::new();
+    for param in &generics.params {
+        if let syn::GenericParam::Type(param) = param {
+            let bounds = trait_bounds(&param.bounds);
+            if !bounds.is_empty() {
+                out.push((param.ident.to_string(), bounds));
+            }
+        }
+    }
+    if let Some(where_clause) = &generics.where_clause {
+        for predicate in &where_clause.predicates {
+            if let syn::WherePredicate::Type(predicate) = predicate
+                && let syn::Type::Path(bounded) = &predicate.bounded_ty
+                && bounded.qself.is_none()
+                && let Some(ident) = bounded.path.get_ident()
+            {
+                let bounds = trait_bounds(&predicate.bounds);
+                if !bounds.is_empty() {
+                    out.push((ident.to_string(), bounds));
+                }
+            }
+        }
+    }
+    out
 }
 
 /// A signature's own generic type parameters, by name.
@@ -6987,7 +7134,10 @@ fn build_trait_impl_index(analyzed_files: &[AnalyzedFile]) -> TraitImplIndex {
             }
         }
         for record in &file.trait_impl_records {
-            let trait_key = record.trait_name.clone();
+            // Keyed by the trait's last path segment, the same token a
+            // receiver's type reduces to, so `impl fmt::Display` and
+            // `impl Display` land under one key.
+            let trait_key = last_segment(&record.trait_name).to_string();
             for (method_id, method_name) in record.method_ids.iter().zip(record.method_names.iter())
             {
                 trait_to_impl_methods
@@ -7007,7 +7157,7 @@ fn build_trait_impl_index(analyzed_files: &[AnalyzedFile]) -> TraitImplIndex {
                     ImplMethodFacts {
                         trait_name: trait_key.clone(),
                         trait_args: record.trait_args.clone(),
-                        trait_args_open: record.trait_args_open.clone(),
+                        impl_generic_params: record.impl_generic_params.clone(),
                         impl_type: record.impl_type.clone(),
                         impl_type_qualified: record.impl_type_qualified.clone(),
                     },
@@ -7613,8 +7763,13 @@ fn resolve_call_targets(
 
     // 1. Fully-qualified / normalized match. Qualified keys only collide
     //    across modules with identical names; treat as StaticOverapprox
-    //    in that rare case rather than silently picking one.
-    if let Some(ids) = local_index.get(&normalized)
+    //    in that rare case rather than silently picking one. A method call
+    //    (`x.pair()`) never names a free function, so its bare method name is
+    //    left to the receiver-typed branch below even when the crate root
+    //    defines a function of that name.
+    let bare_method_call = call.method_name.is_some() && !callee.contains("::");
+    if !bare_method_call
+        && let Some(ids) = local_index.get(&normalized)
         && !ids.is_empty()
     {
         return match ids.len() {
@@ -7687,7 +7842,7 @@ fn resolve_call_targets(
                         trait_arguments_compatible(
                             written_args,
                             &facts.trait_args,
-                            &facts.trait_args_open,
+                            &facts.impl_generic_params,
                             caller_generic_params,
                         )
                     });
@@ -7742,7 +7897,7 @@ fn resolve_call_targets(
                         trait_arguments_compatible(
                             written_args,
                             &facts.trait_args,
-                            &facts.trait_args_open,
+                            &facts.impl_generic_params,
                             caller_generic_params,
                         )
                     })
@@ -7872,44 +8027,93 @@ fn trait_name_of_written(trait_with_args: &str) -> String {
     last_segment(stripped.trim_end_matches(':')).to_string()
 }
 
-/// Whether a written trait argument list is compatible with an impl's: every
-/// concrete pair must be equal, and an open impl argument (one of its own
-/// generic parameters, or a lifetime) matches anything.
+/// Whether an impl whose trait arguments are `impl_args` may be the target of
+/// a call or trait object that writes `written`. Only an argument pair that
+/// provably names different types rules the impl out; everything uncertain
+/// keeps it. A list of a different length keeps it too, because a trait's
+/// defaulted parameters may be left out on either side (`impl ToJson for
+/// Plain` against `dyn ToJson<()>`).
 fn trait_arguments_compatible(
     written: &[String],
     impl_args: &[String],
-    impl_args_open: &[bool],
+    impl_generic_params: &[String],
     caller_generic_params: &[String],
 ) -> bool {
     if written.len() != impl_args.len() {
-        // One side carries no arguments: a bare `ToJson` written at a call
-        // site matches the defaulted `ToJson<()>`, and an impl with no
-        // arguments matches a written list only if the written list is empty
-        // or the impl's are open.
-        if impl_args.is_empty() && !written.is_empty() {
-            return false;
-        }
         return true;
     }
-    for (index, written_arg) in written.iter().enumerate() {
-        if impl_args_open.get(index).copied().unwrap_or(false) {
-            continue;
-        }
-        if written_arg == &impl_args[index] {
-            continue;
-        }
-        // The caller's own generic parameter is not a concrete type: the
-        // impl may be instantiated at whatever the caller is instantiated
-        // with.
-        if caller_generic_params
-            .iter()
-            .any(|param| param == written_arg)
-        {
-            continue;
-        }
-        return false;
+    written
+        .iter()
+        .zip(impl_args)
+        .all(|(written_arg, impl_arg)| {
+            trait_argument_may_match(
+                written_arg,
+                impl_arg,
+                impl_generic_params,
+                caller_generic_params,
+            )
+        })
+}
+
+/// Whether one written trait argument and one impl argument may name the
+/// same type. An argument that mentions a generic parameter of its side
+/// (anywhere, `Vec<T>` included), `Self` or `_` may; otherwise the two are
+/// compared with lifetimes dropped and every path reduced to its last
+/// segment, so `crate::ApiCtx` and an imported `ApiCtx` match, and
+/// `&'a str` matches `&'static str`. Two different types that share a last
+/// segment then also match, which keeps a candidate rather than dropping one.
+fn trait_argument_may_match(
+    written: &str,
+    impl_arg: &str,
+    impl_generic_params: &[String],
+    caller_generic_params: &[String],
+) -> bool {
+    let mentions_open = |text: &str, params: &[String]| {
+        text.split(|ch: char| !(ch.is_alphanumeric() || ch == '_'))
+            .any(|word| word == "Self" || word == "_" || params.iter().any(|param| param == word))
+    };
+    if mentions_open(impl_arg, impl_generic_params) || mentions_open(written, caller_generic_params)
+    {
+        return true;
     }
-    true
+    type_text_shape(written) == type_text_shape(impl_arg)
+}
+
+/// A type's text with whitespace and lifetimes dropped and every path
+/// reduced to its last segment (`&'a crate::model::Id` reads `&Id`).
+fn type_text_shape(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let chars: Vec<char> = text.chars().collect();
+    let mut index = 0;
+    while index < chars.len() {
+        let ch = chars[index];
+        if ch == '\'' {
+            index += 1;
+            while index < chars.len() && (chars[index].is_alphanumeric() || chars[index] == '_') {
+                index += 1;
+            }
+            continue;
+        }
+        if ch.is_alphanumeric() || ch == '_' {
+            let start = index;
+            while index < chars.len() && (chars[index].is_alphanumeric() || chars[index] == '_') {
+                index += 1;
+            }
+            let word: String = chars[start..index].iter().collect();
+            // A segment followed by `::` is a path prefix and is dropped.
+            if chars.get(index) == Some(&':') && chars.get(index + 1) == Some(&':') {
+                index += 2;
+                continue;
+            }
+            out.push_str(&word);
+            continue;
+        }
+        if !ch.is_whitespace() {
+            out.push(ch);
+        }
+        index += 1;
+    }
+    out
 }
 
 /// The impl methods a fully qualified call resolves to, by the self type and
@@ -7954,7 +8158,7 @@ fn resolve_qualified_trait_target_ids(
         if !trait_arguments_compatible(
             &written_args,
             &facts.trait_args,
-            &facts.trait_args_open,
+            &facts.impl_generic_params,
             caller_generic_params,
         ) {
             continue;
@@ -8005,15 +8209,35 @@ fn resolve_qualified_trait_call(
 /// `context_impl_tojson::Client`). This is what names the external node of a
 /// call the resolver could not place: `codec` alone names nothing, while
 /// `context_impl_tojson::Client::codec` names the crate to attribute it to.
+///
+/// The chain is read as a builder chain: each link is assumed to return the
+/// constructor's type, except a standard-library method of `Result`,
+/// `Option` or the conversion traits. An unwrapping or type-preserving link
+/// (`unwrap`, `clone`) keeps the type; any other such method ends the chain,
+/// and such a method is never itself named after the constructor's type, so
+/// `Uuid::parse_str(..).unwrap()` stays the standard library's `unwrap`.
 /// A constructor in the analyzed crate or in the standard library is not
-/// named: the local crate's own paths are already qualified, and the
+/// named either: the local crate's own paths are already qualified, and the
 /// standard library's types are not attributed to any package.
 fn qualified_receiver_crate_type(call: &SimplifiedCall, package_path: &str) -> Option<String> {
+    let method = call.method_name.as_deref()?;
+    if STD_CHAIN_METHODS.contains(&method) {
+        return None;
+    }
     let mut expr = call.receiver_expr.as_ref()?;
     loop {
         match expr {
             SimpleExpr::Reference { expr: inner, .. } => expr = inner,
-            SimpleExpr::MethodCall { receiver, .. } => expr = &**receiver,
+            SimpleExpr::MethodCall {
+                receiver, method, ..
+            } => {
+                let keeps_type = UNWRAPPING_METHODS.contains(&method.as_str())
+                    || TYPE_PRESERVING_METHODS.contains(&method.as_str());
+                if STD_CHAIN_METHODS.contains(&method.as_str()) && !keeps_type {
+                    return None;
+                }
+                expr = &**receiver;
+            }
             SimpleExpr::Call { callee, .. } => {
                 let parts: Vec<&str> = callee.split("::").collect();
                 if parts.len() < 2 {
@@ -8032,6 +8256,43 @@ fn qualified_receiver_crate_type(call: &SimplifiedCall, package_path: &str) -> O
         }
     }
 }
+
+/// Standard-library methods a value of almost any type may be called with
+/// through `Result`, `Option`, `Clone`, the conversion traits or the
+/// iterator adapters, so a call of one is never attributed to the type a
+/// builder chain started from.
+const STD_CHAIN_METHODS: &[&str] = &[
+    "and_then",
+    "as_deref",
+    "as_mut",
+    "as_ref",
+    "borrow",
+    "borrow_mut",
+    "clone",
+    "collect",
+    "err",
+    "expect",
+    "into",
+    "into_inner",
+    "into_iter",
+    "is_err",
+    "is_none",
+    "is_ok",
+    "is_some",
+    "iter",
+    "map",
+    "map_err",
+    "ok",
+    "ok_or",
+    "or_else",
+    "to_owned",
+    "to_string",
+    "try_into",
+    "unwrap",
+    "unwrap_or",
+    "unwrap_or_default",
+    "unwrap_or_else",
+];
 
 fn resolutions(ids: &[String], provenance: CallProvenance) -> Vec<ResolvedCall> {
     ids.iter()
@@ -9496,6 +9757,7 @@ fn build_data_flow(
     field_types: &HashMap<String, String>,
     field_element_types: &HashMap<String, String>,
     trait_index: &TraitImplIndex,
+    max_call_candidates: usize,
 ) -> DataFlowEvidence {
     // Body-less records (a dependency at the lighter tier) are excluded: their
     // empty operation lists would summarize as "taint stops here" and delete
@@ -9523,8 +9785,8 @@ fn build_data_flow(
         &local_index,
         &patterns,
         trait_index,
-        field_types,
-        field_element_types,
+        &indexes,
+        max_call_candidates,
     );
     let summary_rows = stats::time_phase("summary_fixpoint", || {
         infer_summaries(functions, &tables, &indexes)
@@ -11994,6 +12256,7 @@ fn infer_static_source_seeds(
             &FunctionEnv::new(),
             summaries,
             &initializer.package_path,
+            None,
             tables,
         );
         record(
@@ -12005,7 +12268,14 @@ fn infer_static_source_seeds(
     }
     for function in functions {
         let eval = |value: &SimpleExpr, env: &FunctionEnv<BTreeSet<AbstractOrigin>>| {
-            eval_abstract_expr(value, env, summaries, &function.package_path, tables)
+            eval_abstract_expr(
+                value,
+                env,
+                summaries,
+                &function.package_path,
+                Some(function.declaration.id.as_str()),
+                tables,
+            )
         };
         let located = |value: &SimpleExpr| {
             let mut position =
@@ -12262,12 +12532,19 @@ fn infer_summaries_counted(
 /// target its operations name. Only the order of evaluation depends on
 /// this; the reads themselves are recorded.
 fn summary_dependencies(function: &FunctionRecord, tables: &CallTables) -> BTreeSet<u32> {
-    fn visit(expr: &SimpleExpr, package_path: &str, tables: &CallTables, out: &mut BTreeSet<u32>) {
+    fn visit(
+        expr: &SimpleExpr,
+        function: &FunctionRecord,
+        tables: &CallTables,
+        out: &mut BTreeSet<u32>,
+    ) {
+        let package_path = function.package_path.as_str();
+        let caller = Some(function.declaration.id.as_str());
         match expr {
             SimpleExpr::Call { callee, args, .. } => {
-                out.extend(tables.resolve_target(callee, package_path));
+                out.extend(tables.resolve_target_all(callee, package_path, caller));
                 for arg in args {
-                    visit(arg, package_path, tables, out);
+                    visit(arg, function, tables, out);
                 }
             }
             SimpleExpr::MethodCall {
@@ -12276,19 +12553,19 @@ fn summary_dependencies(function: &FunctionRecord, tables: &CallTables) -> BTree
                 args,
                 ..
             } => {
-                out.extend(tables.resolve_target_all(method, package_path));
-                visit(receiver, package_path, tables, out);
+                out.extend(tables.resolve_target_all(method, package_path, caller));
+                visit(receiver, function, tables, out);
                 for arg in args {
-                    visit(arg, package_path, tables, out);
+                    visit(arg, function, tables, out);
                 }
             }
             SimpleExpr::Compose(items) => {
                 for item in items {
-                    visit(item, package_path, tables, out);
+                    visit(item, function, tables, out);
                 }
             }
             SimpleExpr::Field { base, .. } | SimpleExpr::Reference { expr: base, .. } => {
-                visit(base, package_path, tables, out)
+                visit(base, function, tables, out)
             }
             SimpleExpr::Var(_) | SimpleExpr::Literal { .. } | SimpleExpr::Unknown => {}
         }
@@ -12300,9 +12577,7 @@ fn summary_dependencies(function: &FunctionRecord, tables: &CallTables) -> BTree
             | Operation::AssignField { value, .. }
             | Operation::AssignDeref { value, .. }
             | Operation::Expr(value)
-            | Operation::Return(value) => {
-                visit(value, &function.package_path, tables, &mut dependencies)
-            }
+            | Operation::Return(value) => visit(value, function, tables, &mut dependencies),
         }
     }
     dependencies
@@ -12554,8 +12829,14 @@ fn summarize_in_context(
         &mut env,
         &mut |operation, env, _emit| match operation {
             Operation::Assign { target, value } => {
-                let value_taint =
-                    eval_abstract_expr(value, env, summaries, &function.package_path, tables);
+                let value_taint = eval_abstract_expr(
+                    value,
+                    env,
+                    summaries,
+                    &function.package_path,
+                    Some(function.declaration.id.as_str()),
+                    tables,
+                );
                 env.insert(target.clone(), value_taint);
             }
             Operation::AssignField {
@@ -12563,8 +12844,14 @@ fn summarize_in_context(
                 field,
                 value,
             } => {
-                let value_taint =
-                    eval_abstract_expr(value, env, summaries, &function.package_path, tables);
+                let value_taint = eval_abstract_expr(
+                    value,
+                    env,
+                    summaries,
+                    &function.package_path,
+                    Some(function.declaration.id.as_str()),
+                    tables,
+                );
                 record_summary_field_write(
                     function,
                     target,
@@ -12577,8 +12864,14 @@ fn summarize_in_context(
                 env.insert(key, value_taint);
             }
             Operation::AssignDeref { target, value } => {
-                let value_taint =
-                    eval_abstract_expr(value, env, summaries, &function.package_path, tables);
+                let value_taint = eval_abstract_expr(
+                    value,
+                    env,
+                    summaries,
+                    &function.package_path,
+                    Some(function.declaration.id.as_str()),
+                    tables,
+                );
                 env.insert(target.clone(), value_taint.clone());
                 // A write through a parameter's dereference is visible in
                 // the CALLER's variable; the summary records what pours in
@@ -12605,8 +12898,14 @@ fn summarize_in_context(
                 }
             }
             Operation::Expr(expr) | Operation::Return(expr) => {
-                let value_taint =
-                    eval_abstract_expr(expr, env, summaries, &function.package_path, tables);
+                let value_taint = eval_abstract_expr(
+                    expr,
+                    env,
+                    summaries,
+                    &function.package_path,
+                    Some(function.declaration.id.as_str()),
+                    tables,
+                );
                 if matches!(operation, Operation::Return(_)) {
                     for origin in &value_taint {
                         match origin {
@@ -12678,6 +12977,7 @@ fn summarize_in_context(
                                     env,
                                     summaries,
                                     &function.package_path,
+                                    Some(function.declaration.id.as_str()),
                                     tables,
                                 );
                                 for origin in arg_taint {
@@ -12740,6 +13040,7 @@ fn summarize_in_context(
                                         env,
                                         summaries,
                                         &function.package_path,
+                                        Some(function.declaration.id.as_str()),
                                         tables,
                                     );
                                     for origin in arg_taint {
@@ -12777,7 +13078,11 @@ fn summarize_in_context(
                             // pending one; re-summarize each in the receiver
                             // type the caller knows.
                             let contextual = tables
-                                .resolve_target_all(callee, &function.package_path)
+                                .resolve_target_all(
+                                    callee,
+                                    &function.package_path,
+                                    Some(function.declaration.id.as_str()),
+                                )
                                 .into_iter()
                                 .map(|resolved| {
                                     let key = (resolved, receiver_type.clone());
@@ -12809,6 +13114,7 @@ fn summarize_in_context(
                                             env,
                                             summaries,
                                             &function.package_path,
+                                            Some(function.declaration.id.as_str()),
                                             tables,
                                         );
                                         for origin in arg_taint {
@@ -12996,7 +13302,14 @@ fn apply_summary_call_writes(
     tables: &CallTables,
 ) {
     let eval = |expr: &SimpleExpr, env: &FunctionEnv<BTreeSet<AbstractOrigin>>| {
-        eval_abstract_expr(expr, env, summaries, &function.package_path, tables)
+        eval_abstract_expr(
+            expr,
+            env,
+            summaries,
+            &function.package_path,
+            Some(function.declaration.id.as_str()),
+            tables,
+        )
     };
     if RECEIVER_MUTATING_METHODS.contains(&callee)
         && let Some((receiver, field)) = args.first().and_then(container_write_receiver)
@@ -13137,6 +13450,7 @@ fn eval_abstract_expr(
     env: &FunctionEnv<BTreeSet<AbstractOrigin>>,
     summaries: &(impl IndexedTable<FunctionSummary> + ?Sized),
     package_path: &str,
+    caller_decl: Option<&str>,
     tables: &CallTables,
 ) -> BTreeSet<AbstractOrigin> {
     match expr {
@@ -13171,6 +13485,7 @@ fn eval_abstract_expr(
                         env,
                         summaries,
                         package_path,
+                        caller_decl,
                         tables,
                     ));
                 }
@@ -13179,7 +13494,7 @@ fn eval_abstract_expr(
 
             let mut taint = BTreeSet::new();
             if let Some(summary) =
-                joined_callee_summary_indexed(tables, callee, package_path, None, summaries)
+                joined_callee_summary_indexed(tables, callee, package_path, caller_decl, summaries)
             {
                 for category in &summary.returns_source_categories {
                     taint.insert(AbstractOrigin::Source(tables.categories.id(category)));
@@ -13191,6 +13506,7 @@ fn eval_abstract_expr(
                             env,
                             summaries,
                             package_path,
+                            caller_decl,
                             tables,
                         ));
                     }
@@ -13206,6 +13522,7 @@ fn eval_abstract_expr(
                     env,
                     summaries,
                     package_path,
+                    caller_decl,
                     tables,
                 ));
             }
@@ -13230,7 +13547,7 @@ fn eval_abstract_expr(
                 // whole-base read. Nested access paths are tracked at
                 // P3.1 (compiler side); stable keeps the conservative
                 // join here.
-                eval_abstract_expr(base, env, summaries, package_path, tables)
+                eval_abstract_expr(base, env, summaries, package_path, caller_decl, tables)
             }
         }
         SimpleExpr::MethodCall {
@@ -13265,6 +13582,7 @@ fn eval_abstract_expr(
                         env,
                         summaries,
                         package_path,
+                        caller_decl,
                         tables,
                     ));
                 }
@@ -13272,7 +13590,7 @@ fn eval_abstract_expr(
             }
             let mut taint = BTreeSet::new();
             if let Some(summary) =
-                joined_callee_summary_indexed(tables, &callee, package_path, None, summaries)
+                joined_callee_summary_indexed(tables, &callee, package_path, caller_decl, summaries)
             {
                 for category in &summary.returns_source_categories {
                     taint.insert(AbstractOrigin::Source(tables.categories.id(category)));
@@ -13284,6 +13602,7 @@ fn eval_abstract_expr(
                             env,
                             summaries,
                             package_path,
+                            caller_decl,
                             tables,
                         ));
                     }
@@ -13296,7 +13615,7 @@ fn eval_abstract_expr(
             // mutable flag is consulted by the out-param propagation
             // heuristic in the concrete pass; here it does not change
             // the read semantics.
-            eval_abstract_expr(expr, env, summaries, package_path, tables)
+            eval_abstract_expr(expr, env, summaries, package_path, caller_decl, tables)
         }
         SimpleExpr::Literal { .. } | SimpleExpr::Unknown => BTreeSet::new(),
     }
@@ -13818,7 +14137,11 @@ impl<'a> DataFlowBuilder<'a> {
                             // type this site knows.
                             let contextual = self
                                 .tables
-                                .resolve_target_all(callee, &function.package_path)
+                                .resolve_target_all(
+                                    callee,
+                                    &function.package_path,
+                                    Some(function.declaration.id.as_str()),
+                                )
                                 .into_iter()
                                 .map(|resolved| {
                                     let key = (resolved, receiver_type.clone());
@@ -13863,12 +14186,10 @@ impl<'a> DataFlowBuilder<'a> {
                         // (`fn load(v: &mut String) { *v = env::var(..)
                         // }`): the caller's variable at that position
                         // carries what the summary says was poured in.
-                        let callee_name = self.tables.target_qualified(
-                            self.tables
-                                .resolve_target_all(callee, &function.package_path)
-                                .first()
-                                .copied()
-                                .expect("a joined summary implies a resolved target"),
+                        let callee_name = &self.tables.target_label(
+                            callee,
+                            &function.package_path,
+                            &function.declaration.id,
                         );
                         let mut out_param_writes: Vec<(String, ConcreteTaint)> = Vec::new();
                         for (param_index, categories) in &summary.param_written_sources {
@@ -14078,12 +14399,10 @@ impl<'a> DataFlowBuilder<'a> {
                 ) {
                     let mut paths = Vec::new();
                     for category in &summary.returns_source_categories {
-                        let callee_name = self.tables.target_qualified(
-                            self.tables
-                                .resolve_target_all(callee, &function.package_path)
-                                .first()
-                                .copied()
-                                .expect("a joined summary implies a resolved target"),
+                        let callee_name = &self.tables.target_label(
+                            callee,
+                            &function.package_path,
+                            &function.declaration.id,
                         );
                         paths.push(self.new_source_path(
                             function,
@@ -14097,12 +14416,10 @@ impl<'a> DataFlowBuilder<'a> {
                         if let Some(arg) = args.get(*param_index) {
                             let arg_taint = self.eval_concrete_expr(function, arg, env);
                             for mut path in arg_taint.paths {
-                                let callee_name = self.tables.target_qualified(
-                                    self.tables
-                                        .resolve_target_all(callee, &function.package_path)
-                                        .first()
-                                        .copied()
-                                        .expect("a joined summary implies a resolved target"),
+                                let callee_name = &self.tables.target_label(
+                                    callee,
+                                    &function.package_path,
+                                    &function.declaration.id,
                                 );
                                 let mut pos = position.clone();
                                 if pos.filename.is_empty() {
@@ -14244,12 +14561,10 @@ impl<'a> DataFlowBuilder<'a> {
                 ) {
                     let mut paths = Vec::new();
                     for category in &summary.returns_source_categories {
-                        let callee_name = self.tables.target_qualified(
-                            self.tables
-                                .resolve_target_all(method, &function.package_path)
-                                .first()
-                                .copied()
-                                .expect("a joined summary implies a resolved target"),
+                        let callee_name = &self.tables.target_label(
+                            method,
+                            &function.package_path,
+                            &function.declaration.id,
                         );
                         paths.push(self.new_source_path(
                             function,
@@ -14729,20 +15044,13 @@ struct CallTables<'a> {
     /// Function position by declaration id, for the direct resolution of a
     /// callee the build never saw.
     position: HashMap<&'a str, u32>,
-    /// A fully qualified call's callee text -> the impl methods it resolves
-    /// to, by position, keyed per caller so two calls of one text in
-    /// different functions keep their own resolutions (the text alone names
-    /// the trait, not the impl; the call's parts carry the self type and the
-    /// trait arguments that decide it).
-    qualified_targets: HashMap<(String, String), Vec<u32>>,
-    /// The same resolutions, keyed per package for the lookups that know the
-    /// callee text but not the caller.
-    qualified_targets_by_text: HashMap<(String, String), Vec<u32>>,
-    /// The workspace's trait impls. A method call whose bare name no single
-    /// local function owns can still be a trait dispatch, so its last resort
-    /// is the set of impl methods of that name, the same over-approximation
-    /// the call graph emits as one edge per impl.
-    trait_index: &'a TraitImplIndex,
+    /// (caller declaration id, callee text) -> the trait-impl methods the
+    /// caller's calls of that text resolve to, by position: a fully
+    /// qualified call by the self type and trait arguments it wrote, a
+    /// method call by its receiver's type, trait bound or trait-object
+    /// arguments (see [`build_site_targets`]). Keyed per caller, so the same
+    /// text in two functions keeps two answers.
+    site_targets: HashMap<(String, String), Vec<u32>>,
     /// The run's interned source categories (see [`Categories`]).
     categories: Categories,
 }
@@ -14780,10 +15088,9 @@ fn collect_callee_texts(expr: &SimpleExpr, out: &mut Vec<String>) {
     }
 }
 
-/// The summaries of everything a fully qualified call resolves to, joined:
-/// the call may reach any of the impls its written self type and trait
-/// arguments allow, so its caller sees the union, the way the call graph
-/// emits one edge per impl.
+/// The summaries of everything a call resolves to, joined: a call site with
+/// several possible impls may reach any of them, so its caller sees the
+/// union, the way the call graph emits one edge per impl.
 fn joined_callee_summary_indexed(
     tables: &CallTables<'_>,
     callee: &str,
@@ -14792,7 +15099,7 @@ fn joined_callee_summary_indexed(
     summaries: &(impl IndexedTable<FunctionSummary> + ?Sized),
 ) -> Option<FunctionSummary> {
     let mut joined: Option<FunctionSummary> = None;
-    for resolved in tables.resolve_target_all_or_caller(callee, package_path, caller_decl) {
+    for resolved in tables.resolve_target_all(callee, package_path, caller_decl) {
         if let Some(summary) = summaries.lookup_index(resolved as usize).cloned() {
             joined = Some(match joined {
                 None => summary,
@@ -14816,7 +15123,7 @@ fn joined_callee_summary_keyed(
     summaries: &BTreeMap<String, FunctionSummary>,
 ) -> Option<FunctionSummary> {
     let mut joined: Option<FunctionSummary> = None;
-    for resolved in tables.resolve_target_all_or_caller(callee, package_path, caller_decl) {
+    for resolved in tables.resolve_target_all(callee, package_path, caller_decl) {
         if let Some(summary) = summaries.get(tables.target_id(resolved)).cloned() {
             joined = Some(match joined {
                 None => summary,
@@ -14830,6 +15137,196 @@ fn joined_callee_summary_keyed(
     joined
 }
 
+/// Whether a call is one the trait-impl index answers per call site: a
+/// fully qualified trait call, or a method call whose bare name some trait
+/// impl defines.
+fn is_site_resolved_call(call: &SimplifiedCall, trait_index: &TraitImplIndex) -> bool {
+    if call.qualified_trait_call.is_some() {
+        return true;
+    }
+    call.receiver_text.is_some()
+        && !call.callee_text.contains("::")
+        && call
+            .method_name
+            .as_deref()
+            .is_some_and(|method| trait_index.method_to_impls.contains_key(method))
+}
+
+/// Resolves every call [`is_site_resolved_call`] accepts against the
+/// trait-impl index, per caller, the question the call graph answers for the
+/// same call. Only functions with such a call compute type bindings. Each
+/// answer is capped at `max_call_candidates` (0 means no cap), and a call
+/// the index cannot answer gets no entry, which leaves it to the plain name
+/// lookup.
+fn build_site_targets(
+    functions: &[FunctionRecord],
+    position: &HashMap<&str, u32>,
+    trait_index: &TraitImplIndex,
+    indexes: &TypeIndexes<'_>,
+    max_call_candidates: usize,
+) -> HashMap<(String, String), Vec<u32>> {
+    let mut site_targets: HashMap<(String, String), Vec<u32>> = HashMap::new();
+    for function in functions {
+        if !function
+            .direct_calls
+            .iter()
+            .any(|call| is_site_resolved_call(call, trait_index))
+        {
+            continue;
+        }
+        let type_bindings = infer_type_bindings(
+            function,
+            indexes.field_types,
+            indexes.field_element_types,
+            indexes.return_types,
+        );
+        let element_bindings = infer_element_bindings(function);
+        let dyn_type_texts = trait_object_binding_types(function);
+        for call in &function.direct_calls {
+            if !is_site_resolved_call(call, trait_index) {
+                continue;
+            }
+            let (key, ids) = if let Some(parts) = &call.qualified_trait_call {
+                let mut parts = parts.clone();
+                if parts.self_type.is_none() {
+                    parts.self_type = call.receiver_expr.as_ref().and_then(|receiver| {
+                        infer_expr_type(
+                            receiver,
+                            &type_bindings,
+                            indexes.field_types,
+                            indexes.return_types,
+                        )
+                    });
+                }
+                (
+                    call.callee_text.clone(),
+                    resolve_qualified_trait_target_ids(
+                        &parts,
+                        trait_index,
+                        &function.generic_params,
+                    ),
+                )
+            } else {
+                let (Some(method), Some(receiver)) =
+                    (call.method_name.as_deref(), call.receiver_text.as_deref())
+                else {
+                    continue;
+                };
+                let Some(receiver_type) = resolve_receiver_type(
+                    receiver,
+                    call.receiver_expr.as_ref(),
+                    &type_bindings,
+                    &element_bindings,
+                    indexes.field_types,
+                    indexes.field_element_types,
+                    indexes.return_types,
+                ) else {
+                    continue;
+                };
+                let written_dyn = receiver
+                    .split('.')
+                    .next()
+                    .and_then(|base| dyn_type_texts.get(base))
+                    .and_then(|type_text| written_trait_object_type(type_text));
+                (
+                    method.to_string(),
+                    method_call_impl_targets(
+                        method,
+                        &receiver_type,
+                        written_dyn.as_ref().map(|(_, args)| args.as_slice()),
+                        function,
+                        trait_index,
+                    ),
+                )
+            };
+            let mut positions: Vec<u32> = ids
+                .iter()
+                .filter_map(|id| position.get(id.as_str()).copied())
+                .collect();
+            positions.sort_unstable();
+            positions.dedup();
+            if max_call_candidates > 0 {
+                positions.truncate(max_call_candidates);
+            }
+            if positions.is_empty() {
+                continue;
+            }
+            let entry = site_targets
+                .entry((function.declaration.id.clone(), key))
+                .or_default();
+            entry.extend(positions);
+            entry.sort_unstable();
+            entry.dedup();
+        }
+    }
+    site_targets
+}
+
+/// The trait-impl methods named `method` that a call on a receiver of
+/// `receiver_type` may reach: for a generic parameter, the impls of the
+/// traits it is bounded by; for a trait (a trait object or `impl Trait`),
+/// that trait's impls whose arguments fit the object's written ones; for
+/// any other type, the impls for that type. Empty when none fits.
+fn method_call_impl_targets(
+    method: &str,
+    receiver_type: &str,
+    written_dyn_args: Option<&[String]>,
+    function: &FunctionRecord,
+    trait_index: &TraitImplIndex,
+) -> Vec<String> {
+    let Some(ids) = trait_index.method_to_impls.get(method) else {
+        return Vec::new();
+    };
+    let token = last_segment(receiver_type);
+    let bounds: Vec<&String> = function
+        .generic_bounds
+        .iter()
+        .filter(|(param, _)| param == token)
+        .flat_map(|(_, bounds)| bounds)
+        .collect();
+    let is_trait = trait_index.trait_to_impl_methods.contains_key(token);
+    // A receiver bound to a trait object is bound to the arguments written
+    // on it too, whatever type its initializer had.
+    let fits_object = |facts: &ImplMethodFacts| {
+        written_dyn_args.is_none_or(|written| {
+            trait_arguments_compatible(
+                written,
+                &facts.trait_args,
+                &facts.impl_generic_params,
+                &function.generic_params,
+            )
+        })
+    };
+    let fits = |facts: &ImplMethodFacts| {
+        if !fits_object(facts) {
+            return false;
+        }
+        if !bounds.is_empty() {
+            return bounds.iter().any(|bound| {
+                trait_name_of_written(bound) == facts.trait_name
+                    && trait_arguments_compatible(
+                        &trait_argument_texts(bound),
+                        &facts.trait_args,
+                        &facts.impl_generic_params,
+                        &function.generic_params,
+                    )
+            });
+        }
+        if is_trait {
+            return facts.trait_name == token;
+        }
+        bare_type_token(&facts.impl_type).as_deref() == Some(token)
+    };
+    let mut out: Vec<String> = ids
+        .iter()
+        .filter(|id| trait_index.method_impls.get(*id).is_some_and(fits))
+        .cloned()
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
 impl<'a> CallTables<'a> {
     #[allow(clippy::too_many_arguments)]
     fn build(
@@ -14837,9 +15334,9 @@ impl<'a> CallTables<'a> {
         static_initializers: &[StaticInitializer],
         local_index: &'a HashMap<String, Vec<String>>,
         patterns: &'a DataFlowPatternSet,
-        trait_index: &'a TraitImplIndex,
-        field_types: &'a HashMap<String, String>,
-        field_element_types: &'a HashMap<String, String>,
+        trait_index: &TraitImplIndex,
+        indexes: &TypeIndexes<'_>,
+        max_call_candidates: usize,
     ) -> Self {
         let mut pairs: BTreeSet<(String, String)> = BTreeSet::new();
         let mut texts = BTreeSet::new();
@@ -14911,64 +15408,13 @@ impl<'a> CallTables<'a> {
             }
         }
 
-        // A fully qualified call resolves against the trait-impl index by
-        // the self type and trait arguments its call site wrote, the same
-        // question the call graph answers for the same call, so a summary
-        // and an edge cannot disagree about where a call goes.
-        let mut qualified_targets: HashMap<(String, String), Vec<u32>> = HashMap::new();
-        let mut qualified_targets_by_text: HashMap<(String, String), Vec<u32>> = HashMap::new();
-        let return_types = ReturnTypeIndex::build(functions);
-        for function in functions {
-            // A trait-form qualified call names no self type; its first
-            // argument is the receiver, and the function's own type bindings
-            // name the receiver's type.
-            let type_bindings =
-                infer_type_bindings(function, field_types, field_element_types, &return_types);
-            for call in &function.direct_calls {
-                let Some(parts) = &call.qualified_trait_call else {
-                    continue;
-                };
-                let mut resolved_parts = parts.clone();
-                if resolved_parts.self_type.is_none() {
-                    resolved_parts.self_type = call.receiver_expr.as_ref().and_then(|receiver| {
-                        infer_expr_type(receiver, &type_bindings, field_types, &return_types)
-                    });
-                }
-                let mut ids = resolve_qualified_trait_target_ids(
-                    &resolved_parts,
-                    trait_index,
-                    &function.generic_params,
-                );
-                ids.sort();
-                ids.dedup();
-                if ids.is_empty() {
-                    continue;
-                }
-                let mut positions = ids
-                    .iter()
-                    .filter_map(|id| position.get(id.as_str()).copied())
-                    .collect::<Vec<_>>();
-                positions.sort();
-                positions.dedup();
-                if positions.is_empty() {
-                    continue;
-                }
-                qualified_targets.insert(
-                    (function.declaration.id.clone(), call.callee_text.clone()),
-                    positions.clone(),
-                );
-                qualified_targets_by_text
-                    .entry((function.package_path.clone(), call.callee_text.clone()))
-                    .or_default()
-                    .extend(positions);
-                if let Some(positions) = qualified_targets_by_text
-                    .get_mut(&(function.package_path.clone(), call.callee_text.clone()))
-                {
-                    positions.sort_unstable();
-                    positions.dedup();
-                }
-            }
-        }
+        let site_targets = build_site_targets(
+            functions,
+            &position,
+            trait_index,
+            indexes,
+            max_call_candidates,
+        );
 
         Self {
             targets,
@@ -14980,26 +15426,31 @@ impl<'a> CallTables<'a> {
             local_index,
             patterns,
             position,
-            qualified_targets,
-            qualified_targets_by_text,
-            trait_index,
+            site_targets,
             categories: Categories::build(functions, patterns),
         }
     }
 
-    /// The local function `callee` names in `package_path`, if any. A fully
-    /// qualified call can resolve to several impl methods; the first is
-    /// returned, and a caller that unions over the set reads
-    /// [`Self::resolve_target_all`].
+    /// The local function `callee` names in `package_path`, if any.
     fn resolve_target(&self, callee: &str, package_path: &str) -> Option<u32> {
-        self.resolve_target_all(callee, package_path)
-            .into_iter()
-            .next()
+        match self
+            .targets
+            .get(package_path)
+            .and_then(|table| table.get(callee))
+        {
+            Some(Some(position)) => Some(*position),
+            Some(None) => None,
+            // A callee the build never saw cannot come from the operations it
+            // walked; resolve it directly rather than silently dropping it.
+            None => resolve_call_target(callee, package_path, self.local_index, None)
+                .and_then(|id| self.position.get(id.as_str()).copied()),
+        }
     }
 
-    /// [`Self::resolve_target_all`], preferring the resolution the caller's
-    /// own call site wrote, when the caller is known.
-    fn resolve_target_all_or_caller(
+    /// Every local function a call of `callee` in `caller` may reach: the
+    /// call-site resolution when the caller has one for this text, otherwise
+    /// the single target [`Self::resolve_target`] names.
+    fn resolve_target_all(
         &self,
         callee: &str,
         package_path: &str,
@@ -15007,58 +15458,27 @@ impl<'a> CallTables<'a> {
     ) -> Vec<u32> {
         if let Some(caller_decl) = caller_decl
             && let Some(positions) = self
-                .qualified_targets
+                .site_targets
                 .get(&(caller_decl.to_string(), callee.to_string()))
-                .filter(|positions| !positions.is_empty())
         {
             return positions.clone();
         }
-        self.resolve_target_all(callee, package_path)
+        self.resolve_target(callee, package_path)
+            .into_iter()
+            .collect()
     }
 
-    /// Every local function `callee` names in `package_path`: one, or the
-    /// impl methods a fully qualified call resolves to by the self type and
-    /// trait arguments its call site wrote. The summary passes union their
-    /// summaries, which is the same over-approximation the call graph's
-    /// bounded edges carry.
-    fn resolve_target_all(&self, callee: &str, package_path: &str) -> Vec<u32> {
-        if let Some(positions) = self
-            .qualified_targets_by_text
-            .get(&(package_path.to_string(), callee.to_string()))
-            .filter(|positions| !positions.is_empty())
+    /// The name a taint path records for a call of `callee` in `caller`: the
+    /// target's qualified name when the call resolves to one function, the
+    /// callee text as written when it may reach several.
+    fn target_label(&self, callee: &str, package_path: &str, caller_decl: &str) -> String {
+        match self
+            .resolve_target_all(callee, package_path, Some(caller_decl))
+            .as_slice()
         {
-            return positions.clone();
+            [single] => self.target_qualified(*single).to_string(),
+            _ => callee.to_string(),
         }
-        let mut resolved = match self
-            .targets
-            .get(package_path)
-            .and_then(|table| table.get(callee))
-        {
-            Some(Some(position)) => vec![*position],
-            // A callee the build never saw cannot come from the operations it
-            // walked; resolve it directly rather than silently dropping it.
-            _ => resolve_call_target(callee, package_path, self.local_index, None)
-                .and_then(|id| self.position.get(id.as_str()).copied())
-                .into_iter()
-                .collect::<Vec<u32>>(),
-        };
-        // A bare method name that no single local function owns can still be
-        // a trait dispatch, so every impl method of that name stays a
-        // candidate and the summaries they are joined from cover the vtable
-        // the call may go through.
-        if resolved.is_empty() && !callee.contains("::") {
-            resolved = self
-                .trait_index
-                .method_to_impls
-                .get(callee)
-                .into_iter()
-                .flatten()
-                .filter_map(|id| self.position.get(id.as_str()).copied())
-                .collect::<Vec<u32>>();
-            resolved.sort_unstable();
-            resolved.dedup();
-        }
-        resolved
     }
 
     /// The declaration id of the function at `position`, the join key the
@@ -23808,8 +24228,8 @@ pub fn run() {
             &local_index,
             &patterns,
             &trait_index,
-            &empty,
-            &empty,
+            &indexes,
+            0,
         );
         let (summaries, evaluations) = infer_summaries_counted(&records, &tables, &indexes);
         assert_eq!(evaluations, depth);

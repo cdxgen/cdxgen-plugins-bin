@@ -2172,3 +2172,249 @@ fn compiler_backend_context_impl_flows_through_the_dependency() -> Result<()> {
     context_impl_slice_from(&report, "::handler2");
     Ok(())
 }
+
+/// Declarations whose qualified name ends with `suffix`, as (id, canonical
+/// name) pairs.
+fn context_impl_declarations(report: &serde_json::Value, suffix: &str) -> Vec<(String, String)> {
+    report["declarations"]
+        .as_array()
+        .expect("declarations")
+        .iter()
+        .filter(|declaration| {
+            declaration["qualified_name"]
+                .as_str()
+                .is_some_and(|name| name.ends_with(suffix))
+        })
+        .map(|declaration| {
+            (
+                declaration["id"].as_str().unwrap_or_default().to_string(),
+                declaration["canonical_name"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string(),
+            )
+        })
+        .collect()
+}
+
+/// Slices from `function_suffix` carrying the environment source to `sink`.
+fn context_impl_has_slice(report: &serde_json::Value, function_suffix: &str, sink: &str) -> bool {
+    context_impl_has_slice_from(report, function_suffix, Some("env"), sink)
+}
+
+/// Slices from `function_suffix` to `sink`, from `source` or from any source
+/// (parameters included) when `source` is `None`.
+fn context_impl_has_slice_from(
+    report: &serde_json::Value,
+    function_suffix: &str,
+    source: Option<&str>,
+    sink: &str,
+) -> bool {
+    report["data_flow"]["slices"]
+        .as_array()
+        .expect("data flow slices")
+        .iter()
+        .any(|slice| {
+            source.is_none_or(|source| slice["source_category"] == source)
+                && slice["sink_category"] == sink
+                && slice["source_function"]
+                    .as_str()
+                    .is_some_and(|name| name.ends_with(function_suffix))
+        })
+}
+
+#[test]
+fn stable_backend_keeps_context_impl_probes_apart() -> Result<()> {
+    let report = run_report(&[
+        "--dir",
+        fixture_path("context-impl-app").to_str().unwrap(),
+        "--callgraph",
+        "static",
+        "--dataflow",
+        "security",
+    ])?;
+
+    // Same-named types in two modules: the impl methods carry the module
+    // path, get distinct ids, and reduce to the canonical name rustc's
+    // spelling reduces to.
+    let a_fmt = context_impl_declarations(
+        &report,
+        "::probes::a::<impl core::fmt::Display for context_impl_app::probes::a::Err>::fmt",
+    );
+    let b_fmt = context_impl_declarations(
+        &report,
+        "::probes::b::<impl core::fmt::Display for context_impl_app::probes::b::Err>::fmt",
+    );
+    assert_eq!(a_fmt.len(), 1, "a::Err's Display impl is declared once");
+    assert_eq!(b_fmt.len(), 1, "b::Err's Display impl is declared once");
+    assert_ne!(a_fmt[0].0, b_fmt[0].0, "the two impls must not share an id");
+    assert_eq!(a_fmt[0].1, "context_impl_app::probes::a::Err::fmt");
+    assert_eq!(b_fmt[0].1, "context_impl_app::probes::b::Err::fmt");
+
+    // An impl that relies on the trait's default argument stays a candidate
+    // for a call that writes the argument out; the impls of other contexts
+    // do not.
+    let plain = "::<impl ToJson for context_impl_app::probes::Plain>::to_json";
+    assert_context_impl_reaches(&report, "::default_dyn", plain);
+    assert_context_impl_reaches(&report, "::default_dyn", MYUUID_IMPL_TO_JSON);
+    assert!(
+        context_impl_edge_targets(&report, "::default_dyn", API_CTX_IMPL_TO_JSON).is_empty(),
+        "default_dyn must not dispatch to the ApiCtx impl"
+    );
+    assert_context_impl_dispatch(&report, "::default_qualified", plain);
+
+    // A method's own generic parameter on a trait object leaves every impl
+    // of the trait possible.
+    assert_context_impl_reaches(&report, "::method_generic", API_CTX_IMPL_TO_JSON);
+    assert_context_impl_reaches(&report, "::method_generic", RPC_CTX_IMPL_TO_JSON);
+
+    // A trait written with a path, and arguments spelled differently on the
+    // impl and the call, still resolve.
+    assert_context_impl_dispatch(
+        &report,
+        "::pathed",
+        "::<impl tj::Pair<crate::ApiCtx,u8> for context_impl_app::probes::Pathed>::pair",
+    );
+    // A lifetime argument never rules an impl out.
+    assert_context_impl_reaches(
+        &report,
+        "::named_dyn",
+        "::<impl tj::Pair<&'a str,u8> for context_impl_app::probes::Named>::pair",
+    );
+
+    // `unwrap` on a dependency constructor's result is the standard
+    // library's method, not the dependency type's.
+    assert!(
+        !report["call_graph"]["nodes"]
+            .as_array()
+            .expect("call graph nodes")
+            .iter()
+            .any(|node| node["qualified_name"] == "fakeuuid::Uuid::unwrap"),
+        "Result::unwrap must not be attributed to fakeuuid::Uuid"
+    );
+    Ok(())
+}
+
+#[test]
+fn stable_backend_keeps_context_impl_flows_apart() -> Result<()> {
+    let report = run_report(&[
+        "--dir",
+        fixture_path("context-impl-app").to_str().unwrap(),
+        "--deps",
+        "--callgraph",
+        "static",
+        "--dataflow",
+        "security-deps",
+    ])?;
+    // Two qualified calls with the same text shape but different context
+    // arguments reach only their own impl's sink.
+    assert!(context_impl_has_slice(
+        &report,
+        "::api_direct",
+        "process-exec"
+    ));
+    assert!(
+        !context_impl_has_slice(&report, "::api_direct", "filesystem-write"),
+        "the ApiCtx call must not reach the RpcCtx impl's sink"
+    );
+    assert!(context_impl_has_slice(
+        &report,
+        "::rpc_direct",
+        "filesystem-write"
+    ));
+    assert!(
+        !context_impl_has_slice(&report, "::rpc_direct", "process-exec"),
+        "the RpcCtx call must not reach the ApiCtx impl's sink"
+    );
+    // The trait-object receivers reach only the sink of their context's
+    // impl, and a call that resolves to an impl without a sink has none.
+    assert!(context_impl_has_slice_from(
+        &report,
+        "::method_api",
+        None,
+        "process-exec"
+    ));
+    assert!(
+        !context_impl_has_slice_from(&report, "::method_api", None, "filesystem-write"),
+        "method_api must not reach the RpcCtx impl's sink"
+    );
+    assert!(context_impl_has_slice_from(
+        &report,
+        "::plain_method",
+        None,
+        "filesystem-write"
+    ));
+    assert!(
+        !context_impl_has_slice_from(&report, "::plain_method", None, "process-exec"),
+        "plain_method must not reach the ApiCtx impl's sink"
+    );
+    for sink in ["process-exec", "filesystem-write"] {
+        assert!(
+            !context_impl_has_slice_from(&report, "::default_qualified", None, sink),
+            "default_qualified reaches only Plain's impl, which has no {sink} sink"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+#[ignore = "compiler backend: needs the rustc-dev and rust-src components and runs nested cargo. Run: RUSTC_BOOTSTRAP=1 cargo test -- --ignored --test-threads=1"]
+fn compiler_backend_keeps_context_impl_probes_apart() -> Result<()> {
+    let binary = std::env::var("CARGO_BIN_EXE_rusi")?;
+    let output = Command::new(&binary)
+        .args([
+            "analyze",
+            "--dir",
+            fixture_path("context-impl-app").to_str().unwrap(),
+            "--backend",
+            "compiler",
+            "--callgraph",
+            "static",
+            "--dataflow",
+            "security",
+        ])
+        .output()?;
+    assert!(
+        output.status.success(),
+        "cli stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    if !report["diagnostics"]
+        .as_array()
+        .expect("diagnostics")
+        .iter()
+        .any(|diagnostic| diagnostic["kind"] == "compiler-source-evidence")
+    {
+        return Ok(());
+    }
+    // The stable and compiler declarations of the two Display impls join on
+    // one canonical name each.
+    let canonical: std::collections::BTreeSet<String> = report["declarations"]
+        .as_array()
+        .expect("declarations")
+        .iter()
+        .filter_map(|declaration| declaration["canonical_name"].as_str())
+        .filter(|name| name.ends_with("::Err::fmt"))
+        .map(str::to_string)
+        .collect();
+    assert_eq!(
+        canonical.into_iter().collect::<Vec<_>>(),
+        vec![
+            "context_impl_app::probes::a::Err::fmt".to_string(),
+            "context_impl_app::probes::b::Err::fmt".to_string(),
+        ]
+    );
+    // A lifetime argument never rules an impl out of a dyn dispatch.
+    assert_context_impl_reaches(&report, "::named_dyn", "Named");
+    // A method's own generic parameter leaves every impl possible.
+    assert_context_impl_reaches(&report, "::method_generic", COMPILER_API_CTX_IMPL_TO_JSON);
+    assert_context_impl_reaches(&report, "::method_generic", COMPILER_RPC_CTX_IMPL_TO_JSON);
+    // The bound callback finds an impl whose self type is generic.
+    let wrapped = context_impl_edge_targets(&report, "::via_client_wrapped", "Wrapper");
+    assert!(
+        !wrapped.is_empty(),
+        "via_client_wrapped's bound should call back into Wrapper's impl"
+    );
+    Ok(())
+}
