@@ -714,6 +714,10 @@ impl EmbeddedCollector {
                 record.resolved.dispatch_confidence = "high".to_string();
                 record.resolved.target_ids = target_ids.clone();
                 record.resolved.target_names = target_names.clone();
+                record.resolved.target_impl_traits = def_ids
+                    .iter()
+                    .map(|def_id| impl_trait_path_of(tcx, *def_id))
+                    .collect();
                 record.resolved.specialization_key = specialization_key.clone();
             }
         }
@@ -749,6 +753,11 @@ impl EmbeddedCollector {
                 dispatch_confidence: "high".to_string(),
                 target_ids: vec![function_id.clone()],
                 target_names: vec![declaration.qualified_name.clone()],
+                // This index is read by callers that only have the printed
+                // name, so the trait each target implements is derived from
+                // the name's spelling.
+                target_impl_traits: vec![impl_trait_method_parts(&declaration.qualified_name)
+                    .map(|(trait_name, _)| trait_name)],
                 candidate_receivers: declaration.receiver.clone().into_iter().collect(),
                 receiver_type: declaration.receiver.clone(),
                 dispatch_trait: None,
@@ -803,6 +812,8 @@ impl EmbeddedCollector {
                 dispatch_confidence: dispatch_confidence_for("closure", 1),
                 target_ids: vec![function_id],
                 target_names: target_names.clone(),
+                target_impl_traits: vec![impl_trait_method_parts(&declaration.qualified_name)
+                    .map(|(trait_name, _)| trait_name)],
                 candidate_receivers: Vec::new(),
                 receiver_type: None,
                 dispatch_trait: None,
@@ -1581,6 +1592,11 @@ struct ResolvedCall {
     dispatch_confidence: String,
     target_ids: Vec<String>,
     target_names: Vec<String>,
+    /// The trait each target implements, asked from rustc when the target
+    /// resolved (`impl_trait_path_of`). Parallel to `target_names`; `None`
+    /// for a target that is not the method of a trait impl. Consumers read
+    /// this instead of re-deriving the fact from the target's printed name.
+    target_impl_traits: Vec<Option<String>>,
     candidate_receivers: Vec<String>,
     receiver_type: Option<String>,
     /// Trait whose vtable dispatched this call. `Some` only for a
@@ -1603,6 +1619,7 @@ impl ResolvedCall {
             dispatch_confidence: "low".to_string(),
             target_ids: Vec::new(),
             target_names: Vec::new(),
+            target_impl_traits: Vec::new(),
             candidate_receivers: Vec::new(),
             receiver_type: None,
             dispatch_trait: None,
@@ -1850,6 +1867,8 @@ impl MirBlock {
                     {
                         resolved.target_ids = vec![id.clone()];
                         resolved.target_names = vec![def_path(tcx, target.to_def_id())];
+                        resolved.target_impl_traits =
+                            vec![impl_trait_path_of(tcx, target.to_def_id())];
                         resolved.dispatch_confidence = "high".to_string();
                     }
                     // The macro the call came from, if any: a call inside a
@@ -1865,6 +1884,7 @@ impl MirBlock {
                         dispatch_confidence: resolved.dispatch_confidence,
                         target_ids: resolved.target_ids,
                         target_names: resolved.target_names,
+                        target_impl_traits: resolved.target_impl_traits,
                         candidate_receivers: resolved.candidate_receivers,
                         receiver_type: resolved.receiver_type,
                         dispatch_trait: resolved.dispatch_trait,
@@ -1929,12 +1949,17 @@ fn callable_candidate_resolution(
     target_ids.sort();
     target_ids.dedup();
     let semantic_tags = vec!["callable".to_string(), "closure".to_string()];
+    let target_impl_traits = candidates
+        .iter()
+        .flat_map(|candidate| candidate.target_impl_traits.clone())
+        .collect();
     Some(ResolvedCall {
         callee_display: unresolved_display.to_string(),
         call_type: "closure".to_string(),
         dispatch_confidence: dispatch_confidence_for("closure", target_ids.len()),
         target_ids,
         target_names: target_names.clone(),
+        target_impl_traits,
         candidate_receivers: Vec::new(),
         receiver_type: None,
         dispatch_trait: None,
@@ -2042,6 +2067,10 @@ struct MirCall {
     dispatch_confidence: String,
     target_ids: Vec<String>,
     target_names: Vec<String>,
+    /// The trait each target implements, asked from rustc when the call
+    /// resolved (`impl_trait_path_of`). Parallel to `target_names`; `None`
+    /// for a target that is not the method of a trait impl.
+    target_impl_traits: Vec<Option<String>>,
     candidate_receivers: Vec<String>,
     receiver_type: Option<String>,
     dispatch_trait: Option<String>,
@@ -2316,6 +2345,22 @@ fn trait_call_local_impl<'tcx>(
         return None;
     }
     target.as_local()
+}
+
+/// The trait a call target implements, asked from rustc rather than parsed
+/// from the printed name: the method's parent impl and that impl's trait
+/// reference. `Some` exactly when the target is a method of a `impl Trait
+/// for Type` block, which is the fact `reconcile_edges` and the data-flow
+/// passes otherwise re-derive from name spellings that differ by where the
+/// self type lives (`<Type as Trait>::method` for a local one,
+/// `pkg::<impl Trait for Type>::method` for a foreign one).
+fn impl_trait_path_of(tcx: TyCtxt<'_>, def_id: DefId) -> Option<String> {
+    // The pinned nightly names the impl behind an associated item with
+    // `trait_impl_of_assoc`; the method's own container would name the trait
+    // item the impl implements instead.
+    let impl_def_id = tcx.trait_impl_of_assoc(def_id)?;
+    let trait_ref = tcx.impl_trait_ref(impl_def_id);
+    Some(def_path(tcx, trait_ref.skip_binder().def_id))
 }
 
 fn push_unwind_successor(unwind: &UnwindAction, successors: &mut Vec<String>) {
@@ -2711,6 +2756,7 @@ fn build_call_graph(
                 };
                 let targets = if call.target_ids.is_empty() {
                     vec![(
+                        0usize,
                         stable_id("cg-node", &["external", &call.callee_display]),
                         call.callee_display.clone(),
                         false,
@@ -2721,6 +2767,7 @@ fn build_call_graph(
                         .enumerate()
                         .map(|(idx, id)| {
                             (
+                                idx,
                                 id.clone(),
                                 call.target_names
                                     .get(idx)
@@ -2731,7 +2778,7 @@ fn build_call_graph(
                         })
                         .collect::<Vec<_>>()
                 };
-                for (target_id, target_name, local) in targets {
+                for (idx, target_id, target_name, local) in targets {
                     if should_skip_mir_edge(&function.id, &target_name, call, &hir_precision) {
                         continue;
                     }
@@ -2786,6 +2833,13 @@ fn build_call_graph(
                     if !call.target_names.is_empty() {
                         properties
                             .insert("candidateTargets".to_string(), call.target_names.join(","));
+                    }
+                    // Asked from rustc when the call resolved: the target is a
+                    // method of a trait impl, and this is the trait it
+                    // implements. Edge reconciliation reads this instead of
+                    // re-deriving the fact from the target's printed name.
+                    if let Some(Some(impl_trait)) = call.target_impl_traits.get(idx) {
+                        properties.insert("implTrait".to_string(), impl_trait.clone());
                     }
                     if !call.candidate_receivers.is_empty() {
                         properties.insert(
@@ -2868,6 +2922,7 @@ fn build_call_graph(
     for call in hir_calls {
         let targets = if call.resolved.target_ids.is_empty() {
             vec![(
+                0usize,
                 stable_id("cg-node", &["external", &call.resolved.callee_display]),
                 call.resolved.callee_display.clone(),
                 false,
@@ -2879,6 +2934,7 @@ fn build_call_graph(
                 .enumerate()
                 .map(|(idx, id)| {
                     (
+                        idx,
                         id.clone(),
                         call.resolved
                             .target_names
@@ -2890,7 +2946,7 @@ fn build_call_graph(
                 })
                 .collect::<Vec<_>>()
         };
-        for (target_id, target_name, local) in targets {
+        for (idx, target_id, target_name, local) in targets {
             if !local {
                 nodes
                     .entry(target_id.clone())
@@ -2940,6 +2996,13 @@ fn build_call_graph(
                     "candidateTargets".to_string(),
                     call.resolved.target_names.join(","),
                 );
+            }
+            // Asked from rustc when the call resolved: the target is a method
+            // of a trait impl, and this is the trait it implements. Edge
+            // reconciliation reads this instead of re-deriving the fact from
+            // the target's printed name.
+            if let Some(Some(impl_trait)) = call.resolved.target_impl_traits.get(idx) {
+                properties.insert("implTrait".to_string(), impl_trait.clone());
             }
             if !call.resolved.candidate_receivers.is_empty() {
                 properties.insert(
@@ -3143,13 +3206,13 @@ fn reconcile_edges(
     // to the same method from the same source.
     let concrete: HashSet<(String, String)> = collapsed
         .values()
-        .filter(|edge| target_is_concrete_impl(&target_name(edge)))
+        .filter(|edge| edge_target_is_concrete_impl(edge, &target_name(edge)))
         .map(|edge| (edge.source_id.clone(), method_suffix(&target_name(edge))))
         .collect();
     collapsed
         .into_values()
         .filter(|edge| {
-            if target_is_concrete_impl(&target_name(edge)) {
+            if edge_target_is_concrete_impl(edge, &target_name(edge)) {
                 return true;
             }
             !concrete.contains(&(edge.source_id.clone(), method_suffix(&target_name(edge))))
@@ -3181,10 +3244,24 @@ fn call_type_resolution_rank(call_type: &str) -> usize {
     kind_bonus + detail
 }
 
-/// A concrete impl target is spelled `<Type as Trait>::method`; an abstract
-/// trait-item target is spelled `Trait::method`.
+/// Whether an edge's target is the method of a trait impl. The fact rustc
+/// recorded when the edge was created (`implTrait`) decides; only an edge
+/// that predates it, such as one read from another crate's artifact, falls
+/// back to the printed name's spelling.
+fn edge_target_is_concrete_impl(edge: &CallGraphEdge, target_name: &str) -> bool {
+    if let Some(impl_trait) = edge.properties.get("implTrait") {
+        return !impl_trait.is_empty();
+    }
+    target_is_concrete_impl(target_name)
+}
+
+/// A concrete impl target is spelled `<Type as Trait>::method`, or, for an
+/// impl whose self type is foreign to its crate,
+/// `pkg::<impl Trait for Type>::method`. An abstract trait-item target is
+/// spelled `Trait::method`. Same question as [`impl_trait_method_parts`],
+/// answered for the name alone.
 fn target_is_concrete_impl(target_name: &str) -> bool {
-    target_name.starts_with('<') && target_name.contains(" as ")
+    impl_trait_method_parts(target_name).is_some()
 }
 
 fn method_suffix(target_name: &str) -> String {
@@ -5079,19 +5156,34 @@ fn candidate_dataflow_targets(call: &MirCall, ctx: &FlowContext<'_>) -> Vec<Stri
     targets.into_iter().collect()
 }
 
-/// Splits `<Type as Trait>::method` into the trait's last path segment and
-/// the method name.
+/// Splits a trait-impl method's qualified name into the trait's last path
+/// segment and the method name.
 ///
-/// The `as` is the one at the top nesting level of the leading angle
-/// brackets, read with its surrounding spaces, so neither a generic argument
-/// (`<Vec<T> as Trait>`), a qualified self type (`<<T as A>::Out as B>`), nor
-/// a name that merely contains the letters (`Database`, `Class`) is taken for
-/// it.
+/// rustc spells an impl method of a local self type `<Type as Trait>::method`
+/// and one whose self type is foreign to the crate
+/// `crate::<impl Trait<Args> for Type>::method`, which reads
+/// `pkg::<impl Trait<Args> for Type>::method` once the local `crate::` is
+/// spelled from the package. Both are accepted, because a caller that reads
+/// another crate's artifact has the printed name alone. The separators are
+/// the ones at the top nesting level of the leading angle brackets, read with
+/// their surrounding spaces, so neither a generic argument (`<Vec<T> as
+/// Trait>`), a qualified self type (`<<T as A>::Out as B>`), nor a name that
+/// merely contains the letters (`Database`, `Class`) is taken for one.
 fn impl_trait_method_parts(symbol: &str) -> Option<(String, String)> {
-    let inner = symbol.trim().strip_prefix('<')?;
+    let mut work = symbol.trim();
+    if !work.starts_with('<') {
+        // The qualifier can carry the defining crate's name in front of it
+        // (`pkg::<impl Trait for Type>::method`). Cut to the bracket; a name
+        // without a qualified self has no top-level `::<` to cut at, and one
+        // with a turbofish but no qualifier (`Wrapper::<Inner>::get`) leaves
+        // a group that is neither form. The split consumed the `::<`, whose
+        // last character is the bracket, so step back over it.
+        let (before, _) = split_outside_groups(work, "::<")?;
+        work = &work[before.len() + 2..];
+    }
+    let inner = work.strip_prefix('<')?;
     let mut depth = 0usize;
     let mut previous = '\0';
-    let mut split = None;
     let mut close = None;
     for (index, ch) in inner.char_indices() {
         match ch {
@@ -5103,19 +5195,47 @@ fn impl_trait_method_parts(symbol: &str) -> Option<(String, String)> {
                 break;
             }
             '>' => depth -= 1,
-            ' ' if depth == 0 && inner[index..].starts_with(" as ") => split = Some(index),
             _ => {}
         }
         previous = ch;
     }
-    let (split, close) = (split?, close?);
-    let trait_path = inner[split + " as ".len()..close].trim();
-    let trait_name = last_segment(&strip_generic_arguments(trait_path)).to_string();
+    let close = close?;
+    let qualified = &inner[..close];
     let method = normalize_symbol(inner[close + 1..].strip_prefix("::")?);
+    let trait_path = if let Some(body) = qualified.strip_prefix("impl ") {
+        // `<impl Trait<Args> for Type>` names the trait before ` for `.
+        split_outside_groups(body, " for ")?.0
+    } else {
+        split_outside_groups(qualified, " as ")?.1
+    };
+    let trait_name = last_segment(&strip_generic_arguments(trait_path.trim())).to_string();
     if trait_name.is_empty() || method.is_empty() {
         return None;
     }
     Some((trait_name, method))
+}
+
+/// Splits `haystack` at the first `needle` that sits outside any `<` `>`
+/// group, returning both halves.
+fn split_outside_groups<'a>(haystack: &'a str, needle: &str) -> Option<(&'a str, &'a str)> {
+    let mut depth = 0usize;
+    let mut previous = '\0';
+    for (index, ch) in haystack.char_indices() {
+        match ch {
+            '<' => depth += 1,
+            '>' if previous == '-' => {}
+            '>' if depth > 0 => depth -= 1,
+            _ if depth == 0 && haystack[index..].starts_with(needle) => {
+                return Some((
+                    &haystack[..index],
+                    &haystack[index + needle.len()..],
+                ));
+            }
+            _ => {}
+        }
+        previous = ch;
+    }
+    None
 }
 
 fn should_expand_bare_method_candidate(call: &MirCall, method_name: &str) -> bool {
@@ -7357,9 +7477,9 @@ fn pattern(
     }
 }
 
-fn resolve_method_call(
-    tcx: TyCtxt<'_>,
-    receiver_ty: Ty<'_>,
+fn resolve_method_call<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    receiver_ty: Ty<'tcx>,
     def_id: Option<DefId>,
     function_ids: &HashMap<LocalDefId, String>,
 ) -> Option<ResolvedCall> {
@@ -7386,6 +7506,7 @@ fn resolve_method_call(
     let DynCandidates {
         ids: target_ids,
         names: target_names,
+        impl_traits: target_impl_traits,
         receivers: candidate_receivers,
         dispatch_trait,
     } = if call_type == "dyn-dispatch" {
@@ -7395,6 +7516,7 @@ fn resolve_method_call(
         DynCandidates {
             ids,
             names,
+            impl_traits: vec![impl_trait_path_of(tcx, def_id)],
             receivers: receiver_type.clone().into_iter().collect(),
             dispatch_trait: None,
         }
@@ -7429,6 +7551,7 @@ fn resolve_method_call(
         dispatch_confidence,
         target_ids,
         target_names,
+        target_impl_traits,
         candidate_receivers,
         receiver_type: receiver_type.clone(),
         dispatch_trait,
@@ -7477,6 +7600,7 @@ fn resolve_expr_call(
                 dispatch_confidence: dispatch_confidence_for("static", target_ids.len()),
                 target_ids,
                 target_names,
+                target_impl_traits: vec![impl_trait_path_of(tcx, def_id)],
                 candidate_receivers: Vec::new(),
                 receiver_type: None,
                 dispatch_trait: None,
@@ -7504,6 +7628,7 @@ fn resolve_expr_call(
                     dispatch_confidence: dispatch_confidence_for("closure", target_ids.len()),
                     target_ids,
                     target_names,
+                    target_impl_traits: vec![impl_trait_path_of(tcx, def_id)],
                     candidate_receivers: Vec::new(),
                     receiver_type: None,
                     dispatch_trait: None,
@@ -7534,6 +7659,7 @@ fn resolve_expr_call(
                     dispatch_confidence: dispatch_confidence_for("static", target_ids.len()),
                     target_ids,
                     target_names,
+                    target_impl_traits: vec![impl_trait_path_of(tcx, def_id)],
                     candidate_receivers: Vec::new(),
                     receiver_type: None,
                     dispatch_trait: None,
@@ -7550,6 +7676,7 @@ fn resolve_expr_call(
                 dispatch_confidence: "low".to_string(),
                 target_ids: Vec::new(),
                 target_names: Vec::new(),
+                target_impl_traits: Vec::new(),
                 candidate_receivers: Vec::new(),
                 receiver_type: None,
                 dispatch_trait: None,
@@ -7667,6 +7794,8 @@ fn target_for_def_id(
 struct DynCandidates {
     ids: Vec<String>,
     names: Vec<String>,
+    /// The trait each candidate implements, from rustc (`impl_trait_path_of`).
+    impl_traits: Vec<Option<String>>,
     receivers: Vec<String>,
     dispatch_trait: Option<String>,
 }
@@ -7677,15 +7806,16 @@ impl DynCandidates {
         Self {
             ids,
             names,
+            impl_traits: Vec::new(),
             receivers: Vec::new(),
             dispatch_trait: None,
         }
     }
 }
 
-fn enumerate_dyn_candidates(
-    tcx: TyCtxt<'_>,
-    receiver_ty: Ty<'_>,
+fn enumerate_dyn_candidates<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    receiver_ty: Ty<'tcx>,
     method_def_id: DefId,
     function_ids: &HashMap<LocalDefId, String>,
 ) -> DynCandidates {
@@ -7704,10 +7834,30 @@ fn enumerate_dyn_candidates(
     let method_name = tcx.associated_item(trait_item).name();
     let mut ids = Vec::new();
     let mut names = Vec::new();
+    let mut impl_traits = Vec::new();
     let mut receivers = Vec::new();
     let receiver_hint = normalize_type_name(receiver_ty.to_string());
+    // A trait object's vtable belongs to its principal trait, and the
+    // generic arguments written on the object (`dyn ToJson<ApiCtx>`) decide
+    // which impls can be behind it: an impl of `ToJson<RpcCtx>` cannot be,
+    // while an impl whose argument is still one of its own generic
+    // parameters might be. Comparing rustc's `impl_trait_ref` arguments,
+    // skipping `Self`, with the object's keeps the possible targets and
+    // drops the impls of other contexts.
+    let dyn_trait_args: Option<GenericArgsRef<'_>> = match receiver_ty.peel_refs().kind() {
+        ty::Dynamic(object, ..) => object
+            .principal()
+            .map(|principal| principal.skip_binder().args),
+        _ => None,
+    };
     if let Some(impls) = tcx.all_local_trait_impls(()).get(&trait_def_id) {
         for impl_def in impls {
+            let impl_trait_ref = tcx.impl_trait_ref(*impl_def);
+            if let Some(dyn_args) = dyn_trait_args
+                && !impl_trait_args_match_object(impl_trait_ref, dyn_args)
+            {
+                continue;
+            }
             let impl_ty = normalize_type_name(impl_self_ty_name(tcx, impl_def.to_def_id()));
             if !receiver_hint.is_empty()
                 && !receiver_hint.contains("dyn")
@@ -7721,6 +7871,7 @@ fn enumerate_dyn_candidates(
             {
                 if candidate.is_fn() && candidate.name() == method_name {
                     names.push(def_path(tcx, candidate.def_id));
+                    impl_traits.push(impl_trait_path_of(tcx, candidate.def_id));
                     receivers.push(impl_ty.clone());
                     if let Some(id) = candidate
                         .def_id
@@ -7742,6 +7893,7 @@ fn enumerate_dyn_candidates(
         DynCandidates {
             ids,
             names,
+            impl_traits,
             receivers,
             // The bare trait name, matching what the stable backend emits, so
             // the field joins across backends rather than carrying a full path
@@ -7749,6 +7901,34 @@ fn enumerate_dyn_candidates(
             dispatch_trait: Some(tcx.item_name(trait_def_id).to_string()),
         }
     }
+}
+
+/// Whether an impl can back a trait object with the object's principal
+/// arguments: every argument pair must be equal, and an impl argument that
+/// is still one of the impl's own generic parameters counts as a match,
+/// because the impl may be instantiated at the object's argument. Arguments
+/// that cannot be compared (lifetimes, non-type arguments of unequal kinds)
+/// also keep the candidate: an over-approximation never drops a possible
+/// target.
+fn impl_trait_args_match_object<'tcx>(
+    impl_trait_ref: ty::EarlyBinder<'tcx, ty::TraitRef<'tcx>>,
+    object_args: GenericArgsRef<'tcx>,
+) -> bool {
+    // Argument 0 is the impl's self type, which the object's principal
+    // arguments do not carry.
+    for (impl_arg, object_arg) in impl_trait_ref.skip_binder().args.iter().skip(1).zip(object_args)
+    {
+        if impl_arg == object_arg {
+            continue;
+        }
+        if let ty::GenericArgKind::Type(impl_ty) = impl_arg.kind()
+            && matches!(impl_ty.kind(), ty::Param(_))
+        {
+            continue;
+        }
+        return false;
+    }
+    true
 }
 
 fn receiver_matches_hint(candidate: &str, hint: &str) -> bool {
@@ -8336,6 +8516,7 @@ mod tests {
             dispatch_confidence: "high".to_string(),
             target_ids: target_ids.iter().map(|id| id.to_string()).collect(),
             target_names: Vec::new(),
+            target_impl_traits: Vec::new(),
             candidate_receivers: Vec::new(),
             receiver_type: None,
             dispatch_trait: None,
@@ -8794,6 +8975,28 @@ mod tests {
         assert_eq!(parts("<X as Y>::method::<u8>"), pair("Y", "method"));
         assert_eq!(parts("probe::free_function"), None);
         assert_eq!(parts("<Inherent>::method"), None);
+        // rustc prints an impl whose self type is foreign to the crate in the
+        // `crate::<impl Trait<Args> for Type>::method` form, which reads
+        // `pkg::<impl ...>` once the crate segment is spelled from the
+        // package.
+        assert_eq!(
+            parts("my_app::<impl tojson::ToJson<my_app::ApiCtx> for uuid::Uuid>::to_json"),
+            pair("ToJson", "to_json")
+        );
+        assert_eq!(
+            parts("my_app::<impl my_app::Pair<my_app::ApiCtx, T> for uuid::Uuid>::pair"),
+            pair("Pair", "pair")
+        );
+        assert_eq!(
+            parts("my_app::<impl my_app::Sink<Box<dyn Trait>> for my_app::Widget>::write"),
+            pair("Sink", "write")
+        );
+        assert_eq!(
+            parts("my_app::<impl core::fmt::Display for str>::fmt"),
+            pair("Display", "fmt")
+        );
+        assert_eq!(parts("my_app::<impl Inherent>::method"), None);
+        assert_eq!(parts("my_app::probe::free_function"), None);
     }
 
     #[test]

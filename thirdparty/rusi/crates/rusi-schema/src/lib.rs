@@ -152,9 +152,21 @@ fn split_balanced_angle(name: &str) -> Option<(String, String)> {
 }
 
 /// Reduce `<Type as Trait>::m` / `<impl Trait for Type>::m` to the implementing type.
+///
+/// rustc spells an impl method whose self type is foreign to its crate
+/// `pkg::<impl Trait for Type>::m`, with the defining crate's name in front
+/// of the qualifier. The crate prefix is not part of the implementing type,
+/// so it is dropped along with the qualifier: both spellings of one impl
+/// method reduce to the same canonical name.
 fn reduce_qualified_self(name: &str) -> String {
     match split_balanced_angle(name) {
-        None => name.to_string(),
+        None => match find_top_level(name, "::<") {
+            // `pkg::<impl Trait for Type>::m`: reduce from the qualifier on,
+            // without the crate prefix. The bracket is the needle's last
+            // character.
+            Some(range) => reduce_qualified_self(&name[range.end - 1..]),
+            None => name.to_string(),
+        },
         Some((inner, rest)) => {
             let mut implementing = inner.trim().to_string();
             if let Some(body) = implementing.strip_prefix("impl ") {
@@ -1011,6 +1023,35 @@ mod canonical_name_tests {
             canonical_name("<<myapp::Widget as Trait>::Assoc as core::fmt::Debug>::fmt"),
             "myapp::Widget::Assoc::fmt"
         );
+    }
+
+    #[test]
+    fn reduces_the_crate_prefixed_impl_form() {
+        // rustc spells an impl method whose self type is foreign to its crate
+        // with the defining crate's name in front of the qualifier. The
+        // prefix is dropped, so this spelling and the `<impl ...>` one reduce
+        // to the same canonical name and the two backends join on it.
+        assert_eq!(
+            canonical_name(
+                "myapp::<impl tojson::ToJson<myapp::ApiCtx> for uuid::Uuid>::to_json"
+            ),
+            "uuid::Uuid::to_json"
+        );
+        assert_eq!(
+            canonical_name("<impl tojson::ToJson<myapp::ApiCtx> for uuid::Uuid>::to_json"),
+            canonical_name(
+                "myapp::<impl tojson::ToJson<myapp::ApiCtx> for uuid::Uuid>::to_json"
+            )
+        );
+        // A crate prefix in front of a trait-qualified self reduces the same
+        // way.
+        assert_eq!(
+            canonical_name("myapp::<myapp::Widget as core::fmt::Debug>::fmt"),
+            "myapp::Widget::fmt"
+        );
+        // A plain path with generic arguments is not an impl qualifier, and
+        // the search for the separator must not be taken in by one.
+        assert_eq!(canonical_name("alloc::vec::Vec<u8>::push"), "alloc::vec::Vec::push");
     }
 }
 
