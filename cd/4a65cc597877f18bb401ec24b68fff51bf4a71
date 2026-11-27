@@ -1,0 +1,45 @@
+thirdparty/rusi/scripts/eval/golden/receiver-sink-app.compiler.digest.json
+  s_1713225a3bc1ee::t_950f6f6dd27dad 1-6
+thirdparty/rusi/corpus.toml
+  s_1713225a3bc1ee::t_ec0dccd991b5e1 127-132
+thirdparty/rusi/scripts/eval/golden/receiver-sink-app.stable.digest.json
+  s_1713225a3bc1ee::t_950f6f6dd27dad 1-6
+thirdparty/rusi/fixtures/receiver-sink-app/expected.jsonl
+  s_1713225a3bc1ee::t_ec0dccd991b5e1 1
+thirdparty/rusi/crates/rusi-core/src/lib.rs
+  s_1713225a3bc1ee::t_897b0e18795ea6 11749-11752,11900-11909,11960-12010
+  s_1713225a3bc1ee::t_0c7b061818442a 706-712,744-747,14082-14107
+  s_1713225a3bc1ee::t_914b07a8e80eaf 11706-11719,11725,11731-11735,14108
+  s_1713225a3bc1ee::t_0982bf1e9eac13 347-362,12012,12522-12525,12557,12586,12987-13000,13002-13029
+  s_1713225a3bc1ee::t_95488c6757c524 13001
+  s_1713225a3bc1ee::t_53fe6f89a7990e 11705,12011,12013-12015,13030-13032,14109
+thirdparty/rusi/fixtures/receiver-sink-app/Cargo.toml
+  s_1713225a3bc1ee::t_3f8aa78ea74e35 1-6
+thirdparty/rusi/docs/ANALYSIS_ARCHITECTURE.md
+  s_1713225a3bc1ee::t_b5cfc5ae066930 724
+  s_1713225a3bc1ee::t_c5e6d467bdbd57 742-843
+  s_1713225a3bc1ee::t_17be364da668d2 636-697,700-723,725-741
+  s_1713225a3bc1ee::t_1551349f6826bc 698-699
+thirdparty/rusi/fixtures/receiver-sink-app/src/main.rs
+  s_1713225a3bc1ee::t_3f8aa78ea74e35 1-26,33-34,39-43,47-50,53-71
+  s_1713225a3bc1ee::t_816aa9448da5ff 44,51
+  s_1713225a3bc1ee::t_713699a9053b91 27-32,35-38,45-46,52
+thirdparty/rusi/fixtures/receiver-sink-app/Cargo.lock
+  s_1713225a3bc1ee::t_06f98c9563638c 1-7
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "cd4a65cc597877f18bb401ec24b68fff51bf4a71",
+  "prompts": {},
+  "sessions": {
+    "s_1713225a3bc1ee": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_381088a8-962a-49b5-94f2-d6ee00d987ec",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

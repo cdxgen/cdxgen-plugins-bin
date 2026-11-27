@@ -1,0 +1,19 @@
+thirdparty/cdxui/src/bom/store.rs
+  s_1713225a3bc1ee::t_1a54cb62b772bd 2776-2885
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "9056d4b513a9cf1b24887a017964dce4eb1023ea",
+  "prompts": {},
+  "sessions": {
+    "s_1713225a3bc1ee": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_381088a8-962a-49b5-94f2-d6ee00d987ec",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

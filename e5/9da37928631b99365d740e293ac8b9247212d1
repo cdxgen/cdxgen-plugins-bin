@@ -1,0 +1,64 @@
+thirdparty/rusi/crates/rusi-core/src/stats.rs
+  s_1713225a3bc1ee::t_edf56c1ace798a 20
+  s_1713225a3bc1ee::t_26add3b4724746 8,28-31,40-41,44-45,48-49,52-53,56-57,60-61,63-75,78-83,97,99,104,108,114,152-170,176,185-195,212,217,223-227
+  s_1713225a3bc1ee::t_39e08bb5b86b81 1-7,9-19,21-27,32-39,42-43,46-47,50-51,54-55,58-59,62,76-77,84-96,98,100-103,105-107,109-113,115-151,171-175,177-178,180-181,183-184,196-211,213-216,218-222,228
+  s_1713225a3bc1ee::t_6626f0c381f009 179,182
+thirdparty/rusi/crates/rusi-core/src/lib.rs
+  s_1713225a3bc1ee::t_afa6f025bdc1d0 11643
+  s_1713225a3bc1ee::t_612b676693dcfb 12238
+  s_1713225a3bc1ee::t_33ba509ae0562c 18527,18895,19258
+  s_1713225a3bc1ee::t_84b94aba69b99e 138-140
+  s_1713225a3bc1ee::t_23e014c6d27316 12698
+  s_1713225a3bc1ee::t_c0e2fbf7ea58a1 6777-6779
+  s_1713225a3bc1ee::t_d3da4ccda08659 385,394,404-406,437-438,444-445,449
+  s_1713225a3bc1ee::t_c24cffc599b034 1081-1082,1084-1124,1127-1128
+  s_1713225a3bc1ee::t_c328b655ad855e 1260-1269
+  s_1713225a3bc1ee::t_a7b298bb425e17 1251-1254,1342-1345
+  s_1713225a3bc1ee::t_13e666ec52a55a 1309-1311
+  s_1713225a3bc1ee::t_d9c833ecd72807 8535-8537,8545-8558
+  s_1713225a3bc1ee::t_58798f61048ac2 11278-11280
+  s_1713225a3bc1ee::t_0c88d0fd592d1e 11929
+  s_1713225a3bc1ee::t_c85863485e45f1 13405-13407
+  s_1713225a3bc1ee::t_213ea0769412d6 13423-13425
+  s_1713225a3bc1ee::t_6683370d86bfe3 1341,1346,1355-1370
+  s_1713225a3bc1ee::t_cf7b68d2ebc35a 21490,21586,21728
+  s_1713225a3bc1ee::t_2fa76733359de6 41
+  s_1713225a3bc1ee::t_eb113f108664a4 1080
+thirdparty/rusi/crates/rusi-driver/src/lib.rs
+  s_1713225a3bc1ee::t_45617d97a404b9 1290,1326-1330
+  s_1713225a3bc1ee::t_25cd53b71fd667 16-17
+  s_1713225a3bc1ee::t_4ab23fd8610b45 140
+  s_1713225a3bc1ee::t_df958223b9430c 1255-1257
+  s_1713225a3bc1ee::t_e455524f1b0e08 1487
+  s_1713225a3bc1ee::t_b7b5709eb77737 105-108
+  s_1713225a3bc1ee::t_98f8790556d5ca 258
+thirdparty/rusi/crates/rusi-schema/src/lib.rs
+  s_1713225a3bc1ee::t_ad820b001c27a1 843-861
+thirdparty/rusi/crates/rusi-rustc-wrapper/src/main.rs
+  s_1713225a3bc1ee::t_186645108b736f 383
+  s_1713225a3bc1ee::t_6281151a20f894 3259
+  s_1713225a3bc1ee::t_6d7c2475ecf43b 3192-3207
+  s_1713225a3bc1ee::t_579bba1086470e 3392
+  s_1713225a3bc1ee::t_f7050a28c16932 16,29
+  s_1713225a3bc1ee::t_052d6da86f036b 3980
+thirdparty/rusi/crates/rusi-cli/src/main.rs
+  s_1713225a3bc1ee::t_911ac4891bc54c 175-181
+  s_1713225a3bc1ee::t_60fc25273e31ff 119-123
+  s_1713225a3bc1ee::t_14b17ae2ac9c65 378,432
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e59da37928631b99365d740e293ac8b9247212d1",
+  "prompts": {},
+  "sessions": {
+    "s_1713225a3bc1ee": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_381088a8-962a-49b5-94f2-d6ee00d987ec",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

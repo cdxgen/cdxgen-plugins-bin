@@ -1,0 +1,34 @@
+thirdparty/rusi/crates/rusi-core/tests/nested_loops.rs
+  s_babdf7f6b57d6f::t_b3269d2e31db88 1-81
+thirdparty/rusi/crates/rusi-core/src/lib.rs
+  s_babdf7f6b57d6f::t_1cd6d9a7e1b98f 11575-11579,22279,22285-22287
+  s_babdf7f6b57d6f::t_658c074b7206d7 11547-11574,11580-11597,11609,11615,11626,11632,11644-11645,11651,11662-11663
+  s_babdf7f6b57d6f::t_2b1387ba06dfb2 22231-22247,22261-22263,22266-22278,22280-22284,22288-22330,22339-22340,22348,22357-22358,22360
+  s_babdf7f6b57d6f::t_d44fd79ca1c084 22248-22255,22264-22265
+  s_babdf7f6b57d6f::t_54d81dbf9724b3 409-414
+  s_babdf7f6b57d6f::t_2ce26946066bfd 22256-22260
+  s_babdf7f6b57d6f::t_d7ae5a946048d5 642-646
+  s_babdf7f6b57d6f::t_decb9a72687781 368-370,375-376
+  s_babdf7f6b57d6f::t_1cc1d0b566d242 454-464,466-467
+  s_babdf7f6b57d6f::t_c91134248f4b5b 660
+  s_babdf7f6b57d6f::t_c5754743bb6835 524-527
+  s_babdf7f6b57d6f::t_670b1cfab4d0fe 22331-22338,22341-22347,22349-22356,22359,22361-22366
+thirdparty/rusi/crates/rusi-core/src/stats.rs
+  s_babdf7f6b57d6f::t_1cd6d9a7e1b98f 72,78,114-115
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e8b01c4b64e98c6a84380cd04b40bc598a1739a4",
+  "prompts": {},
+  "sessions": {
+    "s_babdf7f6b57d6f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2be749a3-ee66-4442-97ec-ef82c8e114b4",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
