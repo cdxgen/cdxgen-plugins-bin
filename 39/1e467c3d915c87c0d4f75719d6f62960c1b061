@@ -1,0 +1,55 @@
+package-lock.json
+  s_9a841b6bccbee8::t_2cd43c0f33b046 3,9
+package.json
+  s_9a841b6bccbee8::t_fcd240fb596c0d 3
+packages/darwin-amd64/package.json
+  s_9a841b6bccbee8::t_568d480f76e70e 3
+packages/darwin-arm64/package.json
+  s_9a841b6bccbee8::t_643ba10954747c 3
+packages/linux-amd64/package.json
+  s_9a841b6bccbee8::t_71fbd7a10d1500 3
+packages/linux-arm/package.json
+  s_9a841b6bccbee8::t_5c3af8f8f2d827 3
+packages/linux-arm64/package.json
+  s_9a841b6bccbee8::t_4940929a111478 3
+packages/linux-riscv64/package.json
+  s_9a841b6bccbee8::t_b53a15ff52fb7c 3
+packages/linuxmusl-amd64/package.json
+  s_9a841b6bccbee8::t_4f0e12cc8d1269 3
+packages/linuxmusl-arm64/package.json
+  s_9a841b6bccbee8::t_c86835d409b58f 3
+packages/ppc64/package.json
+  s_9a841b6bccbee8::t_915d684e0ff407 3
+packages/windows-amd64/package.json
+  s_9a841b6bccbee8::t_82d43a068560a2 3
+packages/windows-arm64/package.json
+  s_9a841b6bccbee8::t_99ae00dff352b0 3
+thirdparty/cdxrs/Cargo.lock
+  s_9a841b6bccbee8::t_09cfbb4157adfe 215
+thirdparty/cdxrs/Cargo.toml
+  s_9a841b6bccbee8::t_e19225ad48833d 3
+thirdparty/cdxui/Cargo.lock
+  s_9a841b6bccbee8::t_51d671feb62a6f 181
+thirdparty/cdxui/Cargo.toml
+  s_9a841b6bccbee8::t_1dc454824a8b6c 3
+thirdparty/rusi/Cargo.lock
+  s_9a841b6bccbee8::t_72f71aea5ac240 295,309,324,341,352
+thirdparty/rusi/Cargo.toml
+  s_9a841b6bccbee8::t_f6b6aad8c3fb2b 25
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "391e467c3d915c87c0d4f75719d6f62960c1b061",
+  "prompts": {},
+  "sessions": {
+    "s_9a841b6bccbee8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d6317d63-6d3e-4df0-bcaa-98ab71527b87",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
