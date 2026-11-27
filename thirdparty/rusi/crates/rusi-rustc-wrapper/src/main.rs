@@ -708,7 +708,9 @@ impl EmbeddedCollector {
             self.debug,
             format_args!(
                 "pass=mono-devirtualization walked={} calls={} resolved={}",
-                mono_walked, mono_calls, resolved.len()
+                mono_walked,
+                mono_calls,
+                resolved.len()
             ),
         );
         for ((owner, symbol), mut def_ids) in resolved {
@@ -796,8 +798,10 @@ impl EmbeddedCollector {
                 // This index is read by callers that only have the printed
                 // name, so the trait each target implements is derived from
                 // the name's spelling.
-                target_impl_traits: vec![impl_trait_method_parts(&declaration.qualified_name)
-                    .map(|(trait_name, _)| trait_name)],
+                target_impl_traits: vec![
+                    impl_trait_method_parts(&declaration.qualified_name)
+                        .map(|(trait_name, _)| trait_name),
+                ],
                 candidate_receivers: declaration.receiver.clone().into_iter().collect(),
                 receiver_type: declaration.receiver.clone(),
                 dispatch_trait: None,
@@ -852,8 +856,10 @@ impl EmbeddedCollector {
                 dispatch_confidence: dispatch_confidence_for("closure", 1),
                 target_ids: vec![function_id],
                 target_names: target_names.clone(),
-                target_impl_traits: vec![impl_trait_method_parts(&declaration.qualified_name)
-                    .map(|(trait_name, _)| trait_name)],
+                target_impl_traits: vec![
+                    impl_trait_method_parts(&declaration.qualified_name)
+                        .map(|(trait_name, _)| trait_name),
+                ],
                 candidate_receivers: Vec::new(),
                 receiver_type: None,
                 dispatch_trait: None,
@@ -1193,13 +1199,8 @@ impl<'tcx> Visitor<'tcx> for BodyVisitor<'tcx, '_> {
                 );
             }
             ExprKind::Call(func, _) => {
-                let resolved = resolve_expr_call(
-                    self.tcx,
-                    self.typeck,
-                    func,
-                    self.caller,
-                    self.function_ids,
-                );
+                let resolved =
+                    resolve_expr_call(self.tcx, self.typeck, func, self.caller, self.function_ids);
                 self.record_call(
                     func.span,
                     hir_call_callee(self.typeck, func).map(|callee| (expr.span, callee)),
@@ -2559,7 +2560,10 @@ fn trait_callback_targets<'tcx>(
             if !bound_args_match {
                 continue;
             }
-            for method in tcx.associated_items(impl_def.to_def_id()).in_definition_order() {
+            for method in tcx
+                .associated_items(impl_def.to_def_id())
+                .in_definition_order()
+            {
                 if method.is_fn() {
                     targets.push(method.def_id);
                 }
@@ -5467,10 +5471,7 @@ fn split_outside_groups<'a>(haystack: &'a str, needle: &str) -> Option<(&'a str,
             '>' if previous == '-' => {}
             '>' if depth > 0 => depth -= 1,
             _ if depth == 0 && haystack[index..].starts_with(needle) => {
-                return Some((
-                    &haystack[..index],
-                    &haystack[index + needle.len()..],
-                ));
+                return Some((&haystack[..index], &haystack[index + needle.len()..]));
             }
             _ => {}
         }
@@ -7788,7 +7789,10 @@ fn resolve_method_call<'tcx>(
         }
         target_names.push(name.clone());
         target_impl_traits.push(impl_trait_path_of(tcx, callback));
-        match callback.as_local().and_then(|local| function_ids.get(&local)) {
+        match callback
+            .as_local()
+            .and_then(|local| function_ids.get(&local))
+        {
             Some(id) => target_ids.push(id.clone()),
             None => {
                 target_ids.push(stable_id("cg-node", &["external", &name]));
@@ -7796,7 +7800,11 @@ fn resolve_method_call<'tcx>(
         }
         callback_used = true;
     }
-    let call_type = if callback_used { "trait-callback" } else { call_type };
+    let call_type = if callback_used {
+        "trait-callback"
+    } else {
+        call_type
+    };
     let native_boundary = modeled_native_boundary(&symbol)
         || target_names
             .iter()
@@ -7851,8 +7859,7 @@ fn resolve_expr_call<'tcx>(
             let res = typeck.qpath_res(&qpath, func.hir_id);
             let def_id = res.opt_def_id()?;
             let call_args = typeck.node_args(func.hir_id);
-            let (mut target_ids, mut target_names) =
-                target_for_def_id(tcx, def_id, function_ids);
+            let (mut target_ids, mut target_names) = target_for_def_id(tcx, def_id, function_ids);
             let mut target_impl_traits = vec![impl_trait_path_of(tcx, def_id)];
             // A trait-qualified call whose trait arguments are still the
             // caller's own generic parameters resolves inside the caller to
@@ -7864,7 +7871,10 @@ fn resolve_expr_call<'tcx>(
                 if !target_names.contains(&name) {
                     target_names.push(name.clone());
                     target_impl_traits.push(impl_trait_path_of(tcx, fallback));
-                    match fallback.as_local().and_then(|local| function_ids.get(&local)) {
+                    match fallback
+                        .as_local()
+                        .and_then(|local| function_ids.get(&local))
+                    {
                         Some(id) => target_ids.push(id.clone()),
                         None => {
                             target_ids.push(stable_id("cg-node", &["external", &name]));
@@ -8214,7 +8224,12 @@ fn impl_trait_args_match_object<'tcx>(
 ) -> bool {
     // Argument 0 is the impl's self type, which the object's principal
     // arguments do not carry.
-    for (impl_arg, object_arg) in impl_trait_ref.skip_binder().args.iter().skip(1).zip(object_args)
+    for (impl_arg, object_arg) in impl_trait_ref
+        .skip_binder()
+        .args
+        .iter()
+        .skip(1)
+        .zip(object_args)
     {
         if impl_arg == object_arg {
             continue;

@@ -2082,8 +2082,7 @@ fn compiler_backend_resolves_context_impl_dispatch() -> Result<()> {
         "plain_method must not dispatch to the ApiCtx impl"
     );
     assert!(
-        context_impl_edge_targets(&report, "::method_api", COMPILER_MYUUID_IMPL_TO_JSON)
-            .is_empty(),
+        context_impl_edge_targets(&report, "::method_api", COMPILER_MYUUID_IMPL_TO_JSON).is_empty(),
         "method_api must not dispatch to the ToJson<()> impl"
     );
 

@@ -1151,7 +1151,10 @@ fn collect_embedded_compiler_evidence(
     command.env("RUSI_EMIT_DIR", &emit_dir);
     command.env("RUSI_ANALYSIS_ROOT", analysis_root);
     command.env("RUSI_DATA_FLOW_MODE", &options.data_flow_mode);
-    command.env("RUSI_MAX_CALL_CANDIDATES", options.max_call_candidates.to_string());
+    command.env(
+        "RUSI_MAX_CALL_CANDIDATES",
+        options.max_call_candidates.to_string(),
+    );
     if options.debug {
         command.env("RUSI_DEBUG", "1");
     }

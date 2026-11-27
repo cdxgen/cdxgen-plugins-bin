@@ -3207,10 +3207,13 @@ impl SourceCollector {
         }
         let module_path = &self.file_ctx.module_path;
         for record in self.use_records.iter().rev() {
-            let binding = record
-                .alias
-                .as_deref()
-                .unwrap_or_else(|| record.path.rsplit("::").next().unwrap_or(record.path.as_str()));
+            let binding = record.alias.as_deref().unwrap_or_else(|| {
+                record
+                    .path
+                    .rsplit("::")
+                    .next()
+                    .unwrap_or(record.path.as_str())
+            });
             if binding == head && &record.module_path == module_path {
                 return format!("{}{}", record.path, rest);
             }
@@ -4315,7 +4318,9 @@ impl<'ast> Visit<'ast> for SourceCollector {
             })
             .collect();
         let previous_impl_trait = self.current_impl_trait.replace(
-            trait_with_args.clone().unwrap_or(trait_name.clone().unwrap_or_default()),
+            trait_with_args
+                .clone()
+                .unwrap_or(trait_name.clone().unwrap_or_default()),
         );
         // A trait impl's methods are named after the impl block, rustc's
         // spelling. An inherent impl's methods keep `Type::method`.
@@ -4644,7 +4649,10 @@ impl<'ast> Visit<'ast> for SourceCollector {
                             .map(|arg| arg.to_token_stream().to_string())
                     })
                     .flatten(),
-                receiver_expr: trait_form.then(|| node.args.first()).flatten().map(simple_expr),
+                receiver_expr: trait_form
+                    .then(|| node.args.first())
+                    .flatten()
+                    .map(simple_expr),
                 method_name: None,
                 is_higher_order: false,
                 is_macro_call: false,
@@ -6863,9 +6871,7 @@ fn qualified_trait_call_parts(func: &Expr) -> Option<QualifiedTraitCall> {
     let syn::PathArguments::AngleBracketed(_) = &first.arguments else {
         return None;
     };
-    if segments.next().is_none() {
-        return None;
-    }
+    segments.next()?;
     let method = path
         .segments
         .iter()
@@ -7538,6 +7544,7 @@ struct ResolutionContext<'a> {
 ///      TraitOverapprox.
 /// 3. Free function with a bare-name collision (no method_name):
 ///    over-approximate via last-segment index.
+#[allow(clippy::too_many_arguments)]
 fn resolve_call_targets(
     call: &SimplifiedCall,
     package_path: &str,
@@ -7894,7 +7901,10 @@ fn trait_arguments_compatible(
         // The caller's own generic parameter is not a concrete type: the
         // impl may be instantiated at whatever the caller is instantiated
         // with.
-        if caller_generic_params.iter().any(|param| param == written_arg) {
+        if caller_generic_params
+            .iter()
+            .any(|param| param == written_arg)
+        {
             continue;
         }
         return false;
@@ -7998,10 +8008,7 @@ fn resolve_qualified_trait_call(
 /// A constructor in the analyzed crate or in the standard library is not
 /// named: the local crate's own paths are already qualified, and the
 /// standard library's types are not attributed to any package.
-fn qualified_receiver_crate_type(
-    call: &SimplifiedCall,
-    package_path: &str,
-) -> Option<String> {
+fn qualified_receiver_crate_type(call: &SimplifiedCall, package_path: &str) -> Option<String> {
     let mut expr = call.receiver_expr.as_ref()?;
     loop {
         match expr {
@@ -8017,10 +8024,8 @@ fn qualified_receiver_crate_type(
                 let type_segment = parts[parts.len() - 2];
                 bare_type_token(type_segment)?;
                 let owner = parts[0];
-                let owner_is_foreign = owner != package_path
-                    && owner != "std"
-                    && owner != "core"
-                    && owner != "alloc";
+                let owner_is_foreign =
+                    owner != package_path && owner != "std" && owner != "core" && owner != "alloc";
                 return owner_is_foreign.then(|| parts[..parts.len() - 1].join("::"));
             }
             _ => return None,
@@ -12743,10 +12748,10 @@ fn summarize_in_context(
                             let contextual = tables
                                 .resolve_target_all(callee, &function.package_path)
                                 .into_iter()
-                                .filter_map(|resolved| {
+                                .map(|resolved| {
                                     let key = (resolved, receiver_type.clone());
                                     if let Some(cached) = contextual_memo.get(&key) {
-                                        return Some(cached.clone());
+                                        return cached.clone();
                                     }
                                     let computed = summarize_in_context(
                                         &tables.functions[resolved as usize],
@@ -12756,7 +12761,7 @@ fn summarize_in_context(
                                         Some(receiver_type.as_str()),
                                     );
                                     contextual_memo.insert(key, computed.clone());
-                                    Some(computed)
+                                    computed
                                 })
                                 .reduce(|mut acc, computed| {
                                     acc.join(computed);
@@ -13142,13 +13147,9 @@ fn eval_abstract_expr(
             }
 
             let mut taint = BTreeSet::new();
-            if let Some(summary) = joined_callee_summary_indexed(
-                tables,
-                callee,
-                package_path,
-                None,
-                summaries,
-            ) {
+            if let Some(summary) =
+                joined_callee_summary_indexed(tables, callee, package_path, None, summaries)
+            {
                 for category in &summary.returns_source_categories {
                     taint.insert(AbstractOrigin::Source(tables.categories.id(category)));
                 }
@@ -13239,13 +13240,9 @@ fn eval_abstract_expr(
                 return taint;
             }
             let mut taint = BTreeSet::new();
-            if let Some(summary) = joined_callee_summary_indexed(
-                tables,
-                &callee,
-                package_path,
-                None,
-                summaries,
-            ) {
+            if let Some(summary) =
+                joined_callee_summary_indexed(tables, &callee, package_path, None, summaries)
+            {
                 for category in &summary.returns_source_categories {
                     taint.insert(AbstractOrigin::Source(tables.categories.id(category)));
                 }
@@ -13752,11 +13749,11 @@ impl<'a> DataFlowBuilder<'a> {
                     }
 
                     if let Some(summary) = joined_callee_summary_keyed(
-                        &self.tables,
+                        self.tables,
                         callee,
                         &function.package_path,
                         Some(function.declaration.id.as_str()),
-                        &self.summaries,
+                        self.summaries,
                     ) {
                         for (sink_category, parameter_indexes) in &summary.param_to_sink {
                             for parameter_index in parameter_indexes {
@@ -13792,10 +13789,10 @@ impl<'a> DataFlowBuilder<'a> {
                                 .tables
                                 .resolve_target_all(callee, &function.package_path)
                                 .into_iter()
-                                .filter_map(|resolved| {
+                                .map(|resolved| {
                                     let key = (resolved, receiver_type.clone());
                                     if let Some(cached) = self.contextual_memo.get(&key) {
-                                        return Some(cached.clone());
+                                        return cached.clone();
                                     }
                                     let rows = KeyedRows {
                                         functions: self.tables.functions,
@@ -13809,7 +13806,7 @@ impl<'a> DataFlowBuilder<'a> {
                                         Some(receiver_type.as_str()),
                                     );
                                     self.contextual_memo.insert(key, computed.clone());
-                                    Some(computed)
+                                    computed
                                 })
                                 .reduce(|mut acc, computed| {
                                     acc.join(computed);
@@ -14042,11 +14039,11 @@ impl<'a> DataFlowBuilder<'a> {
                     return ConcreteTaint { paths };
                 }
                 if let Some(summary) = joined_callee_summary_keyed(
-                    &self.tables,
+                    self.tables,
                     callee,
                     &function.package_path,
                     Some(function.declaration.id.as_str()),
-                    &self.summaries,
+                    self.summaries,
                 ) {
                     let mut paths = Vec::new();
                     for category in &summary.returns_source_categories {
@@ -14208,11 +14205,11 @@ impl<'a> DataFlowBuilder<'a> {
                     return ConcreteTaint { paths };
                 }
                 if let Some(summary) = joined_callee_summary_keyed(
-                    &self.tables,
+                    self.tables,
                     method,
                     &function.package_path,
                     Some(function.declaration.id.as_str()),
-                    &self.summaries,
+                    self.summaries,
                 ) {
                     let mut paths = Vec::new();
                     for category in &summary.returns_source_categories {
@@ -14964,7 +14961,9 @@ impl<'a> CallTables<'a> {
     /// returned, and a caller that unions over the set reads
     /// [`Self::resolve_target_all`].
     fn resolve_target(&self, callee: &str, package_path: &str) -> Option<u32> {
-        self.resolve_target_all(callee, package_path).into_iter().next()
+        self.resolve_target_all(callee, package_path)
+            .into_iter()
+            .next()
     }
 
     /// [`Self::resolve_target_all`], preferring the resolution the caller's
@@ -14979,25 +14978,7 @@ impl<'a> CallTables<'a> {
             && let Some(positions) = self
                 .qualified_targets
                 .get(&(caller_decl.to_string(), callee.to_string()))
-            && !positions.is_empty()
-        {
-            return positions.clone();
-        }
-        self.resolve_target_all(callee, package_path)
-    }
-
-    /// [`Self::resolve_target_all`], preferring the resolution the caller's
-    /// own call site wrote.
-    fn resolve_target_in(
-        &self,
-        callee: &str,
-        package_path: &str,
-        caller_decl: &str,
-    ) -> Vec<u32> {
-        if let Some(positions) = self
-            .qualified_targets
-            .get(&(caller_decl.to_string(), callee.to_string()))
-            && !positions.is_empty()
+                .filter(|positions| !positions.is_empty())
         {
             return positions.clone();
         }
@@ -15013,10 +14994,9 @@ impl<'a> CallTables<'a> {
         if let Some(positions) = self
             .qualified_targets_by_text
             .get(&(package_path.to_string(), callee.to_string()))
+            .filter(|positions| !positions.is_empty())
         {
-            if !positions.is_empty() {
-                return positions.clone();
-            }
+            return positions.clone();
         }
         let mut resolved = match self
             .targets
@@ -15026,12 +15006,10 @@ impl<'a> CallTables<'a> {
             Some(Some(position)) => vec![*position],
             // A callee the build never saw cannot come from the operations it
             // walked; resolve it directly rather than silently dropping it.
-            _ => {
-                resolve_call_target(callee, package_path, self.local_index, None)
-                    .and_then(|id| self.position.get(id.as_str()).copied())
-                    .into_iter()
-                    .collect::<Vec<u32>>()
-            }
+            _ => resolve_call_target(callee, package_path, self.local_index, None)
+                .and_then(|id| self.position.get(id.as_str()).copied())
+                .into_iter()
+                .collect::<Vec<u32>>(),
         };
         // A bare method name that no single local function owns can still be
         // a trait dispatch, so every impl method of that name stays a
@@ -15534,11 +15512,17 @@ mod package_purl_tests {
         // this way; the first segment `<std` was percent-encoded into
         // `pkg:cargo/%3Cstd`.
         assert_eq!(
-            resolve_package_purl("<std::vec::Vec<u8> as std::ops::Deref>::deref", &empty_purls()),
+            resolve_package_purl(
+                "<std::vec::Vec<u8> as std::ops::Deref>::deref",
+                &empty_purls()
+            ),
             ""
         );
         assert_eq!(
-            resolve_package_purl("<std::string::String as std::ops::Deref>::deref", &empty_purls()),
+            resolve_package_purl(
+                "<std::string::String as std::ops::Deref>::deref",
+                &empty_purls()
+            ),
             ""
         );
     }
@@ -21498,21 +21482,15 @@ pub fn total() -> usize {{ cnt!({long}) }}
         // Trait impl methods are named after the impl block, rustc's
         // spelling (`app::<impl Store for app::FileStore>::persist`).
         assert!(
-            graph
-                .nodes
-                .iter()
-                .any(|node| node
-                    .qualified_name
-                    .ends_with("::<impl Store for dyn_dispatch_app::FileStore>::persist")),
+            graph.nodes.iter().any(|node| node
+                .qualified_name
+                .ends_with("::<impl Store for dyn_dispatch_app::FileStore>::persist")),
             "Expected FileStore's Store impl node"
         );
         assert!(
-            graph
-                .nodes
-                .iter()
-                .any(|node| node
-                    .qualified_name
-                    .ends_with("::<impl Store for dyn_dispatch_app::NetStore>::persist")),
+            graph.nodes.iter().any(|node| node
+                .qualified_name
+                .ends_with("::<impl Store for dyn_dispatch_app::NetStore>::persist")),
             "Expected NetStore's Store impl node"
         );
         // The receiver is `&dyn Store` so we can't pin a concrete type —

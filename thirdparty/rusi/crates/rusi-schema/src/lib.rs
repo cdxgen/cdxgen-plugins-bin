@@ -1032,16 +1032,12 @@ mod canonical_name_tests {
         // prefix is dropped, so this spelling and the `<impl ...>` one reduce
         // to the same canonical name and the two backends join on it.
         assert_eq!(
-            canonical_name(
-                "myapp::<impl tojson::ToJson<myapp::ApiCtx> for uuid::Uuid>::to_json"
-            ),
+            canonical_name("myapp::<impl tojson::ToJson<myapp::ApiCtx> for uuid::Uuid>::to_json"),
             "uuid::Uuid::to_json"
         );
         assert_eq!(
             canonical_name("<impl tojson::ToJson<myapp::ApiCtx> for uuid::Uuid>::to_json"),
-            canonical_name(
-                "myapp::<impl tojson::ToJson<myapp::ApiCtx> for uuid::Uuid>::to_json"
-            )
+            canonical_name("myapp::<impl tojson::ToJson<myapp::ApiCtx> for uuid::Uuid>::to_json")
         );
         // A crate prefix in front of a trait-qualified self reduces the same
         // way.
@@ -1051,7 +1047,10 @@ mod canonical_name_tests {
         );
         // A plain path with generic arguments is not an impl qualifier, and
         // the search for the separator must not be taken in by one.
-        assert_eq!(canonical_name("alloc::vec::Vec<u8>::push"), "alloc::vec::Vec::push");
+        assert_eq!(
+            canonical_name("alloc::vec::Vec<u8>::push"),
+            "alloc::vec::Vec::push"
+        );
     }
 }
 
