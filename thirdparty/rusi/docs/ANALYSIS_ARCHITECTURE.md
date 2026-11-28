@@ -91,9 +91,13 @@ discovery then reads every source file once and parses it once, and that single 
 does three jobs: it walks the `mod` declarations from each crate root to establish what
 each file is and where it sits, it collects the `macro_rules!` definitions, module
 declarations and `use` items the macro pre-pass needs (section 3.5), and it leaves the
-file's text in memory for the analysis pass, so no file is read from disk twice. A
-visitor then parses the text a second time and lowers the syntax tree into a small
-internal representation of expressions and operations. Two parses and one read per file
+file's text in memory for the analysis pass, so no file is read from disk twice. The
+per-file work runs as tasks on one worker pool shared by every package, so the walk of
+a package with a single huge crate does not serialize the front of the pipeline behind
+it; the traversal decisions, the notes, and the order of everything they produce are
+replayed in the order a sequential walk would have recorded. A visitor then parses the
+text a second time and lowers the syntax tree into a small internal representation of
+expressions and operations. Two parses and one read per file
 is the deliberate floor: keeping parsed trees across passes is not possible with `syn`
 spans, which hold `Rc` and cannot cross a thread boundary, and keeping every tree would
 cost an order of magnitude more memory than the text does. The lowering representation
