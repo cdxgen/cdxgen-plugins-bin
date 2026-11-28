@@ -2103,6 +2103,62 @@ where
     flattened
 }
 
+/// Maps `func` over a prefix of `items` on the analysis workers.
+///
+/// Workers claim items in order and stop claiming once `stop` says so, so
+/// the claimed items are always a prefix and every one of them finishes.
+/// The result has one slot per item; the items never claimed stay `None`.
+/// Claiming one item at a time also balances files of very different sizes
+/// better than fixed chunks.
+fn parallel_map_prefix_until<T, U, F, S>(items: &[T], func: F, stop: S) -> Vec<Option<U>>
+where
+    T: Sync,
+    U: Send,
+    F: Fn(&T) -> U + Sync,
+    S: Fn() -> bool + Sync,
+{
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let next = AtomicUsize::new(0);
+    let claim_and_run = || {
+        let mut done = Vec::new();
+        while !stop() {
+            let index = next.fetch_add(1, Ordering::Relaxed);
+            let Some(item) = items.get(index) else {
+                break;
+            };
+            done.push((index, func(item)));
+        }
+        done
+    };
+    let workers = analysis_worker_count().min(items.len().max(1));
+    let mut slots: Vec<Option<U>> = (0..items.len()).map(|_| None).collect();
+    let mut place = |done: Vec<(usize, U)>| {
+        for (index, result) in done {
+            slots[index] = Some(result);
+        }
+    };
+    if workers <= 1 {
+        place(claim_and_run());
+        return slots;
+    }
+    let stack_size = analysis_stack_size();
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..workers)
+            .map(|_| {
+                std::thread::Builder::new()
+                    .name("rusi-worker".to_string())
+                    .stack_size(stack_size)
+                    .spawn_scoped(scope, claim_and_run)
+                    .expect("failed to spawn an analysis worker")
+            })
+            .collect();
+        for handle in handles {
+            place(handle.join().expect("parallel worker panicked"));
+        }
+    });
+    slots
+}
+
 /// How many worker threads the parallel passes run on. `RUSI_THREADS`
 /// overrides the machine's parallelism, the way `RUST_MIN_STACK` overrides
 /// the stack size.
@@ -2593,27 +2649,27 @@ fn build_macro_table(
     macro_expand::MacroScopeTable::build(entries, dependency_crates)
 }
 
-/// Runs the per-file analysis pass in path order and applies the
-/// analysis-wide expansion ceiling deterministically.
+/// Runs the per-file analysis pass and applies the analysis-wide expansion
+/// ceiling in path order.
 ///
-/// Files are measured in rounds of one file per worker, each round under an
-/// unbounded ledger, so a file's recorded expansion work is what its own file
-/// ceiling allows. Walking the measurements in path order, everything from
-/// the file that pushes the running total past
-/// [`macro_expand::MAX_ANALYSIS_EXPANSION_WORK`] on is analysed again in a
-/// repair pass: the cut file with whatever work is left before the line, its
-/// ledger reporting the crossing once at the invocation that crosses it, and
-/// the files after it without expansion. Enforcing the ceiling while the
-/// workers charge it in completion order instead let the same binary produce
-/// different reports from run to run, because the file that lost its
-/// expansions was whichever worker got there first.
+/// The workers claim files in path order under an unbounded ledger, so a
+/// file's recorded expansion work is what its own file ceiling allows, and
+/// they stop claiming once the ledger, which every claimed file charges as it
+/// expands, passes [`macro_expand::MAX_ANALYSIS_EXPANSION_WORK`]. The claimed
+/// files always form a prefix in path order and their recorded work adds up
+/// to the ledger's total, so the file whose running total in path order
+/// crosses the ceiling is among them. Everything from that file on is analysed again
+/// in a repair pass: the cut file with whatever work is left before the line,
+/// its ledger reporting the crossing once at the invocation that crosses it,
+/// and the files after it without expansion. Which invocations keep their
+/// expansions is therefore a function of the input alone, not of the order
+/// the workers finish in.
 ///
-/// Measuring stops at the round the cut falls in. Files past it can never
-/// keep an expansion whatever their own work turns out to be, so measuring
-/// them would only produce a result the repair discards, and a run whose
-/// measurements stay
-/// under the ceiling expands exactly what a run without any analysis-wide
-/// ceiling would.
+/// A run that stays under the ceiling expands exactly what it would with no
+/// analysis-wide ceiling and analyses each file once. A run that crosses it
+/// re-analyses the cut file and the files claimed past it, and the work
+/// spent past the ceiling is at most one file ceiling per worker, the files
+/// in flight when the total crossed it.
 fn analyze_files_in_path_order(
     analysis_tasks: &[FileAnalysisTask],
     analysis_root: &Path,
@@ -2626,98 +2682,82 @@ fn analyze_files_in_path_order(
         .map(|task| (relative_display_path(analysis_root, &task.path), task))
         .collect();
     tasks.sort_by(|left, right| left.0.cmp(&right.0));
-    let mut slots: Vec<Option<AnalyzedFile>> = (0..tasks.len()).map(|_| None).collect();
-    let mut errors: Vec<Option<Box<Diagnostic>>> = (0..tasks.len()).map(|_| None).collect();
-    // One file per worker per round, so the measured work past the ceiling is
-    // at most one file ceiling per worker.
-    let round_size = analysis_worker_count().max(1);
+    let analyze = |path: &str,
+                   task: &FileAnalysisTask,
+                   table: &std::sync::Arc<macro_expand::MacroScopeTable>| {
+        analyze_file(task, analysis_root, file_texts, table).map_err(|error| {
+            // Boxed so the per-file result stays small: a parse failure is
+            // the rare path, while every successfully analyzed file would
+            // otherwise carry the unused Diagnostic's footprint.
+            Box::new(Diagnostic {
+                kind: "parse".to_string(),
+                message: error.to_string(),
+                package_path: Some(task.package_ctx.crate_name.clone()),
+                file_path: Some(path.to_string()),
+                position: None,
+            })
+        })
+    };
+    let work_of = |result: &Result<AnalyzedFile, Box<Diagnostic>>| {
+        result
+            .as_ref()
+            .map(|file| file.macro_expansion_work)
+            .unwrap_or(0)
+    };
+    // The ledger counts the work of files still in flight, so claiming stops
+    // as soon as the files already claimed are known to cross the ceiling.
+    let mut slots = parallel_map_prefix_until(
+        &tasks,
+        |(path, task)| analyze(path, task, macro_table),
+        || macro_table.ledger().spent() > macro_expand::MAX_ANALYSIS_EXPANSION_WORK,
+    );
     let mut cumulative = 0usize;
     let mut cut = None;
-    let mut round_start = 0usize;
-    while round_start < tasks.len() {
-        let round_end = (round_start + round_size).min(tasks.len());
-        let round: Vec<&(String, &FileAnalysisTask)> =
-            tasks[round_start..round_end].iter().collect();
-        let results = parallel_map_collect(&round, |(_, task)| {
-            analyze_file(task, analysis_root, file_texts, macro_table).map_err(|error| {
-                // Boxed so the per-file result stays small: a parse failure is
-                // the rare path, while every successfully analyzed file would
-                // otherwise carry the unused Diagnostic's footprint.
-                Box::new(Diagnostic {
-                    kind: "parse".to_string(),
-                    message: error.to_string(),
-                    package_path: Some(task.package_ctx.crate_name.clone()),
-                    file_path: Some(relative_display_path(analysis_root, &task.path)),
-                    position: None,
-                })
-            })
-        });
-        for (offset, result) in results.into_iter().enumerate() {
-            match result {
-                Ok(file) => slots[round_start + offset] = Some(file),
-                Err(diagnostic) => errors[round_start + offset] = Some(diagnostic),
-            }
-        }
-        for (offset, slot) in slots[round_start..round_end].iter().enumerate() {
-            let work = slot
-                .as_ref()
-                .map(|file| file.macro_expansion_work)
-                .unwrap_or(0);
-            if cumulative + work > macro_expand::MAX_ANALYSIS_EXPANSION_WORK {
-                cut = Some((round_start + offset, cumulative));
-                break;
-            }
-            cumulative += work;
-        }
-        round_start = round_end;
-        if cut.is_some() {
+    for (index, slot) in slots.iter().enumerate() {
+        let Some(result) = slot else {
+            break;
+        };
+        let work = work_of(result);
+        if cumulative.saturating_add(work) > macro_expand::MAX_ANALYSIS_EXPANSION_WORK {
+            cut = Some((index, cumulative));
             break;
         }
+        cumulative += work;
     }
     if let Some((cut_index, before_cut)) = cut {
-        let cut_path = tasks[cut_index].0.clone();
         let mut cut_table = (**macro_table).clone();
         cut_table.replace_ledger(macro_expand::WorkLedger::pre_charged(before_cut));
-        let cut_table = std::sync::Arc::new(cut_table);
         let mut closed_table = (**macro_table).clone();
         closed_table.replace_ledger(macro_expand::WorkLedger::closed());
+        let cut_table = std::sync::Arc::new(cut_table);
         let closed_table = std::sync::Arc::new(closed_table);
-        // The texts discovery kept were taken by the measurement pass where
-        // it ran, so the repair re-reads the files it re-analyses.
+        // The texts discovery kept were taken by the first pass where it ran,
+        // so the repair re-reads the files it re-analyses.
         let repaired = stats::time_phase("expansion_repair", || {
-            parallel_map_collect(&tasks[cut_index..], |(path, task)| {
-                let table = if *path == cut_path {
-                    &cut_table
-                } else {
-                    &closed_table
-                };
-                analyze_file(task, analysis_root, file_texts, table).map_err(|error| {
-                    Box::new(Diagnostic {
-                        kind: "parse".to_string(),
-                        message: error.to_string(),
-                        package_path: Some(task.package_ctx.crate_name.clone()),
-                        file_path: Some(path.clone()),
-                        position: None,
-                    })
-                })
-            })
+            parallel_map_prefix_until(
+                &tasks[cut_index..],
+                |(path, task)| {
+                    let table = if std::ptr::eq(*task, tasks[cut_index].1) {
+                        &cut_table
+                    } else {
+                        &closed_table
+                    };
+                    analyze(path, task, table)
+                },
+                || false,
+            )
         });
         for (offset, result) in repaired.into_iter().enumerate() {
-            let index = cut_index + offset;
-            match result {
-                Ok(file) => slots[index] = Some(file),
-                Err(diagnostic) => errors[index] = Some(diagnostic),
-            }
+            slots[cut_index + offset] = result;
         }
     }
-    for index in 0..tasks.len() {
-        if slots[index].is_none()
-            && let Some(diagnostic) = errors[index].take()
-        {
-            diagnostics.push(*diagnostic);
+    let mut parsed = Vec::with_capacity(slots.len());
+    for result in slots.into_iter().flatten() {
+        match result {
+            Ok(file) => parsed.push(file),
+            Err(diagnostic) => diagnostics.push(*diagnostic),
         }
     }
-    let mut parsed: Vec<AnalyzedFile> = slots.into_iter().flatten().collect();
     parsed.sort_by(|left, right| left.file.path.cmp(&right.file.path));
     parsed
 }

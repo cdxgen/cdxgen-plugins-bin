@@ -70,18 +70,17 @@ pub(crate) const MAX_EXPANSION_TOKENS: usize = 50_000;
 /// hundred over the corpus and room for several of those.
 ///
 /// The file ceiling is enforced while each file is analysed. The analysis
-/// ceiling is enforced between files: the per-file pass measures, file by
-/// file in path order, how much work each file needs, and measuring stops at
-/// the first file whose cumulative total crosses
-/// [`MAX_ANALYSIS_EXPANSION_WORK`]. That file and everything after it in
-/// path order is analysed again in a repair pass, the cut file keeping
-/// whatever work is left before the line and the files after it expanding
-/// nothing, so which invocations lose their expansions is a function of the
-/// input alone rather than of the order the workers charge in. A run whose
-/// measurements stay under the ceiling keeps every expansion, so real code
-/// pays nothing. The worst case is the ceiling plus one measured round of
-/// overshoot, a file ceiling per worker, and the repair pass parses and
-/// walks the files past the cut without expanding them.
+/// ceiling is applied in path order: the per-file pass claims files in path
+/// order and records how much work each one needs, and the first file whose
+/// running total crosses [`MAX_ANALYSIS_EXPANSION_WORK`] marks the cut. That
+/// file and everything after it in path order is analysed again in a repair
+/// pass, the cut file keeping whatever work is left before the line and the
+/// files after it expanding nothing, so which invocations lose their
+/// expansions is a function of the input alone rather than of the order the
+/// workers charge in. A run that stays under the ceiling expands exactly what
+/// it would without one. Workers stop claiming files once the ledger passes
+/// the ceiling, so the work spent past it is at most one file ceiling per
+/// worker, the files in flight at that moment.
 pub(crate) const MAX_FILE_EXPANSION_WORK: usize = 500_000;
 pub(crate) const MAX_ANALYSIS_EXPANSION_WORK: usize = 2_000_000;
 
@@ -273,8 +272,9 @@ mod tests;
 /// analyses a file.
 ///
 /// The per-file pass charges this ledger in whatever order the workers finish,
-/// so while it measures it carries no ceiling: which invocations keep their
-/// expansions is decided afterwards from the per-file work in path order (see
+/// so while it measures it carries no ceiling and only tells the workers when
+/// to stop claiming files: which invocations keep their expansions is decided
+/// afterwards from the per-file work in path order (see
 /// `MAX_ANALYSIS_EXPANSION_WORK`). The repair pass builds ledgers that carry
 /// the ceiling again, one pre-charged with the work the files before the cut
 /// spent and one closed outright for the files after it.
@@ -338,6 +338,11 @@ impl WorkLedger {
             reported: std::sync::atomic::AtomicBool::new(true),
             ceiling: MAX_ANALYSIS_EXPANSION_WORK,
         }
+    }
+
+    /// The work charged so far, including that of expansions still running.
+    pub(crate) fn spent(&self) -> usize {
+        self.spent.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     pub(crate) fn exhausted(&self) -> bool {
