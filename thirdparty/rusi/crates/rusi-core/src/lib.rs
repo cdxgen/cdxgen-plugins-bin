@@ -7509,7 +7509,7 @@ fn build_call_graph(
     // records on a large workspace.
     let mut truncated_sites = 0usize;
     let mut truncated_candidates = 0usize;
-    let local_index = build_local_function_index(functions);
+    let local_index = build_local_position_index(functions);
     let return_types = ReturnTypeIndex::build(functions);
     let mut seen_nodes = HashSet::new();
     // Per-function receiver-type bindings cache (P1.2). Computed lazily inside
@@ -7526,8 +7526,48 @@ fn build_call_graph(
     // disambiguates the impls of the trait.
     let mut dyn_bindings_cache: HashMap<String, HashSet<String>> = HashMap::new();
     let mut dyn_type_texts_cache: HashMap<String, HashMap<String, String>> = HashMap::new();
-    // Resolve a candidate's decl id back to its qualified name so edges carry
-    // human-readable `target_name`s (not raw `decl-*` ids). Built once.
+    // The resolution paths carry id handles; the interner holds their texts
+    // and the position of each id that names a record.
+    let interner = FunctionIdInterner::build(functions, trait_index);
+    let name_facts = build_function_name_facts(functions);
+    // The trait indexes are read by method and trait name; their id lists
+    // are interned once here instead of per call site.
+    let trait_method_candidates: HashMap<&str, std::sync::Arc<Vec<u32>>> = trait_index
+        .method_to_impls
+        .iter()
+        .map(|(method, ids)| {
+            (
+                method.as_str(),
+                std::sync::Arc::new(ids.iter().map(|id| interner.handle_of(id)).collect()),
+            )
+        })
+        .collect();
+    let blanket_method_candidates: HashMap<&str, std::sync::Arc<Vec<u32>>> = trait_index
+        .blanket_method_to_impls
+        .iter()
+        .map(|(method, ids)| {
+            (
+                method.as_str(),
+                std::sync::Arc::new(ids.iter().map(|id| interner.handle_of(id)).collect()),
+            )
+        })
+        .collect();
+    let trait_dispatch_sets: HashMap<&str, std::sync::Arc<HashSet<u32>>> = trait_index
+        .trait_to_impl_methods
+        .iter()
+        .map(|(trait_name, ids)| {
+            (
+                trait_name.as_str(),
+                std::sync::Arc::new(
+                    ids.iter()
+                        .map(|id| interner.handle_of(id))
+                        .collect::<HashSet<u32>>(),
+                ),
+            )
+        })
+        .collect();
+    // Resolve a candidate's decl id back to its qualified name so truncated
+    // candidate lists sort by it as they did. Built once.
     let id_to_qualified: HashMap<&str, &str> = functions
         .iter()
         .map(|f| {
@@ -7540,12 +7580,17 @@ fn build_call_graph(
     let context = ResolutionContext {
         local_index: &local_index,
         trait_index,
-        id_to_qualified: &id_to_qualified,
+        trait_method_candidates: &trait_method_candidates,
+        blanket_method_candidates: &blanket_method_candidates,
+        trait_dispatch_sets: &trait_dispatch_sets,
+        interner: &interner,
+        name_facts: &name_facts,
         field_types,
         field_element_types,
         return_types: &return_types,
         local_types,
     };
+    let mut method_candidates_cache: HashMap<String, MethodCandidates> = HashMap::new();
 
     // Helper closures borrow `nodes`/`seen_nodes` mutably, so they live inline.
     for function in functions {
@@ -7591,6 +7636,7 @@ fn build_call_graph(
                 dyn_bindings,
                 dyn_type_texts,
                 &function.generic_params,
+                &mut method_candidates_cache,
             );
 
             if candidates.is_empty() {
@@ -7708,6 +7754,7 @@ fn build_call_graph(
                 &candidates,
                 max_call_candidates,
                 &function.declaration.qualified_name,
+                &interner,
                 &id_to_qualified,
             );
             let emitted_count = emitted.len();
@@ -7716,12 +7763,13 @@ fn build_call_graph(
                 truncated_candidates += candidate_count - emitted_count;
             }
             for candidate in emitted {
+                let target_id = interner.id(candidate.target_id);
                 edges.push(CallGraphEdge {
                     id: stable_id(
                         "cg-edge",
                         &[
                             &function.declaration.id,
-                            &candidate.target_id,
+                            target_id,
                             &call.position.line.to_string(),
                             &call.position.column.to_string(),
                             // Every link of a method chain shares the chain's
@@ -7731,7 +7779,7 @@ fn build_call_graph(
                         ],
                     ),
                     source_id: function.declaration.id.clone(),
-                    target_id: candidate.target_id.clone(),
+                    target_id: target_id.to_string(),
                     call_type: candidate.provenance.call_type().to_string(),
                     line: call.position.line,
                     column: call.position.column,
@@ -7809,6 +7857,7 @@ fn truncate_candidates<'a>(
     candidates: &'a [ResolvedCall],
     max_call_candidates: usize,
     caller_qualified_name: &str,
+    interner: &FunctionIdInterner<'a>,
     id_to_qualified: &HashMap<&str, &str>,
 ) -> Vec<&'a ResolvedCall> {
     let uncapped = max_call_candidates == 0 || candidates.len() <= max_call_candidates;
@@ -7832,7 +7881,7 @@ fn truncate_candidates<'a>(
     let mut ordered: Vec<&ResolvedCall> = candidates.iter().collect();
     ordered.sort_by_cached_key(|candidate| {
         let qualified = id_to_qualified
-            .get(candidate.target_id.as_str())
+            .get(interner.id(candidate.target_id))
             .copied()
             .unwrap_or_default();
         // `false` sorts first, so same-crate candidates lead.
@@ -7861,6 +7910,172 @@ fn build_local_function_index(functions: &[FunctionRecord]) -> HashMap<String, V
                 .entry(stripped.to_string())
                 .or_default()
                 .push(function.declaration.id.clone());
+        }
+    }
+    index
+}
+
+/// The name facts of one function record, read once per build instead of
+/// once per candidate of every call site.
+///
+/// Receiver-type filtering asks two questions of each candidate's qualified
+/// name: does it declare the receiver's type token, and is its last segment
+/// the method's name. Both answers are fixed for the whole build, and both
+/// used to cost a scan of the name on every candidate of every call: the
+/// segments of a qualified name are recomputed and rescanned for the token,
+/// splitting on `::` outside generic arguments each time.
+#[derive(Debug, Clone)]
+struct FunctionNameFacts<'a> {
+    /// The generic-free segments the name declares, sorted for a binary
+    /// search. For a name spelled after an impl block these are the segments
+    /// of the impl's self type, with the self type as written added; for
+    /// every other name they are the name's own segments.
+    declares: Vec<&'a str>,
+    /// The name's text after its last `::`.
+    last_segment: &'a str,
+}
+
+impl FunctionNameFacts<'_> {
+    /// Whether the name declares `type_token` and ends with `method`, the
+    /// two questions the receiver-type filter asks of every candidate.
+    fn declares_and_ends_with(&self, type_token: &str, method: &str) -> bool {
+        self.declares.binary_search(&type_token).is_ok() && self.last_segment == method
+    }
+}
+
+/// The name facts of one qualified name.
+///
+/// Compare generic-free segments: a method on a generic type is qualified
+/// `Expander<'a>::expand`, and matching that raw against the receiver token
+/// `Expander` failed, which sent every `self.method()` on a generic type
+/// back to over-approximation.
+///
+/// A trait impl's method carries the implementing type inside its
+/// `<impl Trait for Type>` part (`app::<impl ToJson<ApiCtx> for
+/// fakeuuid::Uuid>::to_json`), where the segments are the crate path and
+/// the method, so the declared type is read out of the impl part.
+fn name_facts_of(qname: &str) -> FunctionNameFacts<'_> {
+    let declares = match qualified_impl_self_type(qname) {
+        Some(impl_type) => {
+            let mut segments: Vec<&str> = split_qualified_segments(impl_type).collect();
+            if !segments.contains(&impl_type) {
+                segments.push(impl_type);
+            }
+            segments.sort_unstable();
+            segments
+        }
+        None => {
+            let mut segments: Vec<&str> = split_qualified_segments(qname).collect();
+            segments.sort_unstable();
+            segments
+        }
+    };
+    FunctionNameFacts {
+        declares,
+        last_segment: last_segment(qname),
+    }
+}
+
+/// Reads the name facts of every record, from the record's own qualified
+/// name, so the slices borrow rather than copy.
+fn build_function_name_facts(functions: &[FunctionRecord]) -> Vec<FunctionNameFacts<'_>> {
+    functions
+        .iter()
+        .map(|function| name_facts_of(function.declaration.qualified_name.as_str()))
+        .collect()
+}
+
+/// Function ids as integer handles.
+///
+/// The resolution paths pass, clone, and compare candidate ids far more
+/// often than they read one's text, so the call-graph indexes carry handles
+/// and the strings stay here until an edge is written. A handle below
+/// `record_count` names the function record at that position; the trait
+/// indexes also mention ids whose records the build does not carry (an impl
+/// method of a dependency at the lighter tier), and those get handles of
+/// their own with no position, exactly the ids the string paths would have
+/// carried into an edge.
+#[derive(Debug, Default)]
+struct FunctionIdInterner<'a> {
+    strings: Vec<&'a str>,
+    lookup: HashMap<&'a str, u32>,
+    record_count: usize,
+}
+
+impl<'a> FunctionIdInterner<'a> {
+    /// Interns every record id in position order, then every id the trait
+    /// indexes mention that is not a record's, so a handle resolves without
+    /// a hash lookup.
+    fn build(
+        functions: &'a [FunctionRecord],
+        trait_index: &'a TraitImplIndex,
+    ) -> FunctionIdInterner<'a> {
+        let mut interner = FunctionIdInterner {
+            strings: Vec::with_capacity(functions.len()),
+            lookup: HashMap::with_capacity(functions.len()),
+            record_count: functions.len(),
+        };
+        for (position, function) in functions.iter().enumerate() {
+            let id = function.declaration.id.as_str();
+            interner.strings.push(id);
+            interner.lookup.insert(id, position as u32);
+        }
+        for ids in trait_index
+            .method_to_impls
+            .values()
+            .chain(trait_index.blanket_method_to_impls.values())
+            .chain(trait_index.trait_to_impl_methods.values())
+        {
+            for id in ids {
+                if let std::collections::hash_map::Entry::Vacant(slot) =
+                    interner.lookup.entry(id.as_str())
+                {
+                    let handle = interner.strings.len() as u32;
+                    slot.insert(handle);
+                    interner.strings.push(id);
+                }
+            }
+        }
+        interner
+    }
+
+    /// The function record a handle names, `None` for an id whose record the
+    /// build does not carry.
+    fn position(&self, handle: u32) -> Option<usize> {
+        ((handle as usize) < self.record_count).then_some(handle as usize)
+    }
+
+    /// The id text a handle stands for.
+    fn id(&self, handle: u32) -> &'a str {
+        self.strings[handle as usize]
+    }
+
+    /// The handle of an id the indexes are known to hold.
+    fn handle_of(&self, id: &str) -> u32 {
+        self.lookup[id]
+    }
+}
+
+/// [`build_local_function_index`] over id handles: the same three keys per
+/// record, the values the record's position, which is its id's handle.
+fn build_local_position_index(functions: &[FunctionRecord]) -> HashMap<String, Vec<u32>> {
+    let mut index: HashMap<String, Vec<u32>> = HashMap::new();
+    for (position, function) in functions.iter().enumerate() {
+        let qualified_name = function.declaration.qualified_name.as_str();
+        index
+            .entry(qualified_name.to_string())
+            .or_default()
+            .push(position as u32);
+        index
+            .entry(last_segment(qualified_name).to_string())
+            .or_default()
+            .push(position as u32);
+        if let Some(stripped) = qualified_name.strip_prefix(&(function.package_path.clone() + "::"))
+        {
+            index
+                .entry(stripped.to_string())
+                .or_default()
+                .push(position as u32);
         }
     }
     index
@@ -7950,9 +8165,12 @@ impl CallProvenance {
 }
 
 /// A single resolved target for a callsite, tagged with how it was resolved.
+///
+/// `target_id` is a [`FunctionIdInterner`] handle, not the id text: the text
+/// is read from the interner when an edge is written.
 #[derive(Debug, Clone)]
 struct ResolvedCall {
-    target_id: String,
+    target_id: u32,
     provenance: CallProvenance,
     /// Trait whose vtable dispatches the call, when the receiver is a trait
     /// object resolved through that trait's impls. `None` for every other
@@ -7960,16 +8178,39 @@ struct ResolvedCall {
     dispatch_trait: Option<String>,
 }
 
+/// The candidates of one method name: what the local index and the trait
+/// impls hold for it, and their union with the locals first and the traits
+/// the locals do not already carry.
+///
+/// Every call site of the same method name reads the same three lists, so
+/// they are built once per name and shared through `Arc` instead of being
+/// cloned apart per site.
+#[derive(Debug, Clone)]
+struct MethodCandidates {
+    local: std::sync::Arc<Vec<u32>>,
+    trait_candidates: std::sync::Arc<Vec<u32>>,
+    combined: std::sync::Arc<Vec<u32>>,
+}
+
 /// The workspace-wide indexes call resolution consults.
 ///
 /// Grouped because they are always used together and always live as long as one
 /// call-graph build: a resolver needs all of them to answer a single call site.
 struct ResolutionContext<'a> {
-    /// Function name (qualified, stripped, and bare) -> declaration ids.
-    local_index: &'a HashMap<String, Vec<String>>,
+    /// Function name (qualified, stripped, and bare) -> id handles.
+    local_index: &'a HashMap<String, Vec<u32>>,
     trait_index: &'a TraitImplIndex,
-    /// Declaration id -> qualified name.
-    id_to_qualified: &'a HashMap<&'a str, &'a str>,
+    /// Trait-impl method ids by method name, as handles.
+    trait_method_candidates: &'a HashMap<&'a str, std::sync::Arc<Vec<u32>>>,
+    /// Blanket-impl method ids by method name, as handles.
+    blanket_method_candidates: &'a HashMap<&'a str, std::sync::Arc<Vec<u32>>>,
+    /// Trait-impl method ids by dispatching trait, as handles: the set a
+    /// trait-object receiver's vtable can reach.
+    trait_dispatch_sets: &'a HashMap<&'a str, std::sync::Arc<HashSet<u32>>>,
+    /// The id handles' texts and record positions.
+    interner: &'a FunctionIdInterner<'a>,
+    /// Per-record name facts for the receiver-type filter.
+    name_facts: &'a [FunctionNameFacts<'a>],
     /// `"<TypeToken>::<field>" -> field's type token`.
     field_types: &'a HashMap<String, String>,
     /// `"<TypeToken>::<field>" -> field's element type token`, for container
@@ -7980,6 +8221,32 @@ struct ResolutionContext<'a> {
     /// missing method be read as "this call leaves the analyzed code" rather
     /// than "we do not know".
     local_types: &'a HashSet<String>,
+}
+
+/// The locals, the trait impls, and their union for one method name, read
+/// from the indexes once per name instead of once per call site.
+fn build_method_candidates(method: &str, context: &ResolutionContext<'_>) -> MethodCandidates {
+    let local: Vec<u32> = context.local_index.get(method).cloned().unwrap_or_default();
+    let trait_candidates: Vec<u32> = context
+        .trait_method_candidates
+        .get(method)
+        .map(|candidates| candidates.as_ref().clone())
+        .unwrap_or_default();
+    let mut combined = local.clone();
+    let mut seen: HashSet<&str> = local
+        .iter()
+        .map(|handle| context.interner.id(*handle))
+        .collect();
+    for handle in &trait_candidates {
+        if seen.insert(context.interner.id(*handle)) {
+            combined.push(*handle);
+        }
+    }
+    MethodCandidates {
+        local: std::sync::Arc::new(local),
+        trait_candidates: std::sync::Arc::new(trait_candidates),
+        combined: std::sync::Arc::new(combined),
+    }
 }
 
 /// Receiver-type-aware multi-candidate resolver (P1.1 + P1.2 + P1.3).
@@ -8016,15 +8283,20 @@ fn resolve_call_targets(
     dyn_bindings: &HashSet<String>,
     dyn_type_texts: &HashMap<String, String>,
     caller_generic_params: &[String],
+    method_candidates_cache: &mut HashMap<String, MethodCandidates>,
 ) -> Vec<ResolvedCall> {
     let ResolutionContext {
         local_index,
         trait_index,
-        id_to_qualified,
+        blanket_method_candidates,
+        trait_dispatch_sets,
+        interner,
+        name_facts,
         field_types,
         field_element_types,
         return_types,
         local_types,
+        ..
     } = context;
     let callee = call.callee_text.as_str();
     let normalized = normalize_local_path(callee, package_path);
@@ -8105,12 +8377,11 @@ fn resolve_call_targets(
 
     // 2. Method call with a receiver — apply receiver-type inference.
     if let Some(method) = call.method_name.as_deref() {
-        let local_candidates = local_index.get(method).cloned().unwrap_or_default();
-        let trait_candidates = trait_index
-            .method_to_impls
-            .get(method)
-            .cloned()
-            .unwrap_or_default();
+        let method_candidates = method_candidates_cache
+            .entry(method.to_string())
+            .or_insert_with(|| build_method_candidates(method, context));
+        let local_candidates = &method_candidates.local;
+        let trait_candidates = &method_candidates.trait_candidates;
 
         // Try to filter by the receiver's inferred type. This is the
         // highest-leverage disambiguator we have without typeck.
@@ -8126,18 +8397,12 @@ fn resolve_call_targets(
             )
         }) {
             let receiver_type = &receiver_type;
-            // Combine local + trait candidates so the filter sees every
-            // possible impl of this method, regardless of where it lives.
-            let mut combined: Vec<String> = local_candidates.clone();
-            let mut seen: HashSet<&str> = local_candidates.iter().map(String::as_str).collect();
-            for id in &trait_candidates {
-                if seen.insert(id.as_str()) {
-                    combined.push(id.clone());
-                }
-            }
+            // The union of the locals and the trait impls, built once per
+            // method name, is what the receiver-type filter sees.
+            let combined = &method_candidates.combined;
             if !combined.is_empty() {
                 let mut filtered =
-                    filter_by_receiver_type(&combined, id_to_qualified, receiver_type, method);
+                    filter_by_receiver_type(combined, interner, name_facts, receiver_type, method);
                 // A receiver bound to a trait object is also bound to the
                 // trait's written arguments (`&dyn ToJson<ApiCtx>`), and the
                 // impls of other contexts cannot be behind that vtable.
@@ -8148,8 +8413,8 @@ fn resolve_call_targets(
                     .and_then(|base| dyn_type_texts.get(base))
                     .and_then(|type_text| written_trait_object_type(type_text));
                 if let Some((_, written_args)) = &written_dyn {
-                    filtered.retain(|id| {
-                        let Some(facts) = trait_index.method_impls.get(id) else {
+                    filtered.retain(|handle| {
+                        let Some(facts) = trait_index.method_impls.get(interner.id(*handle)) else {
                             return true;
                         };
                         trait_arguments_compatible(
@@ -8185,7 +8450,7 @@ fn resolve_call_targets(
                 // the usual unresolved-call one.
                 return Vec::new();
             }
-            if let Some(trait_method_ids) = trait_index.trait_to_impl_methods.get(receiver_type) {
+            if let Some(trait_method_ids) = trait_dispatch_sets.get(receiver_type.as_str()) {
                 // The written trait-object type keeps its generic arguments
                 // (`&dyn ToJson<ApiCtx>`), and the impls of other contexts
                 // cannot be behind that vtable. An impl whose argument is
@@ -8197,16 +8462,15 @@ fn resolve_call_targets(
                     .and_then(|receiver| receiver.split('.').next())
                     .and_then(|base| dyn_type_texts.get(base))
                     .and_then(|type_text| written_trait_object_type(type_text));
-                let trait_method_ids: HashSet<&str> =
-                    trait_method_ids.iter().map(String::as_str).collect();
-                let dispatched: Vec<String> = trait_candidates
+                let dispatched: Vec<u32> = trait_candidates
                     .iter()
-                    .filter(|id| trait_method_ids.contains(id.as_str()))
-                    .filter(|id| {
+                    .filter(|handle| trait_method_ids.contains(handle))
+                    .filter(|handle| {
                         let Some((_, written_args)) = written_dyn.as_ref() else {
                             return true;
                         };
-                        let Some(facts) = trait_index.method_impls.get(*id) else {
+                        let Some(facts) = trait_index.method_impls.get(interner.id(**handle))
+                        else {
                             return true;
                         };
                         trait_arguments_compatible(
@@ -8216,7 +8480,7 @@ fn resolve_call_targets(
                             caller_generic_params,
                         )
                     })
-                    .cloned()
+                    .copied()
                     .collect();
                 match dispatched.len() {
                     0 => {}
@@ -8240,15 +8504,10 @@ fn resolve_call_targets(
             // A blanket impl (`impl<T> Ext for T`) applies to a receiver of any
             // type, so it stays a candidate whatever the receiver turned out to
             // be.
-            let blanket_candidates = trait_index
-                .blanket_method_to_impls
-                .get(method)
-                .cloned()
-                .unwrap_or_default();
-            if !blanket_candidates.is_empty() {
+            if let Some(blanket_candidates) = blanket_method_candidates.get(method) {
                 return match blanket_candidates.len() {
-                    1 => resolutions(&blanket_candidates, CallProvenance::TraitImpl),
-                    _ => resolutions(&blanket_candidates, CallProvenance::TraitOverapprox),
+                    1 => resolutions(blanket_candidates, CallProvenance::TraitImpl),
+                    _ => resolutions(blanket_candidates, CallProvenance::TraitOverapprox),
                 };
             }
 
@@ -8278,16 +8537,16 @@ fn resolve_call_targets(
         // over trait impls when both exist (a local method is more likely the
         // intended target than a trait-method-family explosion).
         if local_candidates.len() == 1 {
-            return resolutions(&local_candidates, CallProvenance::Static);
+            return resolutions(local_candidates, CallProvenance::Static);
         }
         if !local_candidates.is_empty() {
-            return resolutions(&local_candidates, CallProvenance::StaticOverapprox);
+            return resolutions(local_candidates, CallProvenance::StaticOverapprox);
         }
         if trait_candidates.len() == 1 {
-            return resolutions(&trait_candidates, CallProvenance::TraitImpl);
+            return resolutions(trait_candidates, CallProvenance::TraitImpl);
         }
         if !trait_candidates.is_empty() {
-            return resolutions(&trait_candidates, CallProvenance::TraitOverapprox);
+            return resolutions(trait_candidates, CallProvenance::TraitOverapprox);
         }
         return Vec::new();
     }
@@ -8311,9 +8570,10 @@ fn resolve_call_targets(
     if let Some(impl_ids) = trait_index.method_to_impls.get(callee)
         && !impl_ids.is_empty()
     {
-        return match impl_ids.len() {
-            1 => resolutions(impl_ids, CallProvenance::TraitImpl),
-            _ => resolutions(impl_ids, CallProvenance::TraitOverapprox),
+        let handles: Vec<u32> = impl_ids.iter().map(|id| interner.handle_of(id)).collect();
+        return match handles.len() {
+            1 => resolutions(&handles, CallProvenance::TraitImpl),
+            _ => resolutions(&handles, CallProvenance::TraitOverapprox),
         };
     }
 
@@ -8490,6 +8750,7 @@ fn resolve_qualified_trait_call(
     caller_generic_params: &[String],
 ) -> Vec<ResolvedCall> {
     let trait_index = context.trait_index;
+    let interner = context.interner;
     // A trait-form call (`ToJson::<RpcCtx>::to_json(&id)`) names no self
     // type; its first argument is the receiver, and its type narrows the
     // impls the call can reach.
@@ -8512,8 +8773,17 @@ fn resolve_qualified_trait_call(
         resolve_qualified_trait_target_ids(&written_parts, trait_index, caller_generic_params);
     match matched.len() {
         0 => Vec::new(),
-        1 => resolutions(&matched, CallProvenance::TraitImpl),
-        _ => resolutions(&matched, CallProvenance::TraitOverapprox),
+        1 => resolutions(
+            &[interner.handle_of(&matched[0])],
+            CallProvenance::TraitImpl,
+        ),
+        _ => resolutions(
+            &matched
+                .iter()
+                .map(|id| interner.handle_of(id))
+                .collect::<Vec<u32>>(),
+            CallProvenance::TraitOverapprox,
+        ),
     }
 }
 
@@ -8608,10 +8878,10 @@ const STD_CHAIN_METHODS: &[&str] = &[
     "unwrap_or_else",
 ];
 
-fn resolutions(ids: &[String], provenance: CallProvenance) -> Vec<ResolvedCall> {
+fn resolutions(ids: &[u32], provenance: CallProvenance) -> Vec<ResolvedCall> {
     ids.iter()
-        .map(|id| ResolvedCall {
-            target_id: id.clone(),
+        .map(|handle| ResolvedCall {
+            target_id: *handle,
             provenance,
             dispatch_trait: None,
         })
@@ -8622,13 +8892,13 @@ fn resolutions(ids: &[String], provenance: CallProvenance) -> Vec<ResolvedCall> 
 /// object's single vtable belongs to its principal trait, so the trait names
 /// exactly which set of impls the call can reach.
 fn resolutions_via_trait(
-    ids: &[String],
+    ids: &[u32],
     provenance: CallProvenance,
     dispatch_trait: &str,
 ) -> Vec<ResolvedCall> {
     ids.iter()
-        .map(|id| ResolvedCall {
-            target_id: id.clone(),
+        .map(|handle| ResolvedCall {
+            target_id: *handle,
             provenance,
             dispatch_trait: Some(dispatch_trait.to_string()),
         })
@@ -9083,73 +9353,42 @@ fn resolve_receiver_type(
 /// size: on wasm-tools 1.247.0 that single scan was 24 of the 28 seconds a full
 /// run took.
 fn filter_by_receiver_type(
-    candidates: &[String],
-    id_to_qualified: &HashMap<&str, &str>,
+    candidates: &[u32],
+    interner: &FunctionIdInterner<'_>,
+    name_facts: &[FunctionNameFacts<'_>],
     receiver_type: &str,
     method: &str,
-) -> Vec<String> {
+) -> Vec<u32> {
     let target_token = last_segment(receiver_type);
-    let mut kept: Vec<String> = Vec::new();
-    for id in candidates {
-        if let Some(qname) = id_to_qualified.get(id.as_str())
-            && type_qualified_name_matches(qname, target_token, method)
+    let mut kept: Vec<u32> = Vec::new();
+    for handle in candidates {
+        if let Some(position) = interner.position(*handle)
+            && name_facts[position].declares_and_ends_with(target_token, method)
         {
-            kept.push(id.clone());
+            kept.push(*handle);
         }
     }
     kept
 }
 
-fn type_qualified_name_matches(qname: &str, type_token: &str, method: &str) -> bool {
-    // Compare generic-free segments: a method on a generic type is qualified
-    // `Expander<'a>::expand`, and matching that raw against the receiver token
-    // `Expander` failed, which sent every `self.method()` on a generic type
-    // back to over-approximation.
-    //
-    // A trait impl's method carries the implementing type inside its
-    // `<impl Trait for Type>` part (`app::<impl ToJson<ApiCtx> for
-    // fakeuuid::Uuid>::to_json`), where the segments are the crate path and
-    // the method, so the declared type is read out of the impl part.
-    let declares = match qualified_impl_self_type(qname) {
-        Some(impl_type) => split_qualified_segments(impl_type)
-            .chain(std::iter::once(impl_type))
-            .any(|segment| segment == type_token),
-        None => split_qualified_segments(qname).any(|segment| segment == type_token),
-    };
-    if !declares {
-        return false;
-    }
-    last_segment(qname) == method
-}
-
 #[cfg(test)]
 mod impl_form_matching_tests {
-    use super::type_qualified_name_matches;
+    use super::name_facts_of;
 
     #[test]
     fn an_impl_form_name_declares_the_type_it_implements_for() {
         let name = "context_impl_app::<impl ToJson<ApiCtx> for fakeuuid::Uuid>::to_json";
-        assert!(type_qualified_name_matches(name, "Uuid", "to_json"));
-        assert!(type_qualified_name_matches(
-            name,
-            "fakeuuid::Uuid",
-            "to_json"
-        ));
-        assert!(!type_qualified_name_matches(name, "Product", "to_json"));
-        assert!(!type_qualified_name_matches(
-            "context_impl_app::<impl ToJson<ApiCtx> for fakeuuid::Uuid>::to_json",
-            "Uuid",
-            "pair"
-        ));
+        let facts = name_facts_of(name);
+        assert!(facts.declares_and_ends_with("Uuid", "to_json"));
+        assert!(facts.declares_and_ends_with("fakeuuid::Uuid", "to_json"));
+        assert!(!facts.declares_and_ends_with("Product", "to_json"));
+        assert!(!facts.declares_and_ends_with("Uuid", "pair"));
     }
 
     #[test]
     fn a_plain_qualified_name_matches_by_segment_as_before() {
-        assert!(type_qualified_name_matches(
-            "context_impl_app::MyUuid::to_json",
-            "MyUuid",
-            "to_json"
-        ));
+        let facts = name_facts_of("context_impl_app::MyUuid::to_json");
+        assert!(facts.declares_and_ends_with("MyUuid", "to_json"));
     }
 }
 
