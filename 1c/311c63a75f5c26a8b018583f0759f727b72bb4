@@ -1,0 +1,19 @@
+thirdparty/rusi/docs/ANALYSIS_ARCHITECTURE.md
+  s_44e6270843dd7a::t_68000ba3ecbe45 94-100
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "1c311c63a75f5c26a8b018583f0759f727b72bb4",
+  "prompts": {},
+  "sessions": {
+    "s_44e6270843dd7a": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_96486ef3-758c-4c44-9c6c-e586a1e2d571",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
