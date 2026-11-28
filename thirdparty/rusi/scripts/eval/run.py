@@ -13,6 +13,10 @@ Designed to run on a clean checkout with no arguments:
 
 Modes:
     --check-determinism   (default on) run each project twice, compare bytes
+    --thread-determinism  (default on, stable backend) also compare a
+                          RUSI_THREADS=1 run against the run at the machine's
+                          full parallelism, and for the small tier a `--deps`
+                          run at both thread counts
     --update-golden       bless the new digest (use only after review)
     --metrics PATH        write a JSON metrics summary
     --junit PATH          write a tiny pass/fail summary
@@ -196,6 +200,7 @@ def invoke_rusi(
     timeout: int | None,
     extra_args: Iterable[str] = (),
     stats_path: Path | None = None,
+    env_extra: dict[str, str] | None = None,
 ) -> dict:
     command = [
         str(rusi_bin),
@@ -214,7 +219,11 @@ def invoke_rusi(
     command.extend(extra_args)
     if stats_path is not None:
         command.extend(["--stats-json", str(stats_path)])
-    result, elapsed, peak_rss = run_with_timeout(command, cwd=REPO_ROOT, timeout=timeout)
+    env = None
+    if env_extra:
+        env = dict(os.environ)
+        env.update(env_extra)
+    result, elapsed, peak_rss = run_with_timeout(command, cwd=REPO_ROOT, timeout=timeout, env=env)
     status = "ok"
     error_text: str | None = None
     if isinstance(result, subprocess.TimeoutExpired):
@@ -490,6 +499,7 @@ def run_one(
     backends: list[str],
     timeout: int | None,
     check_determinism: bool,
+    thread_determinism: bool,
     update_golden: bool,
     runs_root: Path,
 ) -> dict:
@@ -511,6 +521,9 @@ def run_one(
         run_dir.mkdir(parents=True, exist_ok=True)
         out1 = run_dir / "run1.json"
         out2 = run_dir / "run2.json"
+        out3 = run_dir / "run-single-thread.json"
+        out4 = run_dir / "run-deps.json"
+        out5 = run_dir / "run-deps-single-thread.json"
         stats1 = run_dir / "run1.stats.json"
         stats2 = run_dir / "run2.stats.json"
 
@@ -557,6 +570,66 @@ def run_one(
                     "stats_match": stats_match,
                     "run2_seconds": second.get("seconds"),
                 }
+                if thread_determinism and backend == "stable":
+                    # Two runs at the same settings share the scheduling order,
+                    # so this check also compares a run on one thread against
+                    # the default-parallelism run above, where the worker
+                    # interleaving differs.
+                    single = invoke_rusi(
+                        rusi_bin,
+                        target,
+                        backend,
+                        out3,
+                        timeout=timeout,
+                        env_extra={"RUSI_THREADS": "1"},
+                    )
+                    single_match = (
+                        single["status"] == "ok"
+                        and out3.exists()
+                        and out1.read_bytes() == out3.read_bytes()
+                    )
+                    determinism["single_thread_match"] = single_match
+                    if not single_match:
+                        determinism["single_thread_run"] = single
+                    if entry["tier"] == "small":
+                        # The dependency modes read a much larger share of the
+                        # corpus through the expansion budget and the data-flow
+                        # pass, so at least the small tier checks them: a
+                        # `--deps` run at full parallelism against the same
+                        # run on one thread.
+                        deps_parallel = invoke_rusi(
+                            rusi_bin,
+                            target,
+                            backend,
+                            out4,
+                            timeout=timeout,
+                            extra_args=["--deps"],
+                        )
+                        deps_single = invoke_rusi(
+                            rusi_bin,
+                            target,
+                            backend,
+                            out5,
+                            timeout=timeout,
+                            extra_args=["--deps"],
+                            env_extra={"RUSI_THREADS": "1"},
+                        )
+                        deps_match = (
+                            deps_parallel["status"] == "ok"
+                            and deps_single["status"] == "ok"
+                            and out4.exists()
+                            and out4.read_bytes() == out5.read_bytes()
+                        )
+                        determinism["deps_single_thread_match"] = deps_match
+                        determinism["deps_seconds"] = {
+                            "parallel": deps_parallel.get("seconds"),
+                            "single_thread": deps_single.get("seconds"),
+                        }
+                        if not deps_match:
+                            determinism["deps_run"] = deps_parallel
+                    for key in ("single_thread_match", "deps_single_thread_match"):
+                        if determinism.get(key) is False:
+                            determinism["status"] = "diff"
         else:
             determinism = {"status": "skipped"}
 
@@ -607,6 +680,13 @@ def render_table(summaries: list[dict]) -> str:
             pr_str = "-"
             if pr.get("precision") is not None:
                 pr_str = f"{pr['precision']}/{pr['recall']}/{pr['f1']}"
+            # One cell for every determinism comparison: the same-settings
+            # rerun, the single-thread run against full parallelism, and the
+            # small tier's `--deps` pair.
+            det_cells = [det.get("status", "-")]
+            for key in ("single_thread_match", "deps_single_thread_match"):
+                if key in det:
+                    det_cells.append("ok" if det[key] else "DIFF")
             rows.append(
                 [
                     summary["slug"],
@@ -618,7 +698,7 @@ def render_table(summaries: list[dict]) -> str:
                     str(counts.get("df_summaries", "-")),
                     f"{run1.get('seconds', 0)}",
                     rss_str,
-                    det.get("status", "-"),
+                    "/".join(det_cells),
                     golden.get("status", "-"),
                     pr_str,
                 ]
@@ -752,6 +832,15 @@ def main() -> int:
         help="Skip the second run used to check byte-identical output.",
     )
     parser.add_argument(
+        "--no-thread-determinism",
+        action="store_true",
+        help=(
+            "Skip the extended determinism runs: a RUSI_THREADS=1 run against "
+            "the default-parallelism run, and for the small tier a `--deps` "
+            "run at both thread counts. Stable backend only."
+        ),
+    )
+    parser.add_argument(
         "--update-golden",
         action="store_true",
         help="Bless the current digest as the new golden (record why in the Progress log).",
@@ -835,6 +924,7 @@ def main() -> int:
             backends=backends,
             timeout=args.timeout,
             check_determinism=not args.no_determinism,
+            thread_determinism=not args.no_thread_determinism,
             update_golden=args.update_golden,
             runs_root=runs_root,
         )

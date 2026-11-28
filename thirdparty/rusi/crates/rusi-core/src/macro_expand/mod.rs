@@ -67,11 +67,20 @@ pub(crate) const MAX_EXPANSION_TOKENS: usize = 50_000;
 /// The whole small corpus and the fixture together spend under 4,000 tokens
 /// and 700 steps, a counting muncher at the deepest allowed recursion limit
 /// about 85,000, so the file ceiling leaves real code a factor of several
-/// hundred over the corpus and room for several of those, and the analysis
-/// ceiling stops the worst case at about four seconds of work whatever the
-/// number of copies or files. Which invocations the analysis-wide ceiling cuts
-/// off depends on the order the files are analysed in, which only matters once
-/// it is reached.
+/// hundred over the corpus and room for several of those.
+///
+/// The file ceiling is enforced while each file is analysed. The analysis
+/// ceiling is applied in path order: the per-file pass claims files in path
+/// order and records how much work each one needs, and the first file whose
+/// running total crosses [`MAX_ANALYSIS_EXPANSION_WORK`] marks the cut. That
+/// file and everything after it in path order is analysed again in a repair
+/// pass, the cut file keeping whatever work is left before the line and the
+/// files after it expanding nothing, so which invocations lose their
+/// expansions is a function of the input alone rather than of the order the
+/// workers charge in. A run that stays under the ceiling expands exactly what
+/// it would without one. Workers stop claiming files once the ledger passes
+/// the ceiling, so the work spent past it is at most one file ceiling per
+/// worker, the files in flight at that moment.
 pub(crate) const MAX_FILE_EXPANSION_WORK: usize = 500_000;
 pub(crate) const MAX_ANALYSIS_EXPANSION_WORK: usize = 2_000_000;
 
@@ -261,10 +270,29 @@ mod tests;
 
 /// Expansion work spent so far in one analysis, shared by every thread that
 /// analyses a file.
-#[derive(Debug, Default)]
+///
+/// The per-file pass charges this ledger in whatever order the workers finish,
+/// so while it measures it carries no ceiling and only tells the workers when
+/// to stop claiming files: which invocations keep their expansions is decided
+/// afterwards from the per-file work in path order (see
+/// `MAX_ANALYSIS_EXPANSION_WORK`). The repair pass builds ledgers that carry
+/// the ceiling again, one pre-charged with the work the files before the cut
+/// spent and one closed outright for the files after it.
+#[derive(Debug)]
 pub(crate) struct WorkLedger {
     spent: std::sync::atomic::AtomicUsize,
     reported: std::sync::atomic::AtomicBool,
+    ceiling: usize,
+}
+
+impl Default for WorkLedger {
+    fn default() -> Self {
+        Self {
+            spent: std::sync::atomic::AtomicUsize::new(0),
+            reported: std::sync::atomic::AtomicBool::new(false),
+            ceiling: MAX_ANALYSIS_EXPANSION_WORK,
+        }
+    }
 }
 
 impl Clone for WorkLedger {
@@ -273,13 +301,52 @@ impl Clone for WorkLedger {
         Self {
             spent: std::sync::atomic::AtomicUsize::new(self.spent.load(Relaxed)),
             reported: std::sync::atomic::AtomicBool::new(self.reported.load(Relaxed)),
+            ceiling: self.ceiling,
         }
     }
 }
 
 impl WorkLedger {
+    /// The measurement ledger: every charge succeeds, so each file expands up
+    /// to its own file ceiling and records the work it truly needs. The
+    /// ceiling is never crossed during measurement, so nothing is reported.
+    pub(crate) fn unbounded() -> Self {
+        Self {
+            spent: std::sync::atomic::AtomicUsize::new(0),
+            reported: std::sync::atomic::AtomicBool::new(true),
+            ceiling: usize::MAX,
+        }
+    }
+
+    /// A ledger for the file at the deterministic cut: `spent` is the work the
+    /// files before it spent, so this file's expansions stop exactly where the
+    /// analysis ceiling is crossed, and `report_once` hands the crossing to
+    /// the invocation that crosses it.
+    pub(crate) fn pre_charged(spent: usize) -> Self {
+        Self {
+            spent: std::sync::atomic::AtomicUsize::new(spent),
+            reported: std::sync::atomic::AtomicBool::new(false),
+            ceiling: MAX_ANALYSIS_EXPANSION_WORK,
+        }
+    }
+
+    /// A ledger for the files after the cut: nothing may expand, nothing is
+    /// reported.
+    pub(crate) fn closed() -> Self {
+        Self {
+            spent: std::sync::atomic::AtomicUsize::new(MAX_ANALYSIS_EXPANSION_WORK + 1),
+            reported: std::sync::atomic::AtomicBool::new(true),
+            ceiling: MAX_ANALYSIS_EXPANSION_WORK,
+        }
+    }
+
+    /// The work charged so far, including that of expansions still running.
+    pub(crate) fn spent(&self) -> usize {
+        self.spent.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
     pub(crate) fn exhausted(&self) -> bool {
-        self.spent.load(std::sync::atomic::Ordering::Relaxed) > MAX_ANALYSIS_EXPANSION_WORK
+        self.spent.load(std::sync::atomic::Ordering::Relaxed) > self.ceiling
     }
 
     /// Adds `work` and returns whether the analysis is still within its ceiling.
@@ -287,7 +354,7 @@ impl WorkLedger {
         let before = self
             .spent
             .fetch_add(work, std::sync::atomic::Ordering::Relaxed);
-        before.saturating_add(work) <= MAX_ANALYSIS_EXPANSION_WORK
+        before.saturating_add(work) <= self.ceiling
     }
 
     /// True for the first caller only, so the ceiling is reported once.
