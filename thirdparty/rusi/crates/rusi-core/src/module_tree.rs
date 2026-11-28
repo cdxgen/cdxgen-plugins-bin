@@ -123,22 +123,7 @@ pub(crate) fn crate_roots(
     roots
 }
 
-/// Walks every crate root of the package, then sweeps for orphan files.
-///
-/// Each file is read and parsed once; the parse feeds both the `mod` walk
-/// and the macro pre-pass, and the text is kept for the analysis pass.
-/// `analysis_root` is the directory the report's file paths are relative to,
-/// and `edition_2021` is the package's edition as the macro pre-pass reads
-/// patterns.
-///
-/// The per-file half of the walk (read, parse, extract, resolve children)
-/// runs on [`DiscoveryPool`] workers, so one huge crate does not serialize
-/// the front of the pipeline behind it. The traversal decisions stay on the
-/// caller's thread, and the results are replayed in the order a sequential
-/// walk would have produced them, so the notes and the returned tree are
-/// exactly what that walk recorded, whatever order the workers finished in.
-/// Test entry point with its own small pool; the pipeline uses
-/// [`discover_with_pool`] so packages share one pool.
+/// [`discover_with_pool`] on a pool of its own, for tests.
 #[cfg(test)]
 pub(crate) fn discover(
     package_ctx: &PackageContext,
@@ -162,8 +147,21 @@ pub(crate) fn discover(
     tree
 }
 
-/// [`discover`] on a caller-provided pool, so a planning phase can share one
-/// pool across every package it walks.
+/// Walks every crate root of the package, then sweeps for orphan files.
+///
+/// Each file is read and parsed once; the parse feeds both the `mod` walk
+/// and the macro pre-pass, and the text is kept for the analysis pass.
+/// `analysis_root` is the directory the report's file paths are relative to,
+/// and `edition_2021` is the package's edition as the macro pre-pass reads
+/// patterns.
+///
+/// The per-file half of the walk (read, parse, extract, resolve children)
+/// runs on `pool`, which a planning phase shares across every package it
+/// walks, so one huge crate does not serialize the front of the pipeline
+/// behind it. Which file belongs to which root and module path, and the
+/// notes, are decided afterwards on the caller's thread in depth-first
+/// order (see [`walk_root`]), so the returned tree and notes do not depend
+/// on the order the workers finished in.
 pub(crate) fn discover_with_pool(
     package_ctx: &PackageContext,
     roots: &[CrateRoot],
