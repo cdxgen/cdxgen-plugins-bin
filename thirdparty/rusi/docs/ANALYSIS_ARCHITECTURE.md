@@ -275,11 +275,21 @@ depth of 128 expansions (rustc's default, raised to the crate's
 hand-written invocation produces (nested and sibling expansions together), 16,384
 iterations of one repetition, and a step budget of 250,000 for the matcher. Two
 further ceilings cap the work of many invocations together, each reported once:
-500,000 per source file and 2,000,000 per analysis (tokens produced plus a tenth of
-the matcher steps), so copies of one hostile macro cannot add up. Source
-that nests groups more than 64 deep is not read. No input is meant to make the module
-panic: it avoids `unwrap`, `expect`, direct identifier construction and unchecked
-indexing on data that comes from the source.
+500,000 per source file, enforced while the file is analysed, and 2,000,000 per
+analysis (tokens produced plus a tenth of the matcher steps), so copies of one
+hostile macro cannot add up. The per-file pass measures each file's expansion work
+under an unbounded ledger, file by file in path order, and stops measuring at the
+first file whose running total crosses the analysis ceiling; a repair pass then
+re-analyses that file with whatever work is left before the line and the files
+after it in path order without expansion. Which invocations keep their expansions
+is therefore a function of the input alone, not of the order the workers charge
+the ledger in. A run whose measurements stay under the ceiling keeps every
+expansion, so real code pays nothing for this; the worst case is the analysis
+ceiling plus one measured round of overshoot (one file ceiling per worker), plus
+the repair pass parsing and walking the files past the cut without expanding them.
+Source that nests groups more than 64 deep is not read. No input is meant to make
+the module panic: it avoids `unwrap`, `expect`, direct identifier construction and
+unchecked indexing on data that comes from the source.
 
 Where it differs from rustc, rusi accepts more and never invents flows:
 

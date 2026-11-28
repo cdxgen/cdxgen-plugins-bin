@@ -582,6 +582,14 @@ impl MacroScopeTable {
         &self.ledger
     }
 
+    /// Replaces the ledger, for the tables the repair pass builds from a
+    /// clone of this one: the measurement pass analyses with an unbounded
+    /// ledger, the file at the deterministic cut with one pre-charged to the
+    /// work before it, and the files after the cut with a closed one.
+    pub(crate) fn replace_ledger(&mut self, ledger: super::WorkLedger) {
+        self.ledger = ledger;
+    }
+
     /// How many levels of nested expansion the crate allows. rustc stops at
     /// 128 unless the crate raises `#![recursion_limit]`; a larger declared
     /// value is honoured up to `MAX_RECURSION_LIMIT`, and a smaller one is

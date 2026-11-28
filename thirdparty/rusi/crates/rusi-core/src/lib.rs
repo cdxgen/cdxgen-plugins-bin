@@ -429,9 +429,18 @@ impl<T> StateSize for BTreeSet<T> {
 /// its reads and its environment size.
 #[derive(Debug, Clone)]
 struct FunctionEnv<V> {
-    values: HashMap<String, V>,
+    /// `BTreeMap` rather than `HashMap`: the loop-head joins visit every body
+    /// entry, and a key the head does not hold yet is inserted in the order
+    /// the body hands it over. That order decides where the key lands in the
+    /// base's field-key list, a later whole-variable read joins the field
+    /// entries in list order, and the witness bound keeps the first witness
+    /// of each origin, so a HashMap here let the surviving witness, and with
+    /// it the emitted edges, change from run to run. Sorted iteration makes
+    /// the insertion order, and everything built on it, a function of the
+    /// states alone.
+    values: BTreeMap<String, V>,
     /// Base name -> the dotted keys recorded under it, in insertion order.
-    field_keys: HashMap<String, Vec<String>>,
+    field_keys: BTreeMap<String, Vec<String>>,
     /// Total entries `field_keys` holds, so the stats counter can price a
     /// whole-state clone by the entries it copies.
     field_key_count: usize,
@@ -447,8 +456,8 @@ struct FunctionEnv<V> {
 impl<V> FunctionEnv<V> {
     fn new() -> Self {
         Self {
-            values: HashMap::new(),
-            field_keys: HashMap::new(),
+            values: BTreeMap::new(),
+            field_keys: BTreeMap::new(),
             field_key_count: 0,
             dirty_keys: Vec::new(),
         }
@@ -1161,6 +1170,10 @@ struct AnalyzedFile {
     /// Whether any expansion in the file renamed a binding, so the report
     /// holds renaming suffixes that must be removed before it is returned.
     hygiene_renamed: bool,
+    /// Expansion work the file spent, tokens produced plus a tenth of the
+    /// matcher steps, capped by the per-file ceiling. The analysis-wide
+    /// ceiling is applied after the pass, in path order, from these sums.
+    macro_expansion_work: usize,
     static_initializers: Vec<StaticInitializer>,
 }
 
@@ -1365,45 +1378,25 @@ fn analyze_on_this_thread(
         format_args!("pass=stable-file-analysis files={}", analysis_tasks.len()),
     );
     // The pre-pass items were collected during discovery, so what is left is
-    // to build the scope table from them. This consumes the plans.
-    let macro_table = std::sync::Arc::new(stats::time_phase("macro_prepass", || {
+    // to build the scope table from them. This consumes the plans. The
+    // per-file pass analyses with an unbounded ledger, so each file expands up
+    // to its own file ceiling and records the work it needs; the analysis-wide
+    // ceiling is applied from those sums in path order, and measuring stops at
+    // the file that crosses it, because nothing past that file can keep an
+    // expansion whatever its own work turns out to be.
+    let mut macro_scope_table = stats::time_phase("macro_prepass", || {
         build_macro_table(&metadata, options.debug, package_plans)
-    }));
+    });
+    macro_scope_table.replace_ledger(macro_expand::WorkLedger::unbounded());
+    let macro_table = std::sync::Arc::new(macro_scope_table);
     let mut analyzed_files = stats::time_phase("parse", || {
-        let macro_table = macro_table.clone();
-        let mut parse_diagnostics = parallel_map_collect(&analysis_tasks, |task| {
-            match analyze_file(task, &analysis_root, &file_texts, &macro_table) {
-                Ok(file) => {
-                    debug_log(
-                        options.debug,
-                        format_args!(
-                            "pass=stable-file-analysis file={}",
-                            relative_display_path(&analysis_root, &task.path)
-                        ),
-                    );
-                    Ok(file)
-                }
-                // Boxed so the per-file result stays small: a parse failure is
-                // the rare path, while every successfully analyzed file would
-                // otherwise carry the unused Diagnostic's footprint.
-                Err(error) => Err(Box::new(Diagnostic {
-                    kind: "parse".to_string(),
-                    message: error.to_string(),
-                    package_path: Some(task.package_ctx.crate_name.clone()),
-                    file_path: Some(relative_display_path(&analysis_root, &task.path)),
-                    position: None,
-                })),
-            }
-        });
-        let mut parsed = Vec::new();
-        for result in parse_diagnostics.drain(..) {
-            match result {
-                Ok(file) => parsed.push(file),
-                Err(diagnostic) => diagnostics.push(*diagnostic),
-            }
-        }
-        parsed.sort_by(|left, right| left.file.path.cmp(&right.file.path));
-        parsed
+        analyze_files_in_path_order(
+            &analysis_tasks,
+            &analysis_root,
+            &file_texts,
+            &macro_table,
+            &mut diagnostics,
+        )
     });
     // Macro resolution was the last reader of the scope table. Its
     // definitions cover every analyzed crate, so letting it go here keeps
@@ -2600,6 +2593,135 @@ fn build_macro_table(
     macro_expand::MacroScopeTable::build(entries, dependency_crates)
 }
 
+/// Runs the per-file analysis pass in path order and applies the
+/// analysis-wide expansion ceiling deterministically.
+///
+/// Files are measured in rounds of one file per worker, each round under an
+/// unbounded ledger, so a file's recorded expansion work is what its own file
+/// ceiling allows. Walking the measurements in path order, everything from
+/// the file that pushes the running total past
+/// [`macro_expand::MAX_ANALYSIS_EXPANSION_WORK`] on is analysed again in a
+/// repair pass: the cut file with whatever work is left before the line, its
+/// ledger reporting the crossing once at the invocation that crosses it, and
+/// the files after it without expansion. Enforcing the ceiling while the
+/// workers charge it in completion order instead let the same binary produce
+/// different reports from run to run, because the file that lost its
+/// expansions was whichever worker got there first.
+///
+/// Measuring stops at the round the cut falls in. Files past it can never
+/// keep an expansion whatever their own work turns out to be, so measuring
+/// them would only produce a result the repair discards, and a run whose
+/// measurements stay
+/// under the ceiling expands exactly what a run without any analysis-wide
+/// ceiling would.
+fn analyze_files_in_path_order(
+    analysis_tasks: &[FileAnalysisTask],
+    analysis_root: &Path,
+    file_texts: &FileTexts,
+    macro_table: &std::sync::Arc<macro_expand::MacroScopeTable>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Vec<AnalyzedFile> {
+    let mut tasks: Vec<(String, &FileAnalysisTask)> = analysis_tasks
+        .iter()
+        .map(|task| (relative_display_path(analysis_root, &task.path), task))
+        .collect();
+    tasks.sort_by(|left, right| left.0.cmp(&right.0));
+    let mut slots: Vec<Option<AnalyzedFile>> = (0..tasks.len()).map(|_| None).collect();
+    let mut errors: Vec<Option<Box<Diagnostic>>> = (0..tasks.len()).map(|_| None).collect();
+    // One file per worker per round, so the measured work past the ceiling is
+    // at most one file ceiling per worker.
+    let round_size = analysis_worker_count().max(1);
+    let mut cumulative = 0usize;
+    let mut cut = None;
+    let mut round_start = 0usize;
+    while round_start < tasks.len() {
+        let round_end = (round_start + round_size).min(tasks.len());
+        let round: Vec<&(String, &FileAnalysisTask)> =
+            tasks[round_start..round_end].iter().collect();
+        let results = parallel_map_collect(&round, |(_, task)| {
+            analyze_file(task, analysis_root, file_texts, macro_table).map_err(|error| {
+                // Boxed so the per-file result stays small: a parse failure is
+                // the rare path, while every successfully analyzed file would
+                // otherwise carry the unused Diagnostic's footprint.
+                Box::new(Diagnostic {
+                    kind: "parse".to_string(),
+                    message: error.to_string(),
+                    package_path: Some(task.package_ctx.crate_name.clone()),
+                    file_path: Some(relative_display_path(analysis_root, &task.path)),
+                    position: None,
+                })
+            })
+        });
+        for (offset, result) in results.into_iter().enumerate() {
+            match result {
+                Ok(file) => slots[round_start + offset] = Some(file),
+                Err(diagnostic) => errors[round_start + offset] = Some(diagnostic),
+            }
+        }
+        for (offset, slot) in slots[round_start..round_end].iter().enumerate() {
+            let work = slot
+                .as_ref()
+                .map(|file| file.macro_expansion_work)
+                .unwrap_or(0);
+            if cumulative + work > macro_expand::MAX_ANALYSIS_EXPANSION_WORK {
+                cut = Some((round_start + offset, cumulative));
+                break;
+            }
+            cumulative += work;
+        }
+        round_start = round_end;
+        if cut.is_some() {
+            break;
+        }
+    }
+    if let Some((cut_index, before_cut)) = cut {
+        let cut_path = tasks[cut_index].0.clone();
+        let mut cut_table = (**macro_table).clone();
+        cut_table.replace_ledger(macro_expand::WorkLedger::pre_charged(before_cut));
+        let cut_table = std::sync::Arc::new(cut_table);
+        let mut closed_table = (**macro_table).clone();
+        closed_table.replace_ledger(macro_expand::WorkLedger::closed());
+        let closed_table = std::sync::Arc::new(closed_table);
+        // The texts discovery kept were taken by the measurement pass where
+        // it ran, so the repair re-reads the files it re-analyses.
+        let repaired = stats::time_phase("expansion_repair", || {
+            parallel_map_collect(&tasks[cut_index..], |(path, task)| {
+                let table = if *path == cut_path {
+                    &cut_table
+                } else {
+                    &closed_table
+                };
+                analyze_file(task, analysis_root, file_texts, table).map_err(|error| {
+                    Box::new(Diagnostic {
+                        kind: "parse".to_string(),
+                        message: error.to_string(),
+                        package_path: Some(task.package_ctx.crate_name.clone()),
+                        file_path: Some(path.clone()),
+                        position: None,
+                    })
+                })
+            })
+        });
+        for (offset, result) in repaired.into_iter().enumerate() {
+            let index = cut_index + offset;
+            match result {
+                Ok(file) => slots[index] = Some(file),
+                Err(diagnostic) => errors[index] = Some(diagnostic),
+            }
+        }
+    }
+    for index in 0..tasks.len() {
+        if slots[index].is_none()
+            && let Some(diagnostic) = errors[index].take()
+        {
+            diagnostics.push(*diagnostic);
+        }
+    }
+    let mut parsed: Vec<AnalyzedFile> = slots.into_iter().flatten().collect();
+    parsed.sort_by(|left, right| left.file.path.cmp(&right.file.path));
+    parsed
+}
+
 /// Analyzes one file from the text discovery read, parsing it here so the
 /// file is parsed at most twice: once during discovery, once below.
 fn analyze_file(
@@ -2686,6 +2808,7 @@ fn analyze_file(
         unanalyzed_macros: collector.unanalyzed_macros,
         macro_diagnostics: collector.macro_diagnostics,
         hygiene_renamed: collector.hygiene_renamed,
+        macro_expansion_work: collector.file_work,
         static_initializers: collector.static_initializers,
     })
 }
@@ -24437,5 +24560,291 @@ pub fn run() {
             summaries[top_index].param_to_sink.get("process-exec"),
             Some(&BTreeSet::from([0]))
         );
+    }
+}
+
+#[cfg(test)]
+mod determinism_tests {
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use rusi_schema::Diagnostic;
+
+    use super::{
+        AnalyzeOptionsInput, ConcreteTaint, FunctionEnv, TaintPath, analyze, join_concrete_env,
+    };
+
+    fn temp_dir(prefix: &str) -> PathBuf {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock is valid")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("rusi-{prefix}-{timestamp}"));
+        fs::create_dir_all(&path).expect("create temp dir");
+        path
+    }
+
+    fn fixture_crate(name: &str, source: &str) -> PathBuf {
+        let root = temp_dir(name);
+        fs::write(
+            root.join("Cargo.toml"),
+            format!(
+                "[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[workspace]\n"
+            ),
+        )
+        .expect("write Cargo.toml");
+        fs::create_dir_all(root.join("src")).expect("create src");
+        fs::write(root.join("src").join("lib.rs"), source).expect("write lib.rs");
+        root
+    }
+
+    #[test]
+    fn function_env_iterates_in_a_deterministic_order() {
+        // The loop-head joins visit every entry, and a key the head does not
+        // hold yet is inserted in the order the body hands it over. That order
+        // decides where a field key lands in its base's list, and a whole
+        // variable read joins the field entries in list order, so an
+        // environment whose iteration order changed from process to process
+        // let the witness a read kept, and with it the emitted edges, change
+        // from run to run.
+        let mut env: FunctionEnv<ConcreteTaint> = FunctionEnv::new();
+        for name in [
+            "delta", "alpha", "sigma", "beta", "kappa", "omega", "rho", "mu",
+        ] {
+            env.insert(
+                name.to_string(),
+                ConcreteTaint {
+                    paths: vec![TaintPath {
+                        origin_key: name.to_string(),
+                        category: String::new(),
+                        steps: Vec::new(),
+                    }],
+                },
+            );
+        }
+        let keys: Vec<&str> = env.iter().map(|(key, _)| key.as_str()).collect();
+        let mut sorted = keys.clone();
+        sorted.sort_unstable();
+        assert_eq!(keys, sorted);
+    }
+
+    #[test]
+    fn joined_field_key_order_does_not_depend_on_body_insertion_order() {
+        fn body(order: &[&str]) -> FunctionEnv<ConcreteTaint> {
+            let mut env = FunctionEnv::new();
+            for key in order {
+                env.insert(
+                    key.to_string(),
+                    ConcreteTaint {
+                        paths: vec![TaintPath {
+                            origin_key: key.to_string(),
+                            category: String::new(),
+                            steps: Vec::new(),
+                        }],
+                    },
+                );
+            }
+            env
+        }
+        let forward = body(&["s.a", "s.b", "s.c", "s.d", "s.e", "s.f", "s.g", "s.h"]);
+        let backward = body(&["s.h", "s.g", "s.f", "s.e", "s.d", "s.c", "s.b", "s.a"]);
+        let mut head_forward = FunctionEnv::new();
+        let mut head_backward = FunctionEnv::new();
+        join_concrete_env(&mut head_forward, &forward);
+        join_concrete_env(&mut head_backward, &backward);
+        let forward_keys = head_forward
+            .field_keys
+            .get("s")
+            .cloned()
+            .unwrap_or_default();
+        let backward_keys = head_backward
+            .field_keys
+            .get("s")
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(forward_keys, backward_keys);
+        let forward_read: Vec<String> = head_forward
+            .read_with_fields("s")
+            .flat_map(|taint| taint.paths.iter().map(|path| path.origin_key.clone()))
+            .collect();
+        let backward_read: Vec<String> = head_backward
+            .read_with_fields("s")
+            .flat_map(|taint| taint.paths.iter().map(|path| path.origin_key.clone()))
+            .collect();
+        assert_eq!(forward_read, backward_read);
+    }
+
+    #[test]
+    fn data_flow_is_stable_across_runs_in_one_process() {
+        // Two analyses in one process get different per-map hash seeds and a
+        // different worker interleaving each time, so a report that depends on
+        // either shows here.
+        let root = fixture_crate(
+            "dataflow-stable-runs",
+            r#"
+macro_rules! read_bits {
+    ($state:expr) => {{
+        $state.bits = bit_mask($state.cursor);
+        $state.bits
+    }};
+}
+
+pub struct DecoderState {
+    pub cursor: u32,
+    pub bits: u32,
+    pub distance_code: u32,
+    pub distance_context: u32,
+    pub dist_rb_idx: u32,
+    pub copy_length: u32,
+    pub max_distance: u32,
+}
+
+pub fn bit_mask(cursor: u32) -> u32 {
+    cursor & 7
+}
+
+pub fn pump(states: &mut Vec<DecoderState>, out: &mut Vec<u32>) {
+    let mut total = 0u32;
+    for state in states.iter_mut() {
+        for _ in 0..4 {
+            state.distance_code = 1;
+            let bits = read_bits!(state);
+            state.bits = bits;
+            state.distance_context = bits + 1;
+            state.dist_rb_idx = bits + 2;
+            state.copy_length = bits + 3;
+            state.max_distance = bits + 4;
+            total += state.bits;
+        }
+    }
+    out.push(total);
+}
+
+pub fn feed(states: &mut Vec<DecoderState>, out: &mut Vec<u32>) {
+    pump(states, out);
+    let mut scratch = 0u32;
+    pump(states, &mut scratch);
+    out.push(scratch);
+}
+"#,
+        );
+        let first = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("first analysis succeeds");
+        // A second analysis on a thread that this process has already parsed
+        // sources on: the fallback span map and the hash seeds differ from the
+        // first run's, and the report must not follow them.
+        let _ = syn::parse_str::<syn::File>("pub fn unrelated() { let x = 1; }");
+        let second = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("second analysis succeeds");
+        let first_text = serde_json::to_string(&first).expect("first report serializes");
+        let second_text = serde_json::to_string(&second).expect("second report serializes");
+        assert_eq!(first_text, second_text);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    #[ignore = "crosses the analysis-wide expansion ceiling on purpose; takes seconds"]
+    fn analysis_expansion_ceiling_cuts_in_path_order_and_reports_once() {
+        // Sixteen modules whose counting munchers together need more than the
+        // analysis-wide ceiling. The cut lands on one module in path order;
+        // exactly one diagnostic names it, and a second analysis in the same
+        // process reports the same cut, where a ceiling enforced in worker
+        // completion order moved with the scheduling.
+        let root = temp_dir("expansion-ceiling-cut");
+        fs::write(
+            root.join("Cargo.toml"),
+            "[package]\nname = \"expansion-ceiling-cut\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[workspace]\n",
+        )
+        .expect("write Cargo.toml");
+        fs::create_dir_all(root.join("src")).expect("create src");
+        let mut lib = String::from("#![recursion_limit = \"256\"]\n");
+        for index in 1..=16 {
+            let module = format!("m{index:02}");
+            lib.push_str(&format!("mod {module};\n"));
+            let invocation_tokens = "x ".repeat(200);
+            let line = format!("    munch_{module}!({invocation_tokens});\n");
+            let invocations = line.repeat(8);
+            let source = format!(
+                "macro_rules! munch_{module} {{\n    ($t:tt $($rest:tt)*) => {{ \
+                 munch_{module}!($($rest)*); }};\n    () => {{ pub fn settled() {{}} }};\n}}\n\
+                 pub fn warm_{module}() {{\n{invocations}}}\n"
+            );
+            fs::write(root.join("src").join(format!("{module}.rs")), source).expect("write module");
+        }
+        fs::write(root.join("src").join("lib.rs"), lib).expect("write lib.rs");
+        let first = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            call_graph_mode: "none".to_string(),
+            data_flow_mode: "none".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("first analysis succeeds");
+        let budget_diagnostics: Vec<&Diagnostic> = first
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| {
+                diagnostic.kind == "macro"
+                    && diagnostic.message.contains(&format!(
+                        "passed the work budget {}",
+                        super::macro_expand::MAX_ANALYSIS_EXPANSION_WORK
+                    ))
+            })
+            .collect();
+        assert_eq!(
+            budget_diagnostics.len(),
+            1,
+            "exactly one analysis-budget diagnostic is reported"
+        );
+        let cut_file = budget_diagnostics[0]
+            .file_path
+            .clone()
+            .expect("the budget diagnostic names its file");
+        assert!(
+            cut_file.starts_with("src/m") && cut_file.ends_with(".rs"),
+            "the cut lands on one of the muncher modules, got {cut_file}"
+        );
+        // The modules before the cut keep their expansions, the cut module
+        // keeps the ones before the line runs out, and every module after the
+        // cut in path order loses all of them.
+        let settled_in: Vec<String> = first
+            .declarations
+            .iter()
+            .filter(|declaration| declaration.name == "settled")
+            .map(|declaration| declaration.file_path.clone())
+            .collect();
+        let cut_module = cut_file
+            .trim_start_matches("src/")
+            .trim_end_matches(".rs")
+            .to_string();
+        let cut_module_str = cut_module.clone();
+        for declaration_file in &settled_in {
+            let module = declaration_file
+                .trim_start_matches("src/")
+                .trim_end_matches(".rs");
+            if module > cut_module_str.as_str() {
+                panic!(
+                    "module {module} after the cut {cut_module} still holds expanded declarations"
+                );
+            }
+        }
+        assert!(!settled_in.is_empty(), "modules before the cut expand");
+        let second = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            call_graph_mode: "none".to_string(),
+            data_flow_mode: "none".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("second analysis succeeds");
+        let first_text = serde_json::to_string(&first).expect("first report serializes");
+        let second_text = serde_json::to_string(&second).expect("second report serializes");
+        assert_eq!(first_text, second_text);
+        let _ = fs::remove_dir_all(&root);
     }
 }
