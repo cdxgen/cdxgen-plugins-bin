@@ -1,0 +1,31 @@
+thirdparty/rusi/crates/rusi-core/src/lib.rs
+  s_900ee062c254b8::t_38d0d4980708d7 2106-2161,2652-2653,2655-2666,2668-2672,2685-2713,2716-2722,2725,2732,2734-2735,2737-2748,2751,2754-2758
+thirdparty/rusi/crates/rusi-core/src/macro_expand/mod.rs
+  s_9a841b6bccbee8::t_6e0cf695438b0b 73-83,275-277,343-347
+thirdparty/rusi/docs/ANALYSIS_ARCHITECTURE.md
+  s_900ee062c254b8::t_ab9ec93aad48fb 280-290
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "dc398fbf03d63ae839141ec7ad58ad533782f4ac",
+  "prompts": {},
+  "sessions": {
+    "s_900ee062c254b8": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_e8694e75-c0df-4bd1-ab8e-0145a9106b02",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    },
+    "s_9a841b6bccbee8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d6317d63-6d3e-4df0-bcaa-98ab71527b87",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
