@@ -43,9 +43,12 @@ from run import (  # noqa: E402
 )
 
 # The passes whose wall times the table breaks out, in the order the
-# analysis runs them. `concrete_pass` is the slice building pass.
+# analysis runs them. `module_tree_macro_prepass` is the one read and parse
+# per file that module discovery and the macro pre-pass share;
+# `macro_prepass` builds the scope table from what it collected.
+# `concrete_pass` is the slice building pass.
 PHASE_ORDER = [
-    "module_tree",
+    "module_tree_macro_prepass",
     "macro_prepass",
     "parse",
     "import_resolution",

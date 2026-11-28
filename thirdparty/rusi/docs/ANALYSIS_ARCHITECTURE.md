@@ -86,14 +86,28 @@ declaration's cfg gate, because the compiler only sees code that survived cfg ex
 
 ### 3.1 Parsing and the simplified IR
 
-The stable backend begins from Cargo metadata to discover workspace packages, then walks
-each package source tree and parses files with `syn`. A visitor lowers the syntax tree
-into a small internal representation of expressions and operations. This representation
+The stable backend begins from Cargo metadata to discover workspace packages. Module
+discovery then reads every source file once and parses it once, and that single parse
+does three jobs: it walks the `mod` declarations from each crate root to establish what
+each file is and where it sits, it collects the `macro_rules!` definitions, module
+declarations and `use` items the macro pre-pass needs (section 3.5), and it leaves the
+file's text in memory for the analysis pass, so no file is read from disk twice. The
+per-file work runs as tasks on one worker pool shared by every package, so the walk of
+a package with a single huge crate does not serialize the front of the pipeline behind
+it; the traversal decisions, the notes, and the order of everything they produce are
+replayed in the order a sequential walk would have recorded. A visitor then parses the
+text a second time and lowers the syntax tree into a small internal representation of
+expressions and operations. Two parses and one read per file
+is the deliberate floor: keeping parsed trees across passes is not possible with `syn`
+spans, which hold `Rc` and cannot cross a thread boundary, and keeping every tree would
+cost an order of magnitude more memory than the text does. The lowering representation
 is intentionally lossy. It keeps the shapes that matter for call resolution and taint,
 such as assignments, field assignments, method and function calls, and composition of
 sub-expressions, and it discards detail that a syntax level analysis cannot use
 soundly anyway. The representation records enough position information to materialize
-reviewable traces later.
+reviewable traces later. How many files each front-of-pipeline phase actually read and
+parsed is counted in the `file_work` section of the `--stats-json` document, so the
+"parsed at most twice" bound is checked on every run rather than asserted.
 
 ### 3.2 Call graph construction
 
@@ -210,10 +224,12 @@ independent channels do not cross contaminate.
 The stable backend expands the `macro_rules!` macros of the analyzed workspace itself.
 The code lives in `crates/rusi-core/src/macro_expand/`, one file per concern.
 
-`scope.rs` runs before any file is analyzed. It collects every definition with its
-position and the module declarations, `use` items and `extern crate` items that decide
-where each one is visible, and it answers one question: what does the macro path written
-at this position mean? Textual scope follows the Rust Reference: a definition is visible
+`scope.rs` runs before any file is analyzed. Its items are collected from the same
+parse module discovery makes (section 3.1): every definition with its position and the
+module declarations, `use` items and `extern crate` items that decide where each one is
+visible. The scope table itself is built from those items before the first file is
+analyzed, and it answers one question: what does the macro path written at this
+position mean? Textual scope follows the Rust Reference: a definition is visible
 from its position to the end of its module and in child modules declared after it, never
 past the block that holds it, and a later definition of the same name shadows an earlier
 one by line and column. `#[macro_use]` on a `mod` item extends that scope past the item,

@@ -3,7 +3,7 @@
 
 use std::collections::{BTreeSet, HashSet};
 
-use super::scope::{is_std_macro, join_module};
+use super::scope::{is_std_macro, join_module, prepass_from_parsed};
 use super::*;
 use crate::cfg::CfgEvaluator;
 use crate::import_resolution::{UseRecord, collect_use_records};
@@ -29,8 +29,9 @@ fn build(crates: &[TestCrate], dependencies: &[&str]) -> MacroScopeTable {
             for file in &krate.files {
                 let module: Vec<String> = file.module.iter().map(|s| s.to_string()).collect();
                 module_keys.insert(join_module(krate.name, &module));
-                prepasses.push(prepass_file(
-                    file.source,
+                let syntax = syn::parse_file(file.source).expect("test source parses");
+                prepasses.push(prepass_from_parsed(
+                    &syntax,
                     &module,
                     file.path,
                     &CfgEvaluator::permissive(),

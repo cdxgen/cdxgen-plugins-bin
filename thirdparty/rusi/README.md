@@ -112,14 +112,15 @@ rustup component add rustc-dev rust-src --toolchain stable
 rustup toolchain install nightly --component rustc-dev --component rust-src
 ```
 
-Because the `rustc_private` APIs carry no stability guarantee, the wrapper compiles against one narrow window of compiler versions: currently 1.98 through stable 1.100 and the 1.101 nightlies. API differences inside that window are bridged by small shims at the top of `crates/rusi-rustc-wrapper/src/main.rs` wherever the change is in types. Changes to item names or variant arity cannot be bridged that way, so each hangs off its own cfg, which the wrapper's `build.rs` sets by compiling a small probe against the toolchain building it:
+Because the `rustc_private` APIs carry no stability guarantee, the wrapper compiles against one narrow window of compiler versions: currently 1.98 through stable 1.100 and the 1.101 and 1.102 nightlies. API differences inside that window are bridged by small shims at the top of `crates/rusi-rustc-wrapper/src/main.rs` wherever the change is in types. Changes to item names or variant arity cannot be bridged that way, so each hangs off its own cfg, which the wrapper's `build.rs` sets by compiling a small probe against the toolchain building it:
 
-| cfg                              | Change                                                                           | First nightly        |
-| -------------------------------- | -------------------------------------------------------------------------------- | -------------------- |
-| `rusi_rustc_mir_phantom_deref`   | `ProjectionElem::PhantomDeref` added                                             | 2026-08-29 (1.100)   |
-| `rusi_rustc_hir_use_tree`        | `ItemKind::Use` carries one `UseTree` per `use`, `ListStem` replaced by `Nested` | 2026-09-26 (1.100)   |
-| `rusi_rustc_compiler_entrypoint` | `rustc_driver_impl::run_compiler` renamed to `compiler_entrypoint`               | 2026-10-03 (1.101)   |
-| `rusi_rustc_generic_args_handle` | `ty::GenericArgs` is a `Copy` handle and `ty::GenericArgsRef` is removed         | 2026-11-01 (1.101)   |
+| cfg                                  | Change                                                                                               | First nightly      |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------- | ------------------ |
+| `rusi_rustc_mir_phantom_deref`       | `ProjectionElem::PhantomDeref` added                                                                 | 2026-08-29 (1.100) |
+| `rusi_rustc_hir_use_tree`            | `ItemKind::Use` carries one `UseTree` per `use`, `ListStem` replaced by `Nested`                     | 2026-09-26 (1.100) |
+| `rusi_rustc_compiler_entrypoint`     | `rustc_driver_impl::run_compiler` renamed to `compiler_entrypoint`                                   | 2026-10-03 (1.101) |
+| `rusi_rustc_generic_args_handle`     | `ty::GenericArgs` is a `Copy` handle and `ty::GenericArgsRef` is removed                             | 2026-11-01 (1.101) |
+| `rusi_rustc_mir_terminator_required` | `BasicBlockData::terminator` is a `Terminator`, no longer an `Option`, and `terminator()` is removed | 2026-11-28 (1.102) |
 
 The probes look at the API itself rather than the release number on purpose: nightlies carry the version of the release they lead to, so the first two changes reached toolchains that still report 1.100 and the later ones reached toolchains that already reported 1.101. Nothing needs to be passed by hand — a standalone `cargo +nightly test -p rusi-rustc-wrapper` selects the right shape, and a stable or beta compiler needs only `RUSTC_BOOTSTRAP=1`. If the probes cannot use `rustc_private` at all, the build prints a warning saying why.
 
