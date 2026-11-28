@@ -1,0 +1,23 @@
+thirdparty/rusi/README.md
+  s_9a841b6bccbee8::t_cf123da0c1856e 115-123
+thirdparty/rusi/crates/rusi-rustc-wrapper/build.rs
+  s_9a841b6bccbee8::t_1aba4b779ac388 60-70
+thirdparty/rusi/crates/rusi-rustc-wrapper/src/main.rs
+  s_9a841b6bccbee8::t_c34822296e026e 158-173,674,1875
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b1fc958bc58754efa350cd2fe07b6f6a753cba43",
+  "prompts": {},
+  "sessions": {
+    "s_9a841b6bccbee8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d6317d63-6d3e-4df0-bcaa-98ab71527b87",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
