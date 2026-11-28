@@ -155,6 +155,22 @@ impl<'tcx> CallArgAt<'tcx> for ty::GenericArgsRef<'tcx> {
     }
 }
 
+/// The terminator of a MIR basic block. A block's terminator is optional
+/// while the block is being built; nightly 1.102 made it a required field
+/// and removed the `Option`, so every block this wrapper reads has one there.
+#[cfg(rusi_rustc_mir_terminator_required)]
+fn block_terminator<'a, 'tcx>(
+    block: &'a rustc_middle::mir::BasicBlockData<'tcx>,
+) -> Option<&'a rustc_middle::mir::Terminator<'tcx>> {
+    Some(&block.terminator)
+}
+#[cfg(not(rusi_rustc_mir_terminator_required))]
+fn block_terminator<'a, 'tcx>(
+    block: &'a rustc_middle::mir::BasicBlockData<'tcx>,
+) -> Option<&'a rustc_middle::mir::Terminator<'tcx>> {
+    block.terminator.as_ref()
+}
+
 fn main() {
     let args = std::env::args().collect::<Vec<_>>();
     let mut callbacks = WrapperCallbacks::from_env();
@@ -655,7 +671,7 @@ impl EmbeddedCollector {
                 let body = tcx.instance_mir(instance.def);
                 let typing_env = ty::TypingEnv::fully_monomorphized();
                 for block in body.basic_blocks.iter() {
-                    let Some(terminator) = &block.terminator else {
+                    let Some(terminator) = block_terminator(block) else {
                         continue;
                     };
                     let TerminatorKind::Call { func, .. } = &terminator.kind else {
@@ -1856,7 +1872,7 @@ impl MirBlock {
         }
         let mut successors = Vec::new();
         let mut returns = false;
-        if let Some(terminator) = &data.terminator {
+        if let Some(terminator) = block_terminator(data) {
             match &terminator.kind {
                 TerminatorKind::Return => returns = true,
                 // Rust 1.101 added `loop_hint_attrs`; `..` keeps the pattern

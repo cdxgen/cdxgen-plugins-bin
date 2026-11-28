@@ -57,6 +57,17 @@ const PROBES: &[Probe] = &[
                      args.len()
                  }",
     },
+    // `BasicBlockData::terminator` became a plain `Terminator`, and the
+    // `terminator()` accessor went with the `Option` (first nightly
+    // 2026-11-28, 1.102).
+    Probe {
+        cfg: "rusi_rustc_mir_terminator_required",
+        source: "pub fn probe<'a>(
+                     block: &'a rustc_middle::mir::BasicBlockData<'a>,
+                 ) -> &'a rustc_middle::mir::Terminator<'a> {
+                     &block.terminator
+                 }",
+    },
     // rust-lang/rust#159103 added `ProjectionElem::PhantomDeref` (first
     // nightly 2026-08-29, 1.100).
     Probe {
