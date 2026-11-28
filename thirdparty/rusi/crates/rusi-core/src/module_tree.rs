@@ -16,7 +16,7 @@
 //! old path-derived module path, so switching to this discovery cannot silently
 //! lose evidence.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -25,6 +25,7 @@ use cargo_metadata::Package;
 
 use crate::PackageContext;
 use crate::cfg::CfgEvaluator;
+use crate::macro_expand::{self, MacroFilePrepass};
 
 /// A crate root belonging to one Cargo target.
 #[derive(Debug, Clone)]
@@ -53,9 +54,22 @@ pub(crate) struct DiscoveredFile {
 }
 
 /// The outcome of discovery for one package.
+///
+/// Discovery reads each file once and parses it once: the parse that walks
+/// the `mod` tree also feeds the macro pre-pass, and the text is kept for
+/// the analysis pass so no file is read from disk twice. `prepasses` and
+/// `sources` line up with `files` by index.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ModuleTree {
     pub(crate) files: Vec<DiscoveredFile>,
+    /// The macro pre-pass result of each file, extracted from the one parse
+    /// discovery made. Every position carries a value; a file that could not
+    /// be read or parsed carries an empty pre-pass.
+    pub(crate) prepasses: Vec<MacroFilePrepass>,
+    /// Each file's text, taken by the analysis pass so the file is not read
+    /// again. `None` where the file could not be read here, which sends the
+    /// analysis pass back to disk so the failure is reported there as before.
+    pub(crate) sources: Vec<Option<String>>,
     /// Human-readable notes (unresolved `mod` declarations, orphan files) for
     /// the caller to turn into report diagnostics.
     pub(crate) notes: Vec<ModuleTreeNote>,
@@ -110,11 +124,19 @@ pub(crate) fn crate_roots(
 }
 
 /// Walks every crate root of the package, then sweeps for orphan files.
+///
+/// Each file is read and parsed once; the parse feeds both the `mod` walk
+/// and the macro pre-pass, and its text is kept for the analysis pass.
+/// `analysis_root` is the directory the report's file paths are relative to,
+/// and `edition_2021` is the package's edition as the macro pre-pass reads
+/// patterns.
 pub(crate) fn discover(
     package_ctx: &PackageContext,
     roots: &[CrateRoot],
     evaluator: &CfgEvaluator,
     include_tests: bool,
+    analysis_root: &Path,
+    edition_2021: bool,
 ) -> Result<ModuleTree> {
     let mut tree = ModuleTree::default();
     // A file can legitimately be reached by several roots (a module shared by a
@@ -126,6 +148,12 @@ pub(crate) fn discover(
     // package under analysis, which the previous directory walk also refused to
     // follow.
     let allowed_root = crate::canonical_path(&package_ctx.root_dir);
+    // The read and the parse of each walked file, keyed by path while the
+    // walk runs and aligned with `files` once the sort below fixes their
+    // order. The text slot is `None` where the file could not be read, so
+    // the analysis pass knows to read it again.
+    let mut sources: HashMap<PathBuf, Option<String>> = HashMap::new();
+    let mut prepasses: HashMap<PathBuf, MacroFilePrepass> = HashMap::new();
 
     for root in roots {
         if !root.path.is_file() {
@@ -142,10 +170,14 @@ pub(crate) fn discover(
         let mut walker = ModuleWalker {
             root,
             allowed_root: &allowed_root,
+            analysis_root,
             evaluator,
+            edition_2021,
             claimed: &mut claimed,
             files: &mut tree.files,
             notes: &mut tree.notes,
+            sources: &mut sources,
+            prepasses: &mut prepasses,
         };
         walker.walk_root()?;
     }
@@ -159,6 +191,31 @@ pub(crate) fn discover(
             file_path: Some(path.clone()),
         });
         let module_path = crate::module_path_for_file(package_ctx, &path);
+        // An orphan's one read and parse also feed the macro pre-pass, exactly
+        // as a reached file's do. A file that cannot be read stays on the
+        // `None` slot so the analysis pass reads it again and reports the
+        // failure there, as it does for a reached file.
+        let source = fs::read_to_string(&path).ok();
+        crate::stats::FileWorkPhase::Discovery.count_read();
+        let prepass = match source
+            .as_deref()
+            .and_then(|source| syn::parse_file(source).ok())
+        {
+            Some(syntax) => {
+                crate::stats::FileWorkPhase::Discovery.count_parsed();
+                let relative = crate::relative_display_path(analysis_root, &path);
+                macro_expand::prepass_from_parsed(
+                    &syntax,
+                    &module_path,
+                    &relative,
+                    evaluator,
+                    edition_2021,
+                )
+            }
+            None => MacroFilePrepass::default(),
+        };
+        sources.insert(path.clone(), source);
+        prepasses.insert(path.clone(), prepass);
         tree.files.push(DiscoveredFile {
             path,
             module_path,
@@ -169,16 +226,26 @@ pub(crate) fn discover(
     }
 
     tree.files.sort_by(|left, right| left.path.cmp(&right.path));
+    for file in &tree.files {
+        tree.sources
+            .push(sources.remove(&file.path).unwrap_or(None));
+        tree.prepasses
+            .push(prepasses.remove(&file.path).unwrap_or_default());
+    }
     Ok(tree)
 }
 
 struct ModuleWalker<'a> {
     root: &'a CrateRoot,
     allowed_root: &'a Path,
+    analysis_root: &'a Path,
     evaluator: &'a CfgEvaluator,
+    edition_2021: bool,
     claimed: &'a mut HashSet<PathBuf>,
     files: &'a mut Vec<DiscoveredFile>,
     notes: &'a mut Vec<ModuleTreeNote>,
+    sources: &'a mut HashMap<PathBuf, Option<String>>,
+    prepasses: &'a mut HashMap<PathBuf, MacroFilePrepass>,
 }
 
 impl ModuleWalker<'_> {
@@ -211,13 +278,14 @@ impl ModuleWalker<'_> {
             .then_some(canonical)
     }
 
-    /// Parses one module file, records it, and follows the `mod` declarations
+    /// Reads one module file, records it, and follows the `mod` declarations
     /// it contains.
     ///
-    /// The file is parsed here and again during full analysis. Extracting only
-    /// the module structure now and re-parsing later keeps peak memory flat on
-    /// large workspaces, at the cost of one extra `syn` parse per file; the
-    /// analysis pass itself is far more expensive than the parse.
+    /// The one parse this walk makes also feeds the macro pre-pass, and the
+    /// text is kept for the analysis pass, which parses the file a second
+    /// time from it. Holding the text (at most a few tens of megabytes for a
+    /// whole dependency closure) is far cheaper than holding parsed trees,
+    /// and a second `syn` parse beats a second disk read.
     fn walk_file(&mut self, path: PathBuf, module_path: Vec<String>) -> Result<()> {
         if !self.claimed.insert(path.clone()) {
             return Ok(());
@@ -232,10 +300,15 @@ impl ModuleWalker<'_> {
 
         // An unreadable or non-UTF-8 file must not abort the whole run: the file
         // itself is already recorded, discovery just cannot descend through it,
-        // exactly as for a parse failure below.
+        // exactly as for a parse failure below. Its slot stays empty so the
+        // analysis pass reads it again and reports the failure there.
         let source = match fs::read_to_string(&path) {
-            Ok(source) => source,
+            Ok(source) => {
+                crate::stats::FileWorkPhase::Discovery.count_read();
+                source
+            }
             Err(error) => {
+                self.sources.insert(path.clone(), None);
                 self.notes.push(ModuleTreeNote {
                     message: format!("could not read module file: {error}"),
                     file_path: Some(path),
@@ -245,9 +318,28 @@ impl ModuleWalker<'_> {
         };
         // A parse failure here is reported by the analysis pass, which parses
         // the same file; discovery just cannot descend any further.
-        let Ok(syntax) = syn::parse_file(&source) else {
-            return Ok(());
+        let syntax = match syn::parse_file(&source) {
+            Ok(syntax) => {
+                crate::stats::FileWorkPhase::Discovery.count_parsed();
+                syntax
+            }
+            Err(_) => {
+                self.sources.insert(path, Some(source));
+                return Ok(());
+            }
         };
+        // The macro pre-pass reads its items from the same tree, so the file
+        // is not parsed a second time to collect its macros.
+        let relative = crate::relative_display_path(self.analysis_root, &path);
+        let prepass = macro_expand::prepass_from_parsed(
+            &syntax,
+            &module_path,
+            &relative,
+            self.evaluator,
+            self.edition_2021,
+        );
+        self.sources.insert(path.clone(), Some(source));
+        self.prepasses.insert(path.clone(), prepass);
 
         // Only `walk_root` starts with an empty module path, so this is exactly
         // the crate-root test — and rustc's rule is positional, not by filename:
@@ -483,6 +575,8 @@ mod tests {
             &[fixture.lib_root()],
             &CfgEvaluator::permissive(),
             false,
+            &fixture.root,
+            true,
         )
         .expect("discovery succeeds");
 
@@ -509,6 +603,8 @@ mod tests {
             &[fixture.lib_root()],
             &CfgEvaluator::permissive(),
             false,
+            &fixture.root,
+            true,
         )
         .expect("discovery succeeds");
 
@@ -532,6 +628,8 @@ mod tests {
             &[fixture.lib_root()],
             &CfgEvaluator::permissive(),
             false,
+            &fixture.root,
+            true,
         )
         .expect("discovery succeeds");
 
@@ -553,8 +651,15 @@ mod tests {
         let evaluator = CfgEvaluator::new(options, false);
 
         let ctx = fixture.package_ctx();
-        let tree =
-            discover(&ctx, &[fixture.lib_root()], &evaluator, false).expect("discovery succeeds");
+        let tree = discover(
+            &ctx,
+            &[fixture.lib_root()],
+            &evaluator,
+            false,
+            &fixture.root,
+            true,
+        )
+        .expect("discovery succeeds");
 
         assert_eq!(
             module_path_of(&tree, &portable),
@@ -583,6 +688,8 @@ mod tests {
             &[fixture.lib_root()],
             &CfgEvaluator::permissive(),
             false,
+            &fixture.root,
+            true,
         )
         .expect("discovery succeeds");
 
@@ -610,6 +717,8 @@ mod tests {
             &[fixture.lib_root()],
             &CfgEvaluator::permissive(),
             false,
+            &fixture.root,
+            true,
         )
         .expect("discovery succeeds");
 
@@ -630,8 +739,15 @@ mod tests {
             target_kind: "bin".to_string(),
             path: fixture.root.join("src").join("bin").join("tool.rs"),
         };
-        let tree = discover(&ctx, &[root], &CfgEvaluator::permissive(), false)
-            .expect("discovery succeeds");
+        let tree = discover(
+            &ctx,
+            &[root],
+            &CfgEvaluator::permissive(),
+            false,
+            &fixture.root,
+            true,
+        )
+        .expect("discovery succeeds");
 
         // Crate-root status is positional: `tool.rs` is a root, so its children
         // sit beside it, not in `src/bin/tool/`.
@@ -657,6 +773,8 @@ mod tests {
             &[fixture.lib_root()],
             &CfgEvaluator::permissive(),
             false,
+            &fixture.root,
+            true,
         )
         .expect("discovery succeeds despite the unreadable file");
 
@@ -688,6 +806,8 @@ mod tests {
             &[fixture.lib_root()],
             &CfgEvaluator::permissive(),
             false,
+            &fixture.root,
+            true,
         )
         .expect("discovery succeeds");
 
@@ -722,12 +842,155 @@ mod tests {
             &[fixture.lib_root()],
             &CfgEvaluator::permissive(),
             false,
+            &fixture.root,
+            true,
         )
         .expect("discovery succeeds");
 
         assert_eq!(
             module_path_of(&tree, &nested),
             Some(vec!["foo".to_string(), "a".to_string(), "b".to_string()])
+        );
+    }
+
+    /// The one parse discovery makes feeds both the `mod` walk and the macro
+    /// pre-pass. This pins what the merge promises: every discovered file
+    /// carries its pre-pass and its text in the same order, definitions come
+    /// out of files reached through `#[path]` modules, a cfg-disabled module
+    /// contributes no definitions, and an orphan file still has both, so the
+    /// scope table sees exactly what the separate pre-pass used to collect.
+    #[test]
+    fn prepass_items_and_sources_travel_with_the_discovered_files() {
+        let fixture = Fixture::new("prepass-alignment");
+        fixture.write(
+            "src/lib.rs",
+            "#[macro_use]\nmod macros;\n#[path = \"extras/renamed.rs\"]\nmod renamed;\n\
+             #[cfg(windows)]\nmod disabled;\n",
+        );
+        let macros_rs = fixture.write("src/macros.rs", "macro_rules! shout { () => {} }\n");
+        let renamed_rs =
+            fixture.write("src/extras/renamed.rs", "macro_rules! quiet { () => {} }\n");
+        let disabled_rs = fixture.write("src/disabled.rs", "macro_rules! gone { () => {} }\n");
+        let stray = fixture.write("src/stray.rs", "macro_rules! stray { () => {} }\n");
+
+        // A gate the evaluator can definitively false, as the cfg test below
+        // does, so the disabled module is really skipped.
+        let mut options = crate::cfg::CfgOptions::default();
+        options.insert_atom("unix");
+        let evaluator = CfgEvaluator::new(options, false);
+
+        let ctx = fixture.package_ctx();
+        let tree = discover(
+            &ctx,
+            &[fixture.lib_root()],
+            &evaluator,
+            false,
+            &fixture.root,
+            true,
+        )
+        .expect("discovery succeeds");
+
+        assert_eq!(
+            tree.files.len(),
+            tree.prepasses.len(),
+            "one pre-pass result per discovered file"
+        );
+        assert_eq!(
+            tree.files.len(),
+            tree.sources.len(),
+            "one text slot per discovered file"
+        );
+
+        let index_of = |path: &Path| -> usize {
+            tree.files
+                .iter()
+                .position(|file| file.path == path)
+                .expect("the file was discovered")
+        };
+        let definitions_of = |path: &Path| -> Vec<String> {
+            tree.prepasses[index_of(path)]
+                .definitions
+                .iter()
+                .map(|definition| definition.name.clone())
+                .collect()
+        };
+
+        assert_eq!(definitions_of(&macros_rs), vec!["shout".to_string()]);
+        assert_eq!(
+            definitions_of(&renamed_rs),
+            vec!["quiet".to_string()],
+            "definitions are collected from a file reached through `#[path]`"
+        );
+
+        // The cfg-disabled module is not followed, so its file is an orphan;
+        // its macro is not in scope anywhere, but the file itself still
+        // carries its pre-pass and its text like every other file.
+        assert_eq!(definitions_of(&disabled_rs), vec!["gone".to_string()]);
+        let disabled_entry = &tree.files[index_of(&disabled_rs)];
+        assert!(disabled_entry.orphan);
+
+        let stray_index = index_of(&stray);
+        assert_eq!(
+            tree.prepasses[stray_index].definitions[0].name, "stray",
+            "an orphan's definitions are collected from the same read"
+        );
+        assert!(tree.sources[stray_index].is_some());
+
+        // Every discovered, readable file left its text for the analysis pass.
+        for (file, source) in tree.files.iter().zip(&tree.sources) {
+            assert!(source.is_some(), "no text kept for {}", file.path.display());
+        }
+    }
+
+    /// `#[macro_use]` on a `mod` extends the child's macros past the item, so
+    /// the definitions, the declaring `mod` item and its attribute must all
+    /// come out of the same merged walk for the scope table to see them.
+    #[test]
+    fn macro_use_mod_items_reach_the_prepass_from_the_merged_walk() {
+        let fixture = Fixture::new("macro-use-prepass");
+        let lib_rs = fixture.write(
+            "src/lib.rs",
+            "#[macro_use]\nmod macros;\nfn run() { shout!(); }\n",
+        );
+        let macros_rs = fixture.write("src/macros.rs", "macro_rules! shout { () => {} }\n");
+
+        let ctx = fixture.package_ctx();
+        let tree = discover(
+            &ctx,
+            &[fixture.lib_root()],
+            &CfgEvaluator::permissive(),
+            false,
+            &fixture.root,
+            true,
+        )
+        .expect("discovery succeeds");
+
+        let lib_index = tree
+            .files
+            .iter()
+            .position(|file| file.path == lib_rs)
+            .expect("the crate root was discovered");
+        let prepass = &tree.prepasses[lib_index];
+        let declaration = prepass
+            .mods
+            .iter()
+            .find(|declaration| declaration.name == "macros")
+            .expect("the `mod` declaration was collected");
+        assert!(
+            declaration.macro_use,
+            "the `#[macro_use]` attribute of the `mod` item is kept"
+        );
+        let macros_index = tree
+            .files
+            .iter()
+            .position(|file| file.path == macros_rs)
+            .expect("the child module was discovered");
+        assert!(
+            tree.prepasses[macros_index]
+                .definitions
+                .iter()
+                .any(|definition| definition.name == "shout"),
+            "the child module's definitions were collected in the same walk"
         );
     }
 }

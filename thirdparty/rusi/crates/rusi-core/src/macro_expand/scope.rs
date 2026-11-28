@@ -63,18 +63,16 @@ pub(crate) struct MacroFilePrepass {
 }
 
 /// Reads one file's macro-relevant items. `module_path` is the module the
-/// file occupies, exactly as the analysis pass will see it.
-pub(crate) fn prepass_file(
-    source: &str,
+/// file occupies, exactly as the analysis pass will see it. Module discovery
+/// shares its one parse with this reader, so the file is not parsed a second
+/// time to collect its macros.
+pub(crate) fn prepass_from_parsed(
+    syntax: &syn::File,
     module_path: &[String],
     file_path: &str,
     evaluator: &CfgEvaluator,
     edition_2021: bool,
 ) -> MacroFilePrepass {
-    let Ok(syntax) = syn::parse_file(source) else {
-        // A file that does not parse is reported by the main analysis pass.
-        return MacroFilePrepass::default();
-    };
     let mut visitor = PrepassVisitor {
         module_path: module_path.to_vec(),
         file_path: file_path.to_string(),
@@ -83,7 +81,7 @@ pub(crate) fn prepass_file(
         blocks: Vec::new(),
         out: MacroFilePrepass::default(),
     };
-    visitor.visit_file(&syntax);
+    visitor.visit_file(syntax);
     visitor.out.recursion_limit = recursion_limit_of(&syntax.attrs);
     visitor.out
 }

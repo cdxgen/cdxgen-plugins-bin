@@ -1250,8 +1250,9 @@ fn analyze_on_this_thread(
     let mut diagnostics = Vec::new();
 
     debug_log(options.debug, format_args!("pass=workspace-discovery"));
-    let package_plans = plan_packages(
+    let mut package_plans = plan_packages(
         &metadata,
+        &analysis_root,
         options.include_tests,
         options.include_dependencies,
     )?;
@@ -1289,7 +1290,10 @@ fn analyze_on_this_thread(
     };
 
     let mut analysis_tasks = Vec::new();
-    for plan in &package_plans {
+    // The text discovery read for each file, handed to the analysis pass so
+    // no file is read from disk twice.
+    let mut kept_texts: Vec<Option<String>> = Vec::new();
+    for plan in &mut package_plans {
         let package_ctx = &plan.package_ctx;
         debug_log(
             options.debug,
@@ -1339,7 +1343,8 @@ fn analyze_on_this_thread(
         // `security-deps` mode, where taint is meant to flow through it.
         let collect_bodies =
             plan.package_ctx.workspace_member || options.data_flow_mode == DATAFLOW_SECURITY_DEPS;
-        for file in &plan.module_tree.files {
+        for (index, file) in plan.module_tree.files.iter().enumerate() {
+            kept_texts.push(plan.module_tree.sources[index].take());
             analysis_tasks.push(FileAnalysisTask {
                 package_ctx: package_ctx.clone(),
                 evaluator: plan.evaluator.clone(),
@@ -1347,30 +1352,25 @@ fn analyze_on_this_thread(
                 module_path: file.module_path.clone(),
                 crate_path: module_tree::crate_path(package_ctx, file),
                 collect_bodies,
+                source_slot: kept_texts.len() - 1,
             });
         }
     }
+    let file_texts = FileTexts::new(kept_texts);
 
     debug_log(
         options.debug,
         format_args!("pass=stable-file-analysis files={}", analysis_tasks.len()),
     );
+    // The pre-pass items were collected during discovery, so what is left is
+    // to build the scope table from them. This consumes the plans.
     let macro_table = std::sync::Arc::new(stats::time_phase("macro_prepass", || {
-        build_macro_table(&metadata, &analysis_root, options.debug, &analysis_tasks)
+        build_macro_table(&metadata, options.debug, package_plans)
     }));
     let mut analyzed_files = stats::time_phase("parse", || {
         let macro_table = macro_table.clone();
         let mut parse_diagnostics = parallel_map_collect(&analysis_tasks, |task| {
-            match analyze_file(
-                &task.package_ctx,
-                &analysis_root,
-                &task.path,
-                &task.module_path,
-                &task.crate_path,
-                &task.evaluator,
-                task.collect_bodies,
-                &macro_table,
-            ) {
+            match analyze_file(task, &analysis_root, &file_texts, &macro_table) {
                 Ok(file) => {
                     debug_log(
                         options.debug,
@@ -2046,6 +2046,33 @@ struct FileAnalysisTask {
     module_path: Vec<String>,
     crate_path: String,
     collect_bodies: bool,
+    /// Position of the file's text in [`FileTexts`], where discovery left it.
+    source_slot: usize,
+}
+
+/// The text of every file to analyze, in task order, read once by discovery
+/// and taken by the analysis pass so no file is read from disk twice.
+struct FileTexts {
+    texts: std::sync::Mutex<Vec<Option<String>>>,
+}
+
+impl FileTexts {
+    fn new(texts: Vec<Option<String>>) -> Self {
+        Self {
+            texts: std::sync::Mutex::new(texts),
+        }
+    }
+
+    /// The text of the file at `slot`, removing it so the memory goes back
+    /// once that file is analyzed. `None` when discovery could not read the
+    /// file, which sends the caller back to disk, or when the text was
+    /// already taken.
+    fn take(&self, slot: usize) -> Option<String> {
+        if let Ok(mut texts) = self.texts.lock() {
+            return texts.get_mut(slot).and_then(Option::take);
+        }
+        None
+    }
 }
 
 /// Resolves cfg options and the module tree for every package to analyze.
@@ -2058,6 +2085,7 @@ struct FileAnalysisTask {
 /// examples are not part of the artifact being analyzed.
 fn plan_packages(
     metadata: &Metadata,
+    analysis_root: &Path,
     include_tests: bool,
     include_dependencies: bool,
 ) -> Result<Vec<PackageAnalysisPlan>> {
@@ -2077,9 +2105,23 @@ fn plan_packages(
             .map(|package| (package, true))
             .collect()
     };
-    // Module discovery parses every module file to read its `mod` declarations,
+    // The edition a package's macro patterns are read under, keyed the same
+    // way the analysis looks packages up: by name. `pat` accepts a top-level
+    // or-pattern from edition 2021 on.
+    let edition_2021: HashMap<&str, bool> = metadata
+        .packages
+        .iter()
+        .map(|package| {
+            (
+                package.name.as_str(),
+                !matches!(package.edition.as_str(), "2015" | "2018"),
+            )
+        })
+        .collect();
+    // Discovery reads and parses every module file once, both to walk the
+    // `mod` tree and to collect the macro pre-pass items from the same parse,
     // so it is worth spreading across packages the same way file analysis is.
-    let planned = stats::time_phase("module_tree", || {
+    let planned = stats::time_phase("module_tree_macro_prepass", || {
         parallel_map_collect(&packages, |(package, workspace_member)| {
             let package_ctx = package_context(package, *workspace_member)?;
             let mut cfg_options = host_cfg.clone();
@@ -2092,8 +2134,17 @@ fn plan_packages(
                 include_tests && *workspace_member,
                 !*workspace_member,
             );
-            let module_tree =
-                module_tree::discover(&package_ctx, &roots, &evaluator, include_tests)?;
+            let module_tree = module_tree::discover(
+                &package_ctx,
+                &roots,
+                &evaluator,
+                include_tests,
+                analysis_root,
+                edition_2021
+                    .get(package.name.as_str())
+                    .copied()
+                    .unwrap_or(true),
+            )?;
             Ok(PackageAnalysisPlan {
                 package_ctx,
                 evaluator,
@@ -2386,62 +2437,39 @@ fn canonical_path(path: &Path) -> PathBuf {
     fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
-/// Collects every `macro_rules!` definition in the analyzed files and builds
-/// the scope table the file analysis resolves invocations against. The
-/// pre-pass parses each file once more; the definitions it needs (rules,
-/// scoping, `use` records) are collected before any file is analyzed,
-/// because a macro defined in one file is in scope in another.
+/// Builds the scope table the file analysis resolves macro invocations
+/// against, from the pre-pass items discovery collected while it parsed each
+/// file. The definitions it needs (rules, scoping, `use` records) are
+/// complete before any file is analyzed, because a macro defined in one file
+/// is in scope in another. Consumes the plans, taking their pre-passes.
 fn build_macro_table(
     metadata: &Metadata,
-    root: &Path,
     debug: bool,
-    tasks: &[FileAnalysisTask],
+    plans: Vec<PackageAnalysisPlan>,
 ) -> macro_expand::MacroScopeTable {
-    debug_log(
-        debug,
-        format_args!("pass=macro-prepass files={}", tasks.len()),
-    );
-    // `pat` accepts a top-level or-pattern from edition 2021 on.
-    let edition_2021: HashMap<&str, bool> = metadata
-        .packages
-        .iter()
-        .map(|package| {
-            (
-                package.name.as_str(),
-                !matches!(package.edition.as_str(), "2015" | "2018"),
-            )
-        })
-        .collect();
-    let prepasses = parallel_map_collect(tasks, |task| {
-        let source = fs::read_to_string(&task.path).unwrap_or_default();
-        let relative_file_path = relative_display_path(root, &task.path);
-        macro_expand::prepass_file(
-            &source,
-            &task.module_path,
-            &relative_file_path,
-            &task.evaluator,
-            edition_2021
-                .get(task.package_ctx.package_name.as_str())
-                .copied()
-                .unwrap_or(true),
-        )
-    });
+    let files: usize = plans.iter().map(|plan| plan.module_tree.files.len()).sum();
+    debug_log(debug, format_args!("pass=macro-prepass files={files}"));
     let mut by_crate: HashMap<String, Vec<macro_expand::MacroFilePrepass>> = HashMap::new();
     let mut module_keys: HashMap<String, BTreeSet<String>> = HashMap::new();
-    for (task, prepass) in tasks.iter().zip(prepasses) {
-        let mut key = task.crate_path.clone();
-        for segment in &task.module_path {
-            key.push_str("::");
-            key.push_str(segment);
+    for plan in plans {
+        let PackageAnalysisPlan {
+            package_ctx,
+            module_tree,
+            ..
+        } = plan;
+        for (file, prepass) in module_tree.files.into_iter().zip(module_tree.prepasses) {
+            let crate_path = module_tree::crate_path(&package_ctx, &file);
+            let mut key = crate_path.clone();
+            for segment in &file.module_path {
+                key.push_str("::");
+                key.push_str(segment);
+            }
+            module_keys
+                .entry(crate_path.clone())
+                .or_default()
+                .insert(key);
+            by_crate.entry(crate_path).or_default().push(prepass);
         }
-        module_keys
-            .entry(task.crate_path.clone())
-            .or_default()
-            .insert(key);
-        by_crate
-            .entry(task.crate_path.clone())
-            .or_default()
-            .push(prepass);
     }
     let entries: Vec<macro_expand::CratePrepass> = by_crate
         .into_iter()
@@ -2465,39 +2493,51 @@ fn build_macro_table(
     macro_expand::MacroScopeTable::build(entries, dependency_crates)
 }
 
-// The per-file inputs are all distinct facts (package, path, module, cfg
-// environment, tier, macro table); grouping them would trade one lint for a
-// struct that only ever travels whole.
-#[allow(clippy::too_many_arguments)]
+/// Analyzes one file from the text discovery read, parsing it here so the
+/// file is parsed at most twice: once during discovery, once below.
 fn analyze_file(
-    package_ctx: &PackageContext,
+    task: &FileAnalysisTask,
     root: &Path,
-    file_path: &Path,
-    module_path: &[String],
-    crate_path: &str,
-    evaluator: &CfgEvaluator,
-    collect_bodies: bool,
+    texts: &FileTexts,
     macro_table: &std::sync::Arc<macro_expand::MacroScopeTable>,
 ) -> Result<AnalyzedFile> {
+    let FileAnalysisTask {
+        package_ctx,
+        evaluator,
+        path: file_path,
+        module_path,
+        crate_path,
+        collect_bodies,
+        source_slot,
+    } = task;
     EXPANDED_VALUES.with(|values| values.borrow_mut().clear());
     EXPANSION_SEQUENCE.with(|sequence| sequence.set(0));
-    let source = fs::read_to_string(file_path)
-        .with_context(|| format!("failed to read {}", file_path.display()))?;
+    // Discovery read the file once and left the text here; only a file it
+    // could not read is read again, so the failure is reported as before.
+    let source = match texts.take(*source_slot) {
+        Some(source) => source,
+        None => {
+            stats::FileWorkPhase::Analysis.count_read();
+            fs::read_to_string(file_path)
+                .with_context(|| format!("failed to read {}", file_path.display()))?
+        }
+    };
     let syntax = syn::parse_file(&source)
         .with_context(|| format!("failed to parse {}", file_path.display()))?;
+    stats::FileWorkPhase::Analysis.count_parsed();
     let relative_file_path = relative_display_path(root, file_path);
     let file_ctx = FileContext {
         package_name: package_ctx.package_name.clone(),
         package_path: package_ctx.crate_name.clone(),
         crate_path: crate_path.to_string(),
         relative_file_path: relative_file_path.clone(),
-        module_path: module_path.to_vec(),
+        module_path: module_path.clone(),
     };
 
     let mut collector = SourceCollector::new(
         file_ctx.clone(),
         evaluator.clone(),
-        collect_bodies,
+        *collect_bodies,
         macro_table.clone(),
     );
     collector.visit_file(&syntax);
@@ -16823,6 +16863,51 @@ impl Holder {
                 .as_ref()
                 .map(|flow| flow.slices.len()),
             "the lighter dependency tier must not change workspace flows"
+        );
+    }
+
+    #[test]
+    fn each_file_is_read_once_and_parsed_at_most_twice() {
+        // A dependency-closure run, the shape `--deps` gives: workspace plus
+        // dependency packages, each discovered and analyzed. The counters are
+        // process-wide, and other tests analyze in parallel, so this asserts
+        // the ratio the promise is made of rather than exact counts: every
+        // run keeps parsed at most twice read, and no file is analyzed that
+        // discovery did not read, so the sums keep both facts.
+        analyze(AnalyzeOptionsInput {
+            dir: fixture_path("deps-app"),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "security".to_string(),
+            include_dependencies: true,
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        let value = crate::stats::snapshot_value();
+        let file_work = value["file_work"].as_object().expect("file_work exists");
+        let mut files_read = 0;
+        let mut files_parsed = 0;
+        let mut analysis_parsed = 0;
+        let mut discovery_read = 0;
+        for (phase, counts) in file_work {
+            let read = counts["files_read"].as_u64().expect("read is a count");
+            let parsed = counts["files_parsed"].as_u64().expect("parsed is a count");
+            files_read += read;
+            files_parsed += parsed;
+            if phase == "parse" {
+                analysis_parsed = parsed;
+            } else {
+                discovery_read = read;
+            }
+        }
+        assert!(
+            files_parsed <= 2 * files_read,
+            "a file must be parsed at most twice: {files_parsed} parses for {files_read} reads"
+        );
+        assert!(
+            analysis_parsed <= discovery_read,
+            "every analyzed file must have been discovered: {analysis_parsed} analysis parses \
+             against {discovery_read} discovery reads"
         );
     }
 

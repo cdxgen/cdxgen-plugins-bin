@@ -23,6 +23,13 @@
 //! the determinism check ignores them. The peak RSS is the kernel's
 //! high-water mark at the moment the phase ended, so the entries read as a
 //! staircase of where the run's memory actually went.
+//!
+//! How many source files each front-of-pipeline phase read from disk and
+//! parsed with `syn` is deterministic like the work counters, and it is the
+//! checked form of the "each file is parsed at most twice" promise: the
+//! `file_work` section of the stats document carries the two numbers per
+//! phase, so a change that starts re-reading or re-parsing shows up as a
+//! number rather than as a claim.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -147,6 +154,58 @@ pub fn work() -> &'static WorkCounters {
     &WORK
 }
 
+/// Source files one front-of-pipeline phase read from disk and parsed with
+/// `syn`. A read is counted when the file is opened, a parse when `syn`
+/// accepted it, so a file that fails either is counted once and only once.
+#[derive(Default)]
+struct FileWorkCounters {
+    /// Reads and parses of the combined module-discovery and macro pre-pass.
+    discovery_files_read: AtomicU64,
+    discovery_files_parsed: AtomicU64,
+    /// Reads and parses of the per-file analysis pass. It parses from the
+    /// text discovery kept, so its read count stays at zero unless a file
+    /// could not be read during discovery and is tried once more.
+    analysis_files_read: AtomicU64,
+    analysis_files_parsed: AtomicU64,
+}
+
+static FILE_WORK: FileWorkCounters = FileWorkCounters {
+    discovery_files_read: AtomicU64::new(0),
+    discovery_files_parsed: AtomicU64::new(0),
+    analysis_files_read: AtomicU64::new(0),
+    analysis_files_parsed: AtomicU64::new(0),
+};
+
+/// The front-of-pipeline phase whose file reads and parses a call site
+/// counts. The name in the stats document is the phase's name there.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum FileWorkPhase {
+    /// The combined module discovery and macro pre-pass.
+    Discovery,
+    /// The per-file analysis pass.
+    Analysis,
+}
+
+impl FileWorkPhase {
+    pub(crate) fn count_read(&self) {
+        let counters = &FILE_WORK;
+        let counter = match self {
+            Self::Discovery => &counters.discovery_files_read,
+            Self::Analysis => &counters.analysis_files_read,
+        };
+        counter.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub(crate) fn count_parsed(&self) {
+        let counters = &FILE_WORK;
+        let counter = match self {
+            Self::Discovery => &counters.discovery_files_parsed,
+            Self::Analysis => &counters.analysis_files_parsed,
+        };
+        counter.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
 /// Peak resident set size the process has reached so far, in bytes, or
 /// `None` where the platform offers no read. The kernel's
 /// `getrusage(RUSAGE_SELF).ru_maxrss` is a high-water mark, so a later
@@ -245,8 +304,8 @@ pub fn record_compiler_counts(counts: WrapperWorkCounts) {
     }
 }
 
-/// The stats document `--stats-json` writes: deterministic counts plus the
-/// informational phase times.
+/// The stats document `--stats-json` writes: deterministic counts, the
+/// per-phase file reads and parses, and the informational phase times.
 pub fn snapshot_value() -> serde_json::Value {
     let counters = &WORK;
     let load = |counter: &AtomicU64| counter.load(Ordering::Relaxed);
@@ -277,6 +336,17 @@ pub fn snapshot_value() -> serde_json::Value {
             })
         })
         .collect();
+    let files = &FILE_WORK;
+    let file_work = serde_json::json!({
+        "module_tree_macro_prepass": {
+            "files_read": load(&files.discovery_files_read),
+            "files_parsed": load(&files.discovery_files_parsed),
+        },
+        "parse": {
+            "files_read": load(&files.analysis_files_read),
+            "files_parsed": load(&files.analysis_files_parsed),
+        },
+    });
     serde_json::json!({
         "counts": {
             "functions": load(&counters.functions),
@@ -294,6 +364,7 @@ pub fn snapshot_value() -> serde_json::Value {
             "join_entries_visited_summary": load(&counters.join_entries_visited_summary),
             "join_entries_visited_concrete": load(&counters.join_entries_visited_concrete),
         },
+        "file_work": file_work,
         "phase_seconds": phases,
         "phases": phase_entries,
         "compiler": compiler,
@@ -387,6 +458,31 @@ mod tests {
             assert!(
                 entry["peak_rss_bytes"].is_null() || entry["peak_rss_bytes"].is_number(),
                 "a phase's peak RSS is a reading or null, never a counter"
+            );
+        }
+    }
+
+    #[test]
+    fn the_file_work_section_names_the_front_of_the_pipeline() {
+        // The `file_work` section is where the "each file is parsed at most
+        // twice" promise is checked, so its shape is part of the document:
+        // one entry per front-of-pipeline phase, each carrying both counts.
+        let value = snapshot_value();
+        let file_work = value["file_work"]
+            .as_object()
+            .expect("file_work is an object");
+        assert_eq!(
+            file_work.len(),
+            2,
+            "the documented set of file work phases changed: {file_work:?}"
+        );
+        for phase in ["module_tree_macro_prepass", "parse"] {
+            let entry = file_work
+                .get(phase)
+                .unwrap_or_else(|| panic!("file work of the {phase} phase is in the document"));
+            assert!(
+                entry["files_read"].is_u64() && entry["files_parsed"].is_u64(),
+                "the {phase} phase carries plain read and parse counts, got {entry}"
             );
         }
     }
