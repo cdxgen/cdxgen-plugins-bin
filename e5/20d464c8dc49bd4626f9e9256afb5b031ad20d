@@ -1,0 +1,42 @@
+thirdparty/rusi/crates/rusi-core/src/macro_expand/hygiene.rs
+  s_44e6270843dd7a::t_9f2a5079594a08 27,35
+  s_44e6270843dd7a::t_b3205cc0c68957 61-65
+  s_44e6270843dd7a::t_133c0e8e911c28 38-58,60
+  s_44e6270843dd7a::t_72a6830b2308ab 28-30,36-37
+thirdparty/rusi/crates/rusi-core/src/lib.rs
+  s_44e6270843dd7a::t_4ed078250f8926 2640-2641
+  s_44e6270843dd7a::t_37919a16c40544 2133-2138,2140-2141
+  s_44e6270843dd7a::t_07222c830c6062 1408-1411
+  s_44e6270843dd7a::t_bd5069c1187b55 2742,3247,23772
+  s_44e6270843dd7a::t_1d1c3e72adc6ec 1632-1636
+  s_44e6270843dd7a::t_7e2bb916fc9a5f 1542-1564,1566-1569
+  s_44e6270843dd7a::t_2afde659ae891b 1657-1668
+  s_44e6270843dd7a::t_7a1ab9df6098e0 1435-1438,1441-1445,1450-1457
+  s_44e6270843dd7a::t_bb8a920696a25c 1734
+  s_44e6270843dd7a::t_a3464ed1fbb511 1743-1754
+  s_44e6270843dd7a::t_a3ed605bb3dcb5 1412-1414
+  s_44e6270843dd7a::t_622f0376fa33ff 1609-1631,1637
+  s_44e6270843dd7a::t_2918f8675034a3 1439-1440,1565,1588-1590
+  s_44e6270843dd7a::t_a894f90279c528 1346-1347,1351-1352
+  s_44e6270843dd7a::t_83aeb8c1231d7a 1523-1537,1541,1579-1585
+  s_44e6270843dd7a::t_07bd4af64de46c 1755
+thirdparty/rusi/crates/rusi-core/src/macro_expand/mod.rs
+  s_44e6270843dd7a::t_2918f8675034a3 31
+  s_44e6270843dd7a::t_cc901ffb66ff7f 29
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e520d464c8dc49bd4626f9e9256afb5b031ad20d",
+  "prompts": {},
+  "sessions": {
+    "s_44e6270843dd7a": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_96486ef3-758c-4c44-9c6c-e586a1e2d571",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
