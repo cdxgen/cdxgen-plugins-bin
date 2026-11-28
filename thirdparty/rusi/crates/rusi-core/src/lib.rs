@@ -2081,17 +2081,7 @@ where
     U: Send,
     F: Fn(&T) -> U + Sync,
 {
-    let configured_workers = std::env::var("RUSI_THREADS")
-        .ok()
-        .and_then(|value| value.parse::<usize>().ok())
-        .filter(|value| *value > 0);
-    let workers = configured_workers
-        .unwrap_or_else(|| {
-            std::thread::available_parallelism()
-                .map(|count| count.get())
-                .unwrap_or(1)
-        })
-        .min(items.len().max(1));
+    let workers = analysis_worker_count().min(items.len().max(1));
     if workers <= 1 || items.len() <= 1 {
         return items.iter().map(&func).collect();
     }
@@ -2118,6 +2108,22 @@ where
         }
     });
     flattened
+}
+
+/// How many worker threads the parallel passes run on. `RUSI_THREADS`
+/// overrides the machine's parallelism, the way `RUST_MIN_STACK` overrides
+/// the stack size.
+pub(crate) fn analysis_worker_count() -> usize {
+    std::env::var("RUSI_THREADS")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or_else(|| {
+            std::thread::available_parallelism()
+                .map(|count| count.get())
+                .unwrap_or(1)
+        })
+        .max(1)
 }
 
 /// One workspace package plus everything discovery resolved for it: the active
@@ -2216,8 +2222,10 @@ fn plan_packages(
         })
         .collect();
     // Discovery reads and parses every module file once, both to walk the
-    // `mod` tree and to collect the macro pre-pass items from the same parse,
-    // so it is worth spreading across packages the same way file analysis is.
+    // `mod` tree and to collect the macro pre-pass items from the same parse.
+    // The per-file work runs on one shared pool so the walk of a package with
+    // a single huge crate does not serialize the phase behind it.
+    let pool = module_tree::DiscoveryPool::spawn(analysis_worker_count());
     let planned = stats::time_phase("module_tree_macro_prepass", || {
         parallel_map_collect(&packages, |(package, workspace_member)| {
             let package_ctx = package_context(package, *workspace_member)?;
@@ -2231,7 +2239,7 @@ fn plan_packages(
                 include_tests && *workspace_member,
                 !*workspace_member,
             );
-            let module_tree = module_tree::discover(
+            let module_tree = module_tree::discover_with_pool(
                 &package_ctx,
                 &roots,
                 &evaluator,
@@ -2241,6 +2249,7 @@ fn plan_packages(
                     .get(package.name.as_str())
                     .copied()
                     .unwrap_or(true),
+                &pool,
             )?;
             Ok(PackageAnalysisPlan {
                 package_ctx,
@@ -2250,6 +2259,7 @@ fn plan_packages(
         })
     });
     let mut plans = planned.into_iter().collect::<Result<Vec<_>>>()?;
+    drop(pool);
     plans.sort_by(|left, right| {
         left.package_ctx
             .package_name

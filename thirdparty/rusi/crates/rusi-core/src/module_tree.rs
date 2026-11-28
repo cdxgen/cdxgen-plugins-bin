@@ -126,10 +126,20 @@ pub(crate) fn crate_roots(
 /// Walks every crate root of the package, then sweeps for orphan files.
 ///
 /// Each file is read and parsed once; the parse feeds both the `mod` walk
-/// and the macro pre-pass, and its text is kept for the analysis pass.
+/// and the macro pre-pass, and the text is kept for the analysis pass.
 /// `analysis_root` is the directory the report's file paths are relative to,
 /// and `edition_2021` is the package's edition as the macro pre-pass reads
 /// patterns.
+///
+/// The per-file half of the walk (read, parse, extract, resolve children)
+/// runs on [`DiscoveryPool`] workers, so one huge crate does not serialize
+/// the front of the pipeline behind it. The traversal decisions stay on the
+/// caller's thread, and the results are replayed in the order a sequential
+/// walk would have produced them, so the notes and the returned tree are
+/// exactly what that walk recorded, whatever order the workers finished in.
+/// Test entry point with its own small pool; the pipeline uses
+/// [`discover_with_pool`] so packages share one pool.
+#[cfg(test)]
 pub(crate) fn discover(
     package_ctx: &PackageContext,
     roots: &[CrateRoot],
@@ -137,6 +147,31 @@ pub(crate) fn discover(
     include_tests: bool,
     analysis_root: &Path,
     edition_2021: bool,
+) -> Result<ModuleTree> {
+    let pool = DiscoveryPool::spawn(crate::analysis_worker_count());
+    let tree = discover_with_pool(
+        package_ctx,
+        roots,
+        evaluator,
+        include_tests,
+        analysis_root,
+        edition_2021,
+        &pool,
+    );
+    drop(pool);
+    tree
+}
+
+/// [`discover`] on a caller-provided pool, so a planning phase can share one
+/// pool across every package it walks.
+pub(crate) fn discover_with_pool(
+    package_ctx: &PackageContext,
+    roots: &[CrateRoot],
+    evaluator: &CfgEvaluator,
+    include_tests: bool,
+    analysis_root: &Path,
+    edition_2021: bool,
+    pool: &DiscoveryPool,
 ) -> Result<ModuleTree> {
     let mut tree = ModuleTree::default();
     // A file can legitimately be reached by several roots (a module shared by a
@@ -148,277 +183,608 @@ pub(crate) fn discover(
     // package under analysis, which the previous directory walk also refused to
     // follow.
     let allowed_root = crate::canonical_path(&package_ctx.root_dir);
-    // The read and the parse of each walked file, keyed by path while the
-    // walk runs and aligned with `files` once the sort below fixes their
-    // order. The text slot is `None` where the file could not be read, so
-    // the analysis pass knows to read it again.
-    let mut sources: HashMap<PathBuf, Option<String>> = HashMap::new();
-    let mut prepasses: HashMap<PathBuf, MacroFilePrepass> = HashMap::new();
+    // What each walk task produced, keyed by path; replayed into the tree in
+    // walk order once every root has drained.
+    let mut walked: HashMap<PathBuf, WalkedFile> = HashMap::new();
+    // The notes of each root's subtree, in walk order. The walk notes have to
+    // wait here rather than go straight into the tree, because a root whose
+    // root file is missing pushes its note before the next root's subtree
+    // notes, exactly as the sequential walk did.
+    let mut root_notes: Vec<Vec<ModuleTreeNote>> = Vec::new();
 
     for root in roots {
         if !root.path.is_file() {
-            tree.notes.push(ModuleTreeNote {
+            root_notes.push(vec![ModuleTreeNote {
                 message: format!(
                     "crate root for target `{}` does not exist: {}",
                     root.target_name,
                     root.path.display()
                 ),
                 file_path: None,
-            });
+            }]);
             continue;
         }
-        let mut walker = ModuleWalker {
+        let Some(root_path) = contained_file(&root.path, &allowed_root) else {
+            root_notes.push(vec![ModuleTreeNote {
+                message: format!(
+                    "crate root for target `{}` resolves outside the package directory and was \
+                     skipped: {}",
+                    root.target_name,
+                    root.path.display()
+                ),
+                file_path: None,
+            }]);
+            continue;
+        };
+        root_notes.push(walk_root(
+            pool,
             root,
-            allowed_root: &allowed_root,
-            analysis_root,
+            &root_path,
             evaluator,
             edition_2021,
-            claimed: &mut claimed,
-            files: &mut tree.files,
-            notes: &mut tree.notes,
-            sources: &mut sources,
-            prepasses: &mut prepasses,
-        };
-        walker.walk_root()?;
+            analysis_root,
+            &allowed_root,
+            &mut claimed,
+            &mut walked,
+        ));
     }
 
     let orphans = collect_orphans(package_ctx, &claimed, include_tests)?;
-    for path in orphans {
-        tree.notes.push(ModuleTreeNote {
+    // An orphan's one read and parse also feed the macro pre-pass, exactly as
+    // a reached file's do, and it runs on the pool like everything else: a
+    // dependency closure usually sweeps up more files than its `mod` trees
+    // reach, so the orphan sweep is most of the files of the run. A file that
+    // cannot be read stays on the `None` slot so the analysis pass reads it
+    // again and reports the failure there, as it does for a reached file.
+    let (reply, replies) = std::sync::mpsc::channel::<WalkOutcome>();
+    let evaluator = std::sync::Arc::new(evaluator.clone());
+    let analysis_root = std::sync::Arc::new(analysis_root.to_path_buf());
+    let allowed_root = std::sync::Arc::new(allowed_root.to_path_buf());
+    let mut outstanding = 0usize;
+    for path in &orphans {
+        if !claimed.insert(path.clone()) {
+            continue;
+        }
+        outstanding += 1;
+        pool.send(WalkJob {
+            path: path.clone(),
+            module_path: crate::module_path_for_file(package_ctx, path),
+            target_name: package_ctx.package_name.clone(),
+            target_kind: "unknown".to_string(),
+            orphan: true,
+            evaluator: std::sync::Arc::clone(&evaluator),
+            analysis_root: std::sync::Arc::clone(&analysis_root),
+            allowed_root: std::sync::Arc::clone(&allowed_root),
+            edition_2021,
+            reply: reply.clone(),
+        });
+    }
+    let mut orphan_notes = Vec::with_capacity(outstanding);
+    while outstanding > 0 {
+        match replies.recv() {
+            Ok(WalkOutcome::Done(file)) => {
+                outstanding -= 1;
+                let file = *file;
+                walked.insert(file.path.clone(), file);
+            }
+            // A worker that panicked on a file re-raises here, the way the
+            // analysis pool's joins do.
+            Ok(WalkOutcome::Panicked(panic)) => std::panic::resume_unwind(panic),
+            Err(_) => break,
+        }
+    }
+    for path in &orphans {
+        orphan_notes.push(ModuleTreeNote {
             message: "file is not reachable from any crate root; module path derived from the \
                       file path"
                 .to_string(),
             file_path: Some(path.clone()),
         });
-        let module_path = crate::module_path_for_file(package_ctx, &path);
-        // An orphan's one read and parse also feed the macro pre-pass, exactly
-        // as a reached file's do. A file that cannot be read stays on the
-        // `None` slot so the analysis pass reads it again and reports the
-        // failure there, as it does for a reached file.
-        let source = fs::read_to_string(&path).ok();
-        crate::stats::FileWorkPhase::Discovery.count_read();
-        let prepass = match source
-            .as_deref()
-            .and_then(|source| syn::parse_file(source).ok())
-        {
-            Some(syntax) => {
-                crate::stats::FileWorkPhase::Discovery.count_parsed();
-                let relative = crate::relative_display_path(analysis_root, &path);
-                macro_expand::prepass_from_parsed(
-                    &syntax,
-                    &module_path,
-                    &relative,
-                    evaluator,
-                    edition_2021,
-                )
-            }
-            None => MacroFilePrepass::default(),
-        };
-        sources.insert(path.clone(), source);
-        prepasses.insert(path.clone(), prepass);
-        tree.files.push(DiscoveredFile {
-            path,
-            module_path,
-            target_name: package_ctx.package_name.clone(),
-            target_kind: "unknown".to_string(),
-            orphan: true,
-        });
     }
+    root_notes.push(orphan_notes);
 
-    tree.files.sort_by(|left, right| left.path.cmp(&right.path));
-    for file in &tree.files {
-        tree.sources
-            .push(sources.remove(&file.path).unwrap_or(None));
-        tree.prepasses
-            .push(prepasses.remove(&file.path).unwrap_or_default());
+    // The tree is returned in path order, as before; the notes come out in
+    // walk order, roots and orphans included.
+    let mut files: Vec<WalkedFile> = walked.into_values().collect();
+    files.sort_by(|left, right| left.path.cmp(&right.path));
+    for file in files {
+        tree.files.push(DiscoveredFile {
+            path: file.path,
+            module_path: file.module_path,
+            target_name: file.target_name,
+            target_kind: file.target_kind,
+            orphan: file.orphan,
+        });
+        tree.sources.push(file.source);
+        tree.prepasses.push(file.prepass);
+    }
+    for notes in root_notes {
+        tree.notes.extend(notes);
     }
     Ok(tree)
 }
 
-struct ModuleWalker<'a> {
-    root: &'a CrateRoot,
-    allowed_root: &'a Path,
-    analysis_root: &'a Path,
-    evaluator: &'a CfgEvaluator,
+/// Walks one crate root to its end on `pool`, and returns the notes the
+/// sequential walk would have pushed for the subtree, in its order.
+///
+/// Files are claimed as they are enqueued, so a module shared by two roots
+/// is recorded once, under the first root that reaches it: roots drain one
+/// at a time, in their order.
+#[allow(clippy::too_many_arguments)]
+fn walk_root(
+    pool: &DiscoveryPool,
+    root: &CrateRoot,
+    root_path: &Path,
+    evaluator: &CfgEvaluator,
     edition_2021: bool,
-    claimed: &'a mut HashSet<PathBuf>,
-    files: &'a mut Vec<DiscoveredFile>,
-    notes: &'a mut Vec<ModuleTreeNote>,
-    sources: &'a mut HashMap<PathBuf, Option<String>>,
-    prepasses: &'a mut HashMap<PathBuf, MacroFilePrepass>,
+    analysis_root: &Path,
+    allowed_root: &Path,
+    claimed: &mut HashSet<PathBuf>,
+    walked: &mut HashMap<PathBuf, WalkedFile>,
+) -> Vec<ModuleTreeNote> {
+    let (reply, replies) = std::sync::mpsc::channel::<WalkOutcome>();
+    let evaluator = std::sync::Arc::new(evaluator.clone());
+    let analysis_root = std::sync::Arc::new(analysis_root.to_path_buf());
+    let allowed_root = std::sync::Arc::new(allowed_root.to_path_buf());
+
+    // The coordinator claims a file when it enqueues it, so the worker that
+    // parses it always works on a file no other task will touch.
+    let mut outstanding = {
+        claimed.insert(root_path.to_path_buf());
+        1usize
+    };
+    pool.send(WalkJob {
+        path: root_path.to_path_buf(),
+        module_path: Vec::new(),
+        target_name: root.target_name.clone(),
+        target_kind: root.target_kind.clone(),
+        orphan: false,
+        evaluator: std::sync::Arc::clone(&evaluator),
+        analysis_root: std::sync::Arc::clone(&analysis_root),
+        allowed_root: std::sync::Arc::clone(&allowed_root),
+        edition_2021,
+        reply: reply.clone(),
+    });
+
+    while outstanding > 0 {
+        match replies.recv() {
+            Ok(WalkOutcome::Done(file)) => {
+                outstanding -= 1;
+                let file = *file;
+                // Out-of-line children to walk next, in walk order, each with
+                // the module path the walk visits it under. Inline modules
+                // extend the path with their name; their out-of-line children
+                // are enqueued from the same result.
+                let mut to_visit: Vec<(Vec<String>, PathBuf)> = Vec::new();
+                collect_file_children(&file.children, &file.module_path, &mut to_visit);
+                for (module_path, path) in to_visit {
+                    if claimed.insert(path.clone()) {
+                        outstanding += 1;
+                        pool.send(WalkJob {
+                            path,
+                            module_path,
+                            target_name: root.target_name.clone(),
+                            target_kind: root.target_kind.clone(),
+                            orphan: false,
+                            evaluator: std::sync::Arc::clone(&evaluator),
+                            analysis_root: std::sync::Arc::clone(&analysis_root),
+                            allowed_root: std::sync::Arc::clone(&allowed_root),
+                            edition_2021,
+                            reply: reply.clone(),
+                        });
+                    }
+                }
+                walked.insert(file.path.clone(), file);
+            }
+            // A worker that panicked on a file re-raises here, the way the
+            // analysis pool's joins do.
+            Ok(WalkOutcome::Panicked(panic)) => std::panic::resume_unwind(panic),
+            Err(_) => break,
+        }
+    }
+
+    let mut notes = Vec::new();
+    replay_walk_notes(root_path, walked, &mut notes);
+    notes
 }
 
-impl ModuleWalker<'_> {
-    fn walk_root(&mut self) -> Result<()> {
-        let Some(path) = self.contained_file(&self.root.path) else {
-            self.notes.push(ModuleTreeNote {
-                message: format!(
-                    "crate root for target `{}` resolves outside the package directory and was \
-                     skipped: {}",
-                    self.root.target_name,
-                    self.root.path.display()
-                ),
-                file_path: None,
-            });
-            return Ok(());
-        };
-        self.walk_file(path, Vec::new())
-    }
-
-    /// Canonicalizes a candidate module file and accepts it only when it is a
-    /// real (non-symlink) file inside the package directory.
-    fn contained_file(&self, path: &Path) -> Option<PathBuf> {
-        let metadata = fs::symlink_metadata(path).ok()?;
-        if metadata.file_type().is_symlink() || !metadata.is_file() {
-            return None;
+/// Collects the out-of-line children a walk would visit next, in walk
+/// order, each with the module path it is visited under.
+fn collect_file_children(
+    children: &[WalkedChild],
+    module_path: &[String],
+    out: &mut Vec<(Vec<String>, PathBuf)>,
+) {
+    for child in children {
+        match child {
+            WalkedChild::Inline { name, nested } => {
+                let mut nested_path = module_path.to_vec();
+                nested_path.push(name.clone());
+                collect_file_children(nested, &nested_path, out);
+            }
+            WalkedChild::File { name, path } => {
+                let mut child_path = module_path.to_vec();
+                child_path.push(name.clone());
+                out.push((child_path, path.clone()));
+            }
+            WalkedChild::Unresolved { .. } => {}
         }
-        let canonical = fs::canonicalize(path).ok()?;
-        canonical
-            .starts_with(self.allowed_root)
-            .then_some(canonical)
     }
+}
 
-    /// Reads one module file, records it, and follows the `mod` declarations
-    /// it contains.
-    ///
-    /// The one parse this walk makes also feeds the macro pre-pass, and the
-    /// text is kept for the analysis pass, which parses the file a second
-    /// time from it. Holding the text (at most a few tens of megabytes for a
-    /// whole dependency closure) is far cheaper than holding parsed trees,
-    /// and a second `syn` parse beats a second disk read.
-    fn walk_file(&mut self, path: PathBuf, module_path: Vec<String>) -> Result<()> {
-        if !self.claimed.insert(path.clone()) {
-            return Ok(());
-        }
-        self.files.push(DiscoveredFile {
-            path: path.clone(),
-            module_path: module_path.clone(),
-            target_name: self.root.target_name.clone(),
-            target_kind: self.root.target_kind.clone(),
-            orphan: false,
+/// Replays one file's walk notes in the order the sequential walk pushed
+/// them: the read failure first, then the `mod` items in declaration order,
+/// descending into resolved children as the walk did.
+fn replay_walk_notes(
+    path: &Path,
+    walked: &HashMap<PathBuf, WalkedFile>,
+    notes: &mut Vec<ModuleTreeNote>,
+) {
+    let Some(file) = walked.get(path) else {
+        return;
+    };
+    if let Some(error) = &file.read_error {
+        notes.push(ModuleTreeNote {
+            message: format!("could not read module file: {error}"),
+            file_path: Some(file.path.clone()),
         });
+    }
+    replay_child_notes(path, &file.children, walked, notes);
+}
 
-        // An unreadable or non-UTF-8 file must not abort the whole run: the file
-        // itself is already recorded, discovery just cannot descend through it,
-        // exactly as for a parse failure below. Its slot stays empty so the
-        // analysis pass reads it again and reports the failure there.
-        let source = match fs::read_to_string(&path) {
-            Ok(source) => {
-                crate::stats::FileWorkPhase::Discovery.count_read();
-                source
+fn replay_child_notes(
+    owner: &Path,
+    children: &[WalkedChild],
+    walked: &HashMap<PathBuf, WalkedFile>,
+    notes: &mut Vec<ModuleTreeNote>,
+) {
+    for child in children {
+        match child {
+            WalkedChild::Inline { nested, .. } => replay_child_notes(owner, nested, walked, notes),
+            WalkedChild::Unresolved { name, declared_in } => notes.push(ModuleTreeNote {
+                message: format!(
+                    "could not resolve `mod {name};` declared in module path `{}`",
+                    if declared_in.is_empty() {
+                        "<crate root>".to_string()
+                    } else {
+                        declared_in.join("::")
+                    }
+                ),
+                file_path: Some(owner.to_path_buf()),
+            }),
+            WalkedChild::File { path, .. } => replay_walk_notes(path, walked, notes),
+        }
+    }
+}
+
+/// One `mod` item a walk task saw, in declaration order, with what the walk
+/// would have done about it.
+enum WalkedChild {
+    /// An inline module: its `mod` items live in the same file.
+    Inline {
+        name: String,
+        nested: Vec<WalkedChild>,
+    },
+    /// An out-of-line module resolved to a file.
+    File { name: String, path: PathBuf },
+    /// An out-of-line module that resolved to no file.
+    Unresolved {
+        name: String,
+        declared_in: Vec<String>,
+    },
+}
+
+/// What one walk task produced for its file.
+struct WalkedFile {
+    path: PathBuf,
+    module_path: Vec<String>,
+    target_name: String,
+    target_kind: String,
+    orphan: bool,
+    /// The file's text, `None` where it could not be read, so the analysis
+    /// pass reads it again and reports the failure there.
+    source: Option<String>,
+    prepass: MacroFilePrepass,
+    /// The file's `mod` items in declaration order.
+    children: Vec<WalkedChild>,
+    /// The read error, when the file could not be read.
+    read_error: Option<String>,
+}
+
+/// A read, parse, and pre-pass of one discovered file.
+struct WalkJob {
+    path: PathBuf,
+    module_path: Vec<String>,
+    target_name: String,
+    target_kind: String,
+    /// True for a file the orphan sweep picked up, which no crate root
+    /// reached and whose module path is derived from its location.
+    orphan: bool,
+    evaluator: std::sync::Arc<CfgEvaluator>,
+    analysis_root: std::sync::Arc<PathBuf>,
+    allowed_root: std::sync::Arc<PathBuf>,
+    edition_2021: bool,
+    reply: std::sync::mpsc::Sender<WalkOutcome>,
+}
+
+/// What a worker sends back for one [`WalkJob`]. The result is boxed so the
+/// rare panic variant does not carry the size of a whole file's walk.
+enum WalkOutcome {
+    Done(Box<WalkedFile>),
+    /// The worker panicked on this file. The coordinator re-raises the way
+    /// the analysis pool's joins do.
+    Panicked(Box<dyn std::any::Any + Send>),
+}
+
+impl WalkJob {
+    fn run(self) {
+        let WalkJob {
+            path,
+            module_path,
+            target_name,
+            target_kind,
+            orphan,
+            evaluator,
+            analysis_root,
+            allowed_root,
+            edition_2021,
+            reply,
+        } = self;
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            walk_one_file(
+                &path,
+                &module_path,
+                &evaluator,
+                &analysis_root,
+                &allowed_root,
+                edition_2021,
+            )
+        }));
+        let outcome = match outcome {
+            Ok((source, prepass, children, read_error)) => {
+                WalkOutcome::Done(Box::new(WalkedFile {
+                    path,
+                    module_path,
+                    target_name,
+                    target_kind,
+                    orphan,
+                    source,
+                    prepass,
+                    children,
+                    read_error,
+                }))
             }
-            Err(error) => {
-                self.sources.insert(path.clone(), None);
-                self.notes.push(ModuleTreeNote {
-                    message: format!("could not read module file: {error}"),
-                    file_path: Some(path),
+            Err(panic) => WalkOutcome::Panicked(panic),
+        };
+        let _ = reply.send(outcome);
+    }
+}
+
+/// Reads one module file, parses it once for both the `mod` structure and
+/// the macro pre-pass, and records what the walk would do about each `mod`
+/// item. The text is kept for the analysis pass, which parses the file a
+/// second time from it: holding the text (a few tens of megabytes for a
+/// whole dependency closure) is far cheaper than holding parsed trees,
+/// which `syn` spans could not hand across threads anyway.
+#[allow(clippy::type_complexity)]
+fn walk_one_file(
+    path: &Path,
+    module_path: &[String],
+    evaluator: &CfgEvaluator,
+    analysis_root: &Path,
+    allowed_root: &Path,
+    edition_2021: bool,
+) -> (
+    Option<String>,
+    MacroFilePrepass,
+    Vec<WalkedChild>,
+    Option<String>,
+) {
+    // An unreadable or non-UTF-8 file must not abort the whole run: the file
+    // itself is recorded, discovery just cannot descend through it, exactly
+    // as for a parse failure below.
+    let source = match fs::read_to_string(path) {
+        Ok(source) => {
+            crate::stats::FileWorkPhase::Discovery.count_read();
+            source
+        }
+        Err(error) => {
+            return (
+                None,
+                MacroFilePrepass::default(),
+                Vec::new(),
+                Some(error.to_string()),
+            );
+        }
+    };
+    // A parse failure here is reported by the analysis pass, which parses
+    // the same file; discovery just cannot descend any further.
+    let syntax = match syn::parse_file(&source) {
+        Ok(syntax) => {
+            crate::stats::FileWorkPhase::Discovery.count_parsed();
+            syntax
+        }
+        Err(_) => return (Some(source), MacroFilePrepass::default(), Vec::new(), None),
+    };
+    let relative = crate::relative_display_path(analysis_root, path);
+    let prepass =
+        macro_expand::prepass_from_parsed(&syntax, module_path, &relative, evaluator, edition_2021);
+    // Only `walk_root` starts with an empty module path, so this is exactly
+    // the crate-root test, and rustc's rule is positional, not by filename:
+    // a crate root owns its own directory whatever it is called.
+    let child_dir = child_module_dir(path, module_path.is_empty());
+    // `#[path]` on a module *not* inside an inline block is relative to the
+    // directory the declaring file sits in, which is not the directory its
+    // pathless children live in: for `src/foo.rs` those are `src/foo/` but a
+    // `#[path = "explicit.rs"]` there means `src/explicit.rs`. The two
+    // coincide for crate roots and `mod.rs`, which is why the distinction
+    // stayed invisible.
+    let attr_dir = path.parent().unwrap_or(Path::new(".")).to_path_buf();
+    let children = collect_children(
+        &syntax.items,
+        &child_dir,
+        &attr_dir,
+        module_path,
+        allowed_root,
+        evaluator,
+    );
+    (Some(source), prepass, children, None)
+}
+
+/// Records what the walk would do about each `mod` item, in declaration
+/// order, resolving out-of-line modules the way the walk resolves them.
+fn collect_children(
+    items: &[syn::Item],
+    child_dir: &Path,
+    attr_dir: &Path,
+    module_path: &[String],
+    allowed_root: &Path,
+    evaluator: &CfgEvaluator,
+) -> Vec<WalkedChild> {
+    let mut children = Vec::new();
+    for item in items {
+        let syn::Item::Mod(item_mod) = item else {
+            continue;
+        };
+        if !evaluator.attrs_enabled(&item_mod.attrs) {
+            continue;
+        }
+        let name = item_mod.ident.to_string();
+        let mut nested_path = module_path.to_vec();
+        nested_path.push(name.clone());
+
+        match &item_mod.content {
+            // An inline module's own out-of-line children live in a
+            // directory named after it.
+            // Inside an inline block both bases are the same directory: the
+            // inline module's name becomes a path component for its
+            // out-of-line children and for a `#[path]` alike.
+            Some((_, nested_items)) => {
+                let nested_dir = child_dir.join(&name);
+                children.push(WalkedChild::Inline {
+                    name,
+                    nested: collect_children(
+                        nested_items,
+                        &nested_dir,
+                        &nested_dir,
+                        &nested_path,
+                        allowed_root,
+                        evaluator,
+                    ),
                 });
-                return Ok(());
             }
-        };
-        // A parse failure here is reported by the analysis pass, which parses
-        // the same file; discovery just cannot descend any further.
-        let syntax = match syn::parse_file(&source) {
-            Ok(syntax) => {
-                crate::stats::FileWorkPhase::Discovery.count_parsed();
-                syntax
-            }
-            Err(_) => {
-                self.sources.insert(path, Some(source));
-                return Ok(());
-            }
-        };
-        // The macro pre-pass reads its items from the same tree, so the file
-        // is not parsed a second time to collect its macros.
-        let relative = crate::relative_display_path(self.analysis_root, &path);
-        let prepass = macro_expand::prepass_from_parsed(
-            &syntax,
-            &module_path,
-            &relative,
-            self.evaluator,
-            self.edition_2021,
-        );
-        self.sources.insert(path.clone(), Some(source));
-        self.prepasses.insert(path.clone(), prepass);
+            None => match resolve_module_file(item_mod, child_dir, attr_dir, &name, allowed_root) {
+                Some(path) => children.push(WalkedChild::File { name, path }),
+                None => children.push(WalkedChild::Unresolved {
+                    name,
+                    declared_in: module_path.to_vec(),
+                }),
+            },
+        }
+    }
+    children
+}
 
-        // Only `walk_root` starts with an empty module path, so this is exactly
-        // the crate-root test — and rustc's rule is positional, not by filename:
-        // a crate root owns its own directory whatever it is called.
-        let child_dir = child_module_dir(&path, module_path.is_empty());
-        // `#[path]` on a module *not* inside an inline block is relative to the
-        // directory the declaring file sits in, which is not the directory its
-        // pathless children live in: for `src/foo.rs` those are `src/foo/` but a
-        // `#[path = "explicit.rs"]` there means `src/explicit.rs`. The two
-        // coincide for crate roots and `mod.rs`, which is why the distinction
-        // stayed invisible.
-        let attr_dir = path.parent().unwrap_or(Path::new(".")).to_path_buf();
-        self.walk_items(&syntax.items, &child_dir, &attr_dir, &module_path, &path)
+/// Canonicalizes a candidate module file and accepts it only when it is a
+/// real (non-symlink) file inside the package directory.
+fn contained_file(path: &Path, allowed_root: &Path) -> Option<PathBuf> {
+    let metadata = fs::symlink_metadata(path).ok()?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return None;
+    }
+    let canonical = fs::canonicalize(path).ok()?;
+    canonical.starts_with(allowed_root).then_some(canonical)
+}
+
+/// `#[path = "..."]` wins, resolved against `attr_dir`; otherwise
+/// `child_dir/name.rs` then `child_dir/name/mod.rs`.
+fn resolve_module_file(
+    item_mod: &syn::ItemMod,
+    child_dir: &Path,
+    attr_dir: &Path,
+    name: &str,
+    allowed_root: &Path,
+) -> Option<PathBuf> {
+    if let Some(path_attr) = module_path_attr(item_mod) {
+        return contained_file(&attr_dir.join(path_attr), allowed_root);
+    }
+    if let Some(flat) = contained_file(&child_dir.join(format!("{name}.rs")), allowed_root) {
+        return Some(flat);
+    }
+    contained_file(&child_dir.join(name).join("mod.rs"), allowed_root)
+}
+
+/// Workers that read, parse, and pre-pass one discovered file per task.
+///
+/// One pool is shared by every package of a planning phase, so a package
+/// with a single huge crate no longer serializes the front of the pipeline
+/// behind it. The workers own no state: each task carries everything it
+/// needs and sends its result to the coordinator that enqueued it.
+pub(crate) struct DiscoveryPool {
+    tx: Option<std::sync::mpsc::Sender<WalkJob>>,
+    workers: Vec<std::thread::JoinHandle<()>>,
+}
+
+impl DiscoveryPool {
+    /// Spawns `workers` walk workers.
+    pub(crate) fn spawn(workers: usize) -> Self {
+        let (tx, rx) = std::sync::mpsc::channel::<WalkJob>();
+        let rx = std::sync::Arc::new(std::sync::Mutex::new(rx));
+        let workers = (0..workers.max(1))
+            .map(|_| {
+                let rx = std::sync::Arc::clone(&rx);
+                std::thread::Builder::new()
+                    .name("rusi-discovery".to_string())
+                    .stack_size(crate::analysis_stack_size())
+                    .spawn(move || {
+                        loop {
+                            let received = match rx.lock() {
+                                Ok(received) => received,
+                                // The queue mutex is only poisoned by another
+                                // worker dying while holding it; this worker
+                                // exits and the pool's drop reports the panic.
+                                Err(_) => return,
+                            };
+                            let job = match received.recv() {
+                                Ok(job) => job,
+                                Err(_) => return,
+                            };
+                            drop(received);
+                            job.run();
+                        }
+                    })
+                    .expect("failed to spawn a discovery worker")
+            })
+            .collect();
+        Self {
+            tx: Some(tx),
+            workers,
+        }
     }
 
-    fn walk_items(
-        &mut self,
-        items: &[syn::Item],
-        child_dir: &Path,
-        attr_dir: &Path,
-        module_path: &[String],
-        owner: &Path,
-    ) -> Result<()> {
-        for item in items {
-            let syn::Item::Mod(item_mod) = item else {
-                continue;
-            };
-            if !self.evaluator.attrs_enabled(&item_mod.attrs) {
-                continue;
-            }
-            let name = item_mod.ident.to_string();
-            let mut nested_path = module_path.to_vec();
-            nested_path.push(name.clone());
-
-            match &item_mod.content {
-                // An inline module's own out-of-line children live in a
-                // directory named after it.
-                // Inside an inline block both bases are the same directory: the
-                // inline module's name becomes a path component for its
-                // out-of-line children and for a `#[path]` alike.
-                Some((_, nested_items)) => {
-                    let nested_dir = child_dir.join(&name);
-                    self.walk_items(nested_items, &nested_dir, &nested_dir, &nested_path, owner)?;
-                }
-                None => match self.resolve_module_file(item_mod, child_dir, attr_dir, &name) {
-                    Some(file) => self.walk_file(file, nested_path)?,
-                    None => self.notes.push(ModuleTreeNote {
-                        message: format!(
-                            "could not resolve `mod {name};` declared in module path `{}`",
-                            if module_path.is_empty() {
-                                "<crate root>".to_string()
-                            } else {
-                                module_path.join("::")
-                            }
-                        ),
-                        file_path: Some(owner.to_path_buf()),
-                    }),
-                },
-            }
+    /// Hands one file task to a worker. A worker that died mid-run closes
+    /// the queue and the send returns the job, which then runs on the
+    /// caller's thread so discovery still completes; the pool's drop
+    /// reports the panic that closed the queue.
+    fn send(&self, job: WalkJob) {
+        if let Some(tx) = &self.tx
+            && let Err(failed) = tx.send(job)
+        {
+            failed.0.run();
         }
-        Ok(())
     }
+}
 
-    /// `#[path = "..."]` wins, resolved against `attr_dir`; otherwise
-    /// `child_dir/name.rs` then `child_dir/name/mod.rs`.
-    fn resolve_module_file(
-        &self,
-        item_mod: &syn::ItemMod,
-        child_dir: &Path,
-        attr_dir: &Path,
-        name: &str,
-    ) -> Option<PathBuf> {
-        if let Some(path_attr) = module_path_attr(item_mod) {
-            return self.contained_file(&attr_dir.join(path_attr));
+impl Drop for DiscoveryPool {
+    fn drop(&mut self) {
+        // Closing the queue lets the workers finish and exit; the joins
+        // surface a worker panic the way the analysis pool does.
+        self.tx = None;
+        for worker in self.workers.drain(..) {
+            if let Err(panic) = worker.join() {
+                std::panic::resume_unwind(panic);
+            }
         }
-        if let Some(flat) = self.contained_file(&child_dir.join(format!("{name}.rs"))) {
-            return Some(flat);
-        }
-        self.contained_file(&child_dir.join(name).join("mod.rs"))
     }
 }
 
