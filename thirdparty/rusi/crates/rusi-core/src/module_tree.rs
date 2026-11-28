@@ -304,12 +304,17 @@ pub(crate) fn discover_with_pool(
     Ok(tree)
 }
 
-/// Walks one crate root to its end on `pool`, and returns the notes the
-/// sequential walk would have pushed for the subtree, in its order.
+/// Walks one crate root to its end and returns its notes in the order the
+/// sequential depth-first walk pushed them.
 ///
-/// Files are claimed as they are enqueued, so a module shared by two roots
-/// is recorded once, under the first root that reaches it: roots drain one
-/// at a time, in their order.
+/// The pool reads and parses every file the root can reach, each once,
+/// under the module path of whichever `mod` item reached it first in
+/// completion order. Nothing is claimed while the pool runs: once it has
+/// drained, [`replay_file`] walks the results depth first, claims each file
+/// at the point the sequential walk claimed it, and keeps it under that
+/// module path. A file shared with an earlier root is therefore left to that
+/// root, and a file reachable along two paths belongs to the path the
+/// depth-first order reaches first, whatever order the workers finished in.
 #[allow(clippy::too_many_arguments)]
 fn walk_root(
     pool: &DiscoveryPool,
@@ -323,58 +328,47 @@ fn walk_root(
     walked: &mut HashMap<PathBuf, WalkedFile>,
 ) -> Vec<ModuleTreeNote> {
     let (reply, replies) = std::sync::mpsc::channel::<WalkOutcome>();
-    let evaluator = std::sync::Arc::new(evaluator.clone());
-    let analysis_root = std::sync::Arc::new(analysis_root.to_path_buf());
-    let allowed_root = std::sync::Arc::new(allowed_root.to_path_buf());
-
-    // The coordinator claims a file when it enqueues it, so the worker that
-    // parses it always works on a file no other task will touch.
-    let mut outstanding = {
-        claimed.insert(root_path.to_path_buf());
-        1usize
-    };
-    pool.send(WalkJob {
-        path: root_path.to_path_buf(),
-        module_path: Vec::new(),
+    let shared_evaluator = std::sync::Arc::new(evaluator.clone());
+    let shared_analysis_root = std::sync::Arc::new(analysis_root.to_path_buf());
+    let shared_allowed_root = std::sync::Arc::new(allowed_root.to_path_buf());
+    let job = |path: PathBuf, module_path: Vec<String>| WalkJob {
+        path,
+        module_path,
         target_name: root.target_name.clone(),
         target_kind: root.target_kind.clone(),
         orphan: false,
-        evaluator: std::sync::Arc::clone(&evaluator),
-        analysis_root: std::sync::Arc::clone(&analysis_root),
-        allowed_root: std::sync::Arc::clone(&allowed_root),
+        evaluator: std::sync::Arc::clone(&shared_evaluator),
+        analysis_root: std::sync::Arc::clone(&shared_analysis_root),
+        allowed_root: std::sync::Arc::clone(&shared_allowed_root),
         edition_2021,
         reply: reply.clone(),
-    });
+    };
 
+    // Each reachable file is parsed once, under the first module path the
+    // coordinator saw for it. Files an earlier root claimed are not parsed
+    // again: the replay stops at them.
+    let mut parsed: HashMap<PathBuf, WalkedFile> = HashMap::new();
+    let mut enqueued: HashSet<PathBuf> = HashSet::new();
+    let mut outstanding = 0usize;
+    if !claimed.contains(root_path) {
+        enqueued.insert(root_path.to_path_buf());
+        outstanding += 1;
+        pool.send(job(root_path.to_path_buf(), Vec::new()));
+    }
     while outstanding > 0 {
         match replies.recv() {
             Ok(WalkOutcome::Done(file)) => {
                 outstanding -= 1;
                 let file = *file;
-                // Out-of-line children to walk next, in walk order, each with
-                // the module path the walk visits it under. Inline modules
-                // extend the path with their name; their out-of-line children
-                // are enqueued from the same result.
                 let mut to_visit: Vec<(Vec<String>, PathBuf)> = Vec::new();
                 collect_file_children(&file.children, &file.module_path, &mut to_visit);
                 for (module_path, path) in to_visit {
-                    if claimed.insert(path.clone()) {
+                    if !claimed.contains(&path) && enqueued.insert(path.clone()) {
                         outstanding += 1;
-                        pool.send(WalkJob {
-                            path,
-                            module_path,
-                            target_name: root.target_name.clone(),
-                            target_kind: root.target_kind.clone(),
-                            orphan: false,
-                            evaluator: std::sync::Arc::clone(&evaluator),
-                            analysis_root: std::sync::Arc::clone(&analysis_root),
-                            allowed_root: std::sync::Arc::clone(&allowed_root),
-                            edition_2021,
-                            reply: reply.clone(),
-                        });
+                        pool.send(job(path, module_path));
                     }
                 }
-                walked.insert(file.path.clone(), file);
+                parsed.insert(file.path.clone(), file);
             }
             // A worker that panicked on a file re-raises here, the way the
             // analysis pool's joins do.
@@ -383,9 +377,19 @@ fn walk_root(
         }
     }
 
-    let mut notes = Vec::new();
-    replay_walk_notes(root_path, walked, &mut notes);
-    notes
+    let mut replay = Replay {
+        root,
+        evaluator,
+        edition_2021,
+        analysis_root,
+        allowed_root,
+        claimed,
+        parsed,
+        walked,
+        notes: Vec::new(),
+    };
+    replay.file(root_path, Vec::new());
+    replay.notes
 }
 
 /// Collects the out-of-line children a walk would visit next, in walk
@@ -412,47 +416,96 @@ fn collect_file_children(
     }
 }
 
-/// Replays one file's walk notes in the order the sequential walk pushed
-/// them: the read failure first, then the `mod` items in declaration order,
-/// descending into resolved children as the walk did.
-fn replay_walk_notes(
-    path: &Path,
-    walked: &HashMap<PathBuf, WalkedFile>,
-    notes: &mut Vec<ModuleTreeNote>,
-) {
-    let Some(file) = walked.get(path) else {
-        return;
-    };
-    if let Some(error) = &file.read_error {
-        notes.push(ModuleTreeNote {
-            message: format!("could not read module file: {error}"),
-            file_path: Some(file.path.clone()),
-        });
-    }
-    replay_child_notes(path, &file.children, walked, notes);
+/// The depth-first pass over one root's parsed files that decides which
+/// files the root owns and under which module path, and records the notes
+/// in the order the sequential walk pushed them.
+struct Replay<'a> {
+    root: &'a CrateRoot,
+    evaluator: &'a CfgEvaluator,
+    edition_2021: bool,
+    analysis_root: &'a Path,
+    allowed_root: &'a Path,
+    claimed: &'a mut HashSet<PathBuf>,
+    parsed: HashMap<PathBuf, WalkedFile>,
+    walked: &'a mut HashMap<PathBuf, WalkedFile>,
+    notes: Vec<ModuleTreeNote>,
 }
 
-fn replay_child_notes(
-    owner: &Path,
-    children: &[WalkedChild],
-    walked: &HashMap<PathBuf, WalkedFile>,
-    notes: &mut Vec<ModuleTreeNote>,
-) {
-    for child in children {
-        match child {
-            WalkedChild::Inline { nested, .. } => replay_child_notes(owner, nested, walked, notes),
-            WalkedChild::Unresolved { name, declared_in } => notes.push(ModuleTreeNote {
-                message: format!(
-                    "could not resolve `mod {name};` declared in module path `{}`",
-                    if declared_in.is_empty() {
-                        "<crate root>".to_string()
-                    } else {
-                        declared_in.join("::")
-                    }
-                ),
-                file_path: Some(owner.to_path_buf()),
-            }),
-            WalkedChild::File { path, .. } => replay_walk_notes(path, walked, notes),
+impl Replay<'_> {
+    /// Claims `path` under `module_path` unless an earlier walk claimed it,
+    /// then records its read failure and descends into its `mod` items.
+    fn file(&mut self, path: &Path, module_path: Vec<String>) {
+        if !self.claimed.insert(path.to_path_buf()) {
+            return;
+        }
+        let mut file = match self.parsed.remove(path) {
+            Some(file) if file.module_path == module_path => file,
+            // The pool parsed this file under another `mod` item that the
+            // depth-first order reaches later. The pre-pass and the notes
+            // depend on the module path, so the file is walked again here
+            // under the path it keeps. This second parse is left out of the
+            // file work counters, which would otherwise depend on the order
+            // the workers finished in.
+            _ => {
+                let (source, prepass, children, read_error) = walk_one_file(
+                    path,
+                    &module_path,
+                    self.evaluator,
+                    self.analysis_root,
+                    self.allowed_root,
+                    self.edition_2021,
+                    false,
+                );
+                WalkedFile {
+                    path: path.to_path_buf(),
+                    module_path,
+                    target_name: self.root.target_name.clone(),
+                    target_kind: self.root.target_kind.clone(),
+                    orphan: false,
+                    source,
+                    prepass,
+                    children,
+                    read_error,
+                }
+            }
+        };
+        if let Some(error) = &file.read_error {
+            self.notes.push(ModuleTreeNote {
+                message: format!("could not read module file: {error}"),
+                file_path: Some(file.path.clone()),
+            });
+        }
+        let children = std::mem::take(&mut file.children);
+        let module_path = file.module_path.clone();
+        self.walked.insert(path.to_path_buf(), file);
+        self.children(path, &children, &module_path);
+    }
+
+    fn children(&mut self, owner: &Path, children: &[WalkedChild], module_path: &[String]) {
+        for child in children {
+            match child {
+                WalkedChild::Inline { name, nested } => {
+                    let mut nested_path = module_path.to_vec();
+                    nested_path.push(name.clone());
+                    self.children(owner, nested, &nested_path);
+                }
+                WalkedChild::Unresolved { name, declared_in } => self.notes.push(ModuleTreeNote {
+                    message: format!(
+                        "could not resolve `mod {name};` declared in module path `{}`",
+                        if declared_in.is_empty() {
+                            "<crate root>".to_string()
+                        } else {
+                            declared_in.join("::")
+                        }
+                    ),
+                    file_path: Some(owner.to_path_buf()),
+                }),
+                WalkedChild::File { name, path } => {
+                    let mut child_path = module_path.to_vec();
+                    child_path.push(name.clone());
+                    self.file(path, child_path);
+                }
+            }
         }
     }
 }
@@ -538,6 +591,7 @@ impl WalkJob {
                 &analysis_root,
                 &allowed_root,
                 edition_2021,
+                true,
             )
         }));
         let outcome = match outcome {
@@ -574,6 +628,7 @@ fn walk_one_file(
     analysis_root: &Path,
     allowed_root: &Path,
     edition_2021: bool,
+    count: bool,
 ) -> (
     Option<String>,
     MacroFilePrepass,
@@ -585,7 +640,9 @@ fn walk_one_file(
     // as for a parse failure below.
     let source = match fs::read_to_string(path) {
         Ok(source) => {
-            crate::stats::FileWorkPhase::Discovery.count_read();
+            if count {
+                crate::stats::FileWorkPhase::Discovery.count_read();
+            }
             source
         }
         Err(error) => {
@@ -601,7 +658,9 @@ fn walk_one_file(
     // the same file; discovery just cannot descend any further.
     let syntax = match syn::parse_file(&source) {
         Ok(syntax) => {
-            crate::stats::FileWorkPhase::Discovery.count_parsed();
+            if count {
+                crate::stats::FileWorkPhase::Discovery.count_parsed();
+            }
             syntax
         }
         Err(_) => return (Some(source), MacroFilePrepass::default(), Vec::new(), None),
@@ -1358,5 +1417,79 @@ mod tests {
                 .any(|definition| definition.name == "shout"),
             "the child module's definitions were collected in the same walk"
         );
+    }
+
+    /// A file reachable along two `mod` paths belongs to the one the
+    /// depth-first walk reaches first, whatever order the pool finishes in:
+    /// `a` and everything below it come before the root's next item `b`.
+    #[test]
+    fn a_file_reached_twice_keeps_the_depth_first_module_path() {
+        let fixture = Fixture::new("reached-twice");
+        fixture.write("src/lib.rs", "mod a;\n#[path = \"shared.rs\"]\nmod b;\n");
+        fixture.write("src/a.rs", "#[path = \"shared.rs\"]\nmod inner;\n");
+        let shared = fixture.write("src/shared.rs", "mod missing;\n");
+
+        let ctx = fixture.package_ctx();
+        let tree = discover(
+            &ctx,
+            &[fixture.lib_root()],
+            &CfgEvaluator::permissive(),
+            false,
+            &fixture.root,
+            true,
+        )
+        .expect("discovery succeeds");
+
+        assert_eq!(
+            module_path_of(&tree, &shared),
+            Some(vec!["a".to_string(), "inner".to_string()])
+        );
+        let unresolved: Vec<&ModuleTreeNote> = tree
+            .notes
+            .iter()
+            .filter(|note| note.message.contains("mod missing;"))
+            .collect();
+        assert_eq!(unresolved.len(), 1, "{unresolved:?}");
+        assert!(unresolved[0].message.contains("`a::inner`"));
+    }
+
+    /// A module shared by two crate roots is recorded once, under the first
+    /// root, and the second root's walk stops at it without repeating its
+    /// notes.
+    #[test]
+    fn a_module_shared_by_two_roots_is_walked_once() {
+        let fixture = Fixture::new("shared-by-roots");
+        fixture.write("src/lib.rs", "mod common;\n");
+        fixture.write("src/main.rs", "mod common;\n");
+        let common = fixture.write("src/common.rs", "mod missing;\n");
+
+        let ctx = fixture.package_ctx();
+        let bin_root = CrateRoot {
+            target_name: "tool".to_string(),
+            target_kind: "bin".to_string(),
+            path: fixture.root.join("src").join("main.rs"),
+        };
+        let tree = discover(
+            &ctx,
+            &[fixture.lib_root(), bin_root],
+            &CfgEvaluator::permissive(),
+            false,
+            &fixture.root,
+            true,
+        )
+        .expect("discovery succeeds");
+
+        let entry = tree
+            .files
+            .iter()
+            .find(|file| file.path == common)
+            .expect("the shared module was discovered");
+        assert_eq!(entry.target_kind, "lib");
+        let unresolved = tree
+            .notes
+            .iter()
+            .filter(|note| note.message.contains("mod missing;"))
+            .count();
+        assert_eq!(unresolved, 1);
     }
 }

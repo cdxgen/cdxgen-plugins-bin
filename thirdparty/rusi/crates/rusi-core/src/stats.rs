@@ -157,6 +157,10 @@ pub fn work() -> &'static WorkCounters {
 /// Source files one front-of-pipeline phase read from disk and parsed with
 /// `syn`. A read is counted when the file is opened, a parse when `syn`
 /// accepted it, so a file that fails either is counted once and only once.
+/// A file reachable along two `mod` paths that discovery's pool happened to
+/// parse under the one the depth-first walk reaches later is walked a second
+/// time under the right path; that walk is not counted, so the numbers do
+/// not depend on the order the workers finished in.
 #[derive(Default)]
 struct FileWorkCounters {
     /// Reads and parses of the combined module-discovery and macro pre-pass.
