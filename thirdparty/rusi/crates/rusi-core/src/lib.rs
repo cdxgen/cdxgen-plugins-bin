@@ -7892,38 +7892,28 @@ fn truncate_candidates<'a>(
     ordered
 }
 
+/// Function name (qualified, stripped of its package, and bare) -> the ids
+/// of the records that declare it.
 fn build_local_function_index(functions: &[FunctionRecord]) -> HashMap<String, Vec<String>> {
-    let mut index: HashMap<String, Vec<String>> = HashMap::new();
-    for function in functions {
-        let qualified_name = function.declaration.qualified_name.clone();
-        index
-            .entry(qualified_name.clone())
-            .or_default()
-            .push(function.declaration.id.clone());
-        index
-            .entry(last_segment(&qualified_name).to_string())
-            .or_default()
-            .push(function.declaration.id.clone());
-        if let Some(stripped) = qualified_name.strip_prefix(&(function.package_path.clone() + "::"))
-        {
-            index
-                .entry(stripped.to_string())
-                .or_default()
-                .push(function.declaration.id.clone());
-        }
-    }
-    index
+    build_local_position_index(functions)
+        .into_iter()
+        .map(|(name, positions)| {
+            let ids = positions
+                .into_iter()
+                .map(|position| functions[position as usize].declaration.id.clone())
+                .collect();
+            (name, ids)
+        })
+        .collect()
 }
 
-/// The name facts of one function record, read once per build instead of
-/// once per candidate of every call site.
+/// The name facts of one function record, read once per build.
 ///
 /// Receiver-type filtering asks two questions of each candidate's qualified
 /// name: does it declare the receiver's type token, and is its last segment
-/// the method's name. Both answers are fixed for the whole build, and both
-/// used to cost a scan of the name on every candidate of every call: the
-/// segments of a qualified name are recomputed and rescanned for the token,
-/// splitting on `::` outside generic arguments each time.
+/// the method's name. Both answers are fixed for the whole build, so the
+/// segments are split out of the name (on `::` outside generic arguments)
+/// once per record rather than once per candidate of every call site.
 #[derive(Debug, Clone)]
 struct FunctionNameFacts<'a> {
     /// The generic-free segments the name declares, sorted for a binary
@@ -8056,8 +8046,9 @@ impl<'a> FunctionIdInterner<'a> {
     }
 }
 
-/// [`build_local_function_index`] over id handles: the same three keys per
-/// record, the values the record's position, which is its id's handle.
+/// Function name (qualified, stripped of its package, and bare) -> the
+/// positions of the records that declare it, which are also their ids'
+/// [`FunctionIdInterner`] handles.
 fn build_local_position_index(functions: &[FunctionRecord]) -> HashMap<String, Vec<u32>> {
     let mut index: HashMap<String, Vec<u32>> = HashMap::new();
     for (position, function) in functions.iter().enumerate() {
@@ -8377,9 +8368,11 @@ fn resolve_call_targets(
 
     // 2. Method call with a receiver — apply receiver-type inference.
     if let Some(method) = call.method_name.as_deref() {
-        let method_candidates = method_candidates_cache
-            .entry(method.to_string())
-            .or_insert_with(|| build_method_candidates(method, context));
+        if !method_candidates_cache.contains_key(method) {
+            let built = build_method_candidates(method, context);
+            method_candidates_cache.insert(method.to_string(), built);
+        }
+        let method_candidates = &method_candidates_cache[method];
         let local_candidates = &method_candidates.local;
         let trait_candidates = &method_candidates.trait_candidates;
 
