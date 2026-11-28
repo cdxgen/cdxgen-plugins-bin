@@ -26,7 +26,9 @@ mod matcher;
 mod scope;
 mod transcriber;
 
+#[cfg(test)]
 pub(crate) use hygiene::strip_suffixes;
+pub(crate) use hygiene::strip_suffixes_in_place;
 use matcher::MatchError;
 pub(crate) use scope::{
     CratePrepass, InvocationTarget, MacroFilePrepass, MacroRef, MacroScopeTable, Pos, is_std_macro,

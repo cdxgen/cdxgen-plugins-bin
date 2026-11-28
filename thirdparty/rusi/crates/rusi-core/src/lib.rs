@@ -1343,11 +1343,13 @@ fn analyze_on_this_thread(
         // `security-deps` mode, where taint is meant to flow through it.
         let collect_bodies =
             plan.package_ctx.workspace_member || options.data_flow_mode == DATAFLOW_SECURITY_DEPS;
+        let shared_ctx = std::sync::Arc::new(package_ctx.clone());
+        let shared_evaluator = std::sync::Arc::new(plan.evaluator.clone());
         for (index, file) in plan.module_tree.files.iter().enumerate() {
             kept_texts.push(plan.module_tree.sources[index].take());
             analysis_tasks.push(FileAnalysisTask {
-                package_ctx: package_ctx.clone(),
-                evaluator: plan.evaluator.clone(),
+                package_ctx: shared_ctx.clone(),
+                evaluator: shared_evaluator.clone(),
                 path: file.path.clone(),
                 module_path: file.module_path.clone(),
                 crate_path: module_tree::crate_path(package_ctx, file),
@@ -1403,6 +1405,13 @@ fn analyze_on_this_thread(
         parsed.sort_by(|left, right| left.file.path.cmp(&right.file.path));
         parsed
     });
+    // Macro resolution was the last reader of the scope table. Its
+    // definitions cover every analyzed crate, so letting it go here keeps
+    // them out of the report's memory for the rest of the run.
+    drop(macro_table);
+    // The task list and the kept texts served the analysis pass alone.
+    drop(analysis_tasks);
+    drop(file_texts);
     debug_log(options.debug, format_args!("pass=import-resolution"));
     let unresolved_globs =
         stats::time_phase("import_resolution", || resolve_imports(&mut analyzed_files));
@@ -1423,17 +1432,29 @@ fn analyze_on_this_thread(
     // the per-file evidence can then be *moved* into the report instead of
     // cloned. Cloning held two copies of every declaration, usage, signal, and
     // function record at once — on a large workspace, hundreds of megabytes.
-    let trait_index = build_trait_impl_index(&analyzed_files);
+    // The call graph and the data-flow pass are the only readers of these
+    // indexes, so with both turned off they are not built at all and the
+    // memory stays with the per-file results, which the merge loop below
+    // releases as it goes.
+    let analysis_needs_functions =
+        options.call_graph_mode != "none" || options.data_flow_mode != "none";
+    let trait_index = if analysis_needs_functions {
+        build_trait_impl_index(&analyzed_files)
+    } else {
+        TraitImplIndex::default()
+    };
     // Struct field types, workspace-wide: a receiver written `self.sink` needs
     // the declaring type's field table, which may live in another file.
     let mut field_types: HashMap<String, String> = HashMap::new();
     let mut field_element_types: HashMap<String, String> = HashMap::new();
-    for analyzed in &analyzed_files {
-        for (key, value) in &analyzed.field_types {
-            field_types.insert(key.clone(), value.clone());
-        }
-        for (key, value) in &analyzed.field_element_types {
-            field_element_types.insert(key.clone(), value.clone());
+    if analysis_needs_functions {
+        for analyzed in &analyzed_files {
+            for (key, value) in &analyzed.field_types {
+                field_types.insert(key.clone(), value.clone());
+            }
+            for (key, value) in &analyzed.field_element_types {
+                field_element_types.insert(key.clone(), value.clone());
+            }
         }
     }
 
@@ -1499,20 +1520,53 @@ fn analyze_on_this_thread(
 
     // Type names declared in the analyzed code, so a method missing from one of
     // them can be read as leaving the analyzed code rather than as unknown.
-    let local_types: HashSet<String> = analyzed_files
-        .iter()
-        .flat_map(|analyzed| analyzed.declarations.iter())
-        .filter(|declaration| {
-            matches!(
-                declaration.kind.as_str(),
-                "struct" | "enum" | "union" | "trait" | "type"
-            )
-        })
-        .map(|declaration| declaration.name.clone())
-        .collect();
+    let local_types: HashSet<String> = if analysis_needs_functions {
+        analyzed_files
+            .iter()
+            .flat_map(|analyzed| analyzed.declarations.iter())
+            .filter(|declaration| {
+                matches!(
+                    declaration.kind.as_str(),
+                    "struct" | "enum" | "union" | "trait" | "type"
+                )
+            })
+            .map(|declaration| declaration.name.clone())
+            .collect()
+    } else {
+        HashSet::new()
+    };
 
     let mut all_functions = Vec::new();
     let mut static_initializers = Vec::new();
+    let mut function_count = 0usize;
+    // The report arrays are filled by appends from every file. Sizing them
+    // once to the exact total keeps each Vec from doubling its way up, which
+    // at the top of a dependency closure means a transient copy of the
+    // largest collection.
+    let mut total_files = 0usize;
+    let mut total_imports = 0usize;
+    let mut total_declarations = 0usize;
+    let mut total_usages = 0usize;
+    let mut total_signals = 0usize;
+    let mut total_static_initializers = 0usize;
+    for analyzed in &analyzed_files {
+        total_files += 1;
+        total_imports += analyzed.imports.len();
+        total_declarations += analyzed.declarations.len();
+        total_usages += analyzed.usages.len();
+        total_signals += analyzed.security_signals.len();
+        function_count += analyzed.functions.len();
+        total_static_initializers += analyzed.static_initializers.len();
+    }
+    report.files.reserve_exact(total_files);
+    report.imports.reserve_exact(total_imports);
+    report.declarations.reserve_exact(total_declarations);
+    report.usages.reserve_exact(total_usages);
+    report.security_signals.reserve_exact(total_signals);
+    if analysis_needs_functions {
+        all_functions.reserve_exact(function_count);
+        static_initializers.reserve_exact(total_static_initializers);
+    }
     for mut analyzed in analyzed_files {
         merge_crypto_evidence(&mut report.crypto, analyzed.file.crypto.clone());
         report.files.push(analyzed.file);
@@ -1522,14 +1576,18 @@ fn analyze_on_this_thread(
         report
             .security_signals
             .append(&mut analyzed.security_signals);
-        all_functions.append(&mut analyzed.functions);
-        static_initializers.append(&mut analyzed.static_initializers);
+        // Nothing outside the call graph and the data-flow pass reads function
+        // records, so with both turned off they are dropped here instead of
+        // held until the end of the analysis.
+        if analysis_needs_functions {
+            all_functions.append(&mut analyzed.functions);
+            static_initializers.append(&mut analyzed.static_initializers);
+        }
     }
 
-    stats::work().functions.fetch_add(
-        all_functions.len() as u64,
-        std::sync::atomic::Ordering::Relaxed,
-    );
+    stats::work()
+        .functions
+        .fetch_add(function_count as u64, std::sync::atomic::Ordering::Relaxed);
     let fallback_call_graph = if options.call_graph_mode != "none" {
         debug_log(
             options.debug,
@@ -1548,24 +1606,35 @@ fn analyze_on_this_thread(
     } else {
         None
     };
-    let mut dataflow_patterns = built_in_dataflow_patterns();
-    if options.analysis_scope == AnalysisScope::Cryptos {
-        dataflow_patterns = crypto_only_pattern_set(dataflow_patterns);
-    }
-    if let Some(custom_patterns) = options.custom_data_flow_patterns.clone() {
-        merge_pattern_sets(&mut dataflow_patterns, custom_patterns);
-    }
-    let auto_passthroughs = discover_auto_passthroughs(&all_functions);
-    if !auto_passthroughs.is_empty() {
-        merge_pattern_sets(
-            &mut dataflow_patterns,
-            DataFlowPatternSet {
-                sources: Vec::new(),
-                sinks: Vec::new(),
-                passthroughs: auto_passthroughs,
-            },
-        );
-    }
+    // The pattern set and the passthrough discovery feed only the data-flow
+    // pass, so with data flow turned off neither runs.
+    let dataflow_patterns = if options.data_flow_mode != "none" {
+        let mut dataflow_patterns = built_in_dataflow_patterns();
+        if options.analysis_scope == AnalysisScope::Cryptos {
+            dataflow_patterns = crypto_only_pattern_set(dataflow_patterns);
+        }
+        if let Some(custom_patterns) = options.custom_data_flow_patterns.clone() {
+            merge_pattern_sets(&mut dataflow_patterns, custom_patterns);
+        }
+        let auto_passthroughs = discover_auto_passthroughs(&all_functions);
+        if !auto_passthroughs.is_empty() {
+            merge_pattern_sets(
+                &mut dataflow_patterns,
+                DataFlowPatternSet {
+                    sources: Vec::new(),
+                    sinks: Vec::new(),
+                    passthroughs: auto_passthroughs,
+                },
+            );
+        }
+        dataflow_patterns
+    } else {
+        DataFlowPatternSet {
+            sources: Vec::new(),
+            sinks: Vec::new(),
+            passthroughs: Vec::new(),
+        }
+    };
     let fallback_data_flow = if options.data_flow_mode != "none" {
         debug_log(
             options.debug,
@@ -1584,6 +1653,18 @@ fn analyze_on_this_thread(
     } else {
         None
     };
+
+    // The call graph and the data-flow pass were the last readers of the
+    // per-function evidence and the indexes derived from it. Everything that
+    // follows (report normalization, hygiene stripping, serialization) only
+    // touches the report, so the analysis inputs are released here rather
+    // than held until the end of the run.
+    drop(all_functions);
+    drop(static_initializers);
+    drop(trait_index);
+    drop(field_types);
+    drop(field_element_types);
+    drop(local_types);
 
     if let Some(payload) = compiler_payload {
         if let Some(counts) = payload.work_counts {
@@ -1650,7 +1731,7 @@ fn analyze_on_this_thread(
     });
     debug_log(options.debug, format_args!("pass=done"));
     if hygiene_renamed {
-        report = strip_hygiene_suffixes(&report)?;
+        report = strip_hygiene_suffixes(report)?;
     }
     Ok(report)
 }
@@ -1659,9 +1740,19 @@ fn analyze_on_this_thread(
 /// transcriber, so no report field shows a name the source did not write.
 /// The suffix only ever follows identifier characters, so removing it from
 /// the serialized text keeps the JSON valid.
-fn strip_hygiene_suffixes(report: &Report) -> Result<Report> {
-    let text = serde_json::to_string(report)?;
-    let stripped = macro_expand::strip_suffixes(&text);
+/// Removes the suffixes macro hygiene gave to bindings written in a
+/// transcriber, so the report shows the names the source wrote.
+///
+/// The report goes through its JSON form, which keeps the strip complete
+/// whatever the schema carries: every string the report holds passes the
+/// textual removal. The report is dropped before the stripped document is
+/// parsed back, so the report and its replacement never sit in memory
+/// together; on a dependency closure that difference is measured in
+/// hundreds of megabytes at the run's peak.
+fn strip_hygiene_suffixes(report: Report) -> Result<Report> {
+    let text = serde_json::to_string(&report)?;
+    drop(report);
+    let stripped = macro_expand::strip_suffixes_in_place(text);
     Ok(serde_json::from_str(&stripped)?)
 }
 
@@ -2039,9 +2130,15 @@ struct PackageAnalysisPlan {
 
 /// One file to analyze, with its resolved module path and the cfg environment
 /// of the package that owns it.
+///
+/// The package context and the cfg environment are shared through `Arc`
+/// rather than cloned per file: a dependency closure analyzes thousands of
+/// files of the same packages, and a cloned evaluator carries the whole
+/// resolved cfg set (host atoms plus the package's features) on every one
+/// of them.
 struct FileAnalysisTask {
-    package_ctx: PackageContext,
-    evaluator: CfgEvaluator,
+    package_ctx: std::sync::Arc<PackageContext>,
+    evaluator: std::sync::Arc<CfgEvaluator>,
     path: PathBuf,
     module_path: Vec<String>,
     crate_path: String,
@@ -2540,6 +2637,8 @@ fn analyze_file(
         *collect_bodies,
         macro_table.clone(),
     );
+    // The task's cfg environment is shared across the package's files, so the
+    // collector holds a handle rather than a copy.
     collector.visit_file(&syntax);
 
     // The per-file `imports`/`declarations`/`usages`/`security_signals` are
@@ -2640,7 +2739,7 @@ struct SourceCollector {
     collect_bodies: bool,
     /// Every `use` in the file, kept for package-wide import resolution.
     use_records: Vec<UseRecord>,
-    evaluator: CfgEvaluator,
+    evaluator: std::sync::Arc<CfgEvaluator>,
     /// Trait being implemented by the enclosing `impl` block, if any. Part of a
     /// method's identity: `impl Section for T` and `impl ComponentSection for T`
     /// can both define `fn id(&self) -> u8`, identical in name and signature.
@@ -3145,7 +3244,7 @@ impl SourceCollector {
 
     fn new(
         file_ctx: FileContext,
-        evaluator: CfgEvaluator,
+        evaluator: std::sync::Arc<CfgEvaluator>,
         collect_bodies: bool,
         macro_table: std::sync::Arc<macro_expand::MacroScopeTable>,
     ) -> Self {
@@ -23670,7 +23769,7 @@ mod fixpoint_tests {
         };
         let mut collector = SourceCollector::new(
             file_ctx,
-            CfgEvaluator::permissive(),
+            std::sync::Arc::new(CfgEvaluator::permissive()),
             true,
             std::sync::Arc::new(macro_expand::MacroScopeTable::default()),
         );

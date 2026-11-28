@@ -24,21 +24,45 @@ use super::transcriber::Tpl;
 pub(crate) const MARK: &str = "__rhyg";
 
 /// Removes every renaming suffix from `text`, so reports show the names the
-/// source wrote.
+/// source wrote. The borrowed fast path keeps text without any suffix where
+/// it is. Tests read the stripped form through this borrowed wrapper; the
+/// analysis takes the in-place version directly.
+#[cfg(test)]
 pub(crate) fn strip_suffixes(text: &str) -> std::borrow::Cow<'_, str> {
     if !text.contains(MARK) {
         return std::borrow::Cow::Borrowed(text);
     }
-    let mut out = String::with_capacity(text.len());
-    let mut rest = text;
-    while let Some(at) = rest.find(MARK) {
-        out.push_str(&rest[..at]);
-        let after = &rest[at + MARK.len()..];
-        let digits = after.chars().take_while(char::is_ascii_digit).count();
-        rest = &after[digits..];
+    std::borrow::Cow::Owned(strip_suffixes_in_place(text.to_string()))
+}
+
+/// The in-place form of [`strip_suffixes`] for text the caller owns whole,
+/// such as the serialized report: the buffer is compacted rather than
+/// copied, so the peak holds one text instead of two.
+pub(crate) fn strip_suffixes_in_place(text: String) -> String {
+    if !text.contains(MARK) {
+        return text;
     }
-    out.push_str(rest);
-    std::borrow::Cow::Owned(out)
+    let mut bytes = text.into_bytes();
+    let mut read = 0usize;
+    let mut write = 0usize;
+    while read < bytes.len() {
+        if bytes[read..].starts_with(MARK.as_bytes()) {
+            read += MARK.len();
+            while read < bytes.len() && bytes[read].is_ascii_digit() {
+                read += 1;
+            }
+        } else {
+            bytes[write] = bytes[read];
+            write += 1;
+            read += 1;
+        }
+    }
+    bytes.truncate(write);
+    // The removed runs are pure ASCII, so no multi-byte sequence was cut
+    // open and the remaining bytes are the UTF-8 the caller handed in.
+    // This text is the serialized report, not analyzed source, so the one
+    // arithmetic that cannot fail carries an expect rather than a fallback.
+    String::from_utf8(bytes).expect("suffix removal keeps the text valid UTF-8")
 }
 
 struct State {
